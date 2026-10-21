@@ -95,3 +95,9 @@ fn dev_server_serves_and_rebuilds() {
     std::fs::remove_dir_all(&dir).unwrap();
     result.unwrap();
 }
+
+#[test]
+fn repository_sources_are_formatted() {
+    let o = vcwl(".", &["fmt", "--check", "src", "examples", "tests/programs", "tests/cli"]);
+    assert!(o.status.success(), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+}

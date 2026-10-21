@@ -87,10 +87,10 @@ fn fingerprint(root: &Path, skip: &Path) -> Vec<(PathBuf, SystemTime)> {
                 if !name.starts_with('.') && name != "node_modules" && name != "target" && path != skip {
                     walk(&path, skip, out);
                 }
-            } else if name.ends_with(".vcwl") || name == "vcwl.toml" {
-                if let Ok(m) = e.metadata().and_then(|m| m.modified()) {
-                    out.push((path, m));
-                }
+            } else if (name.ends_with(".vcwl") || name == "vcwl.toml")
+                && let Ok(m) = e.metadata().and_then(|m| m.modified())
+            {
+                out.push((path, m));
             }
         }
     }

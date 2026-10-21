@@ -203,3 +203,26 @@ fn test_double() {
     assert(double(21) == 42, "double(21) should be 42")
 }
 "#;
+
+/// Collects `path` if it is a file, else every `.vcwl` file below it (sorted), skipping
+/// hidden directories, `node_modules` and `target`.
+pub fn vcwl_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    if path.is_file() {
+        out.push(path.to_path_buf());
+        return Ok(());
+    }
+    let rd = std::fs::read_dir(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let mut entries: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    entries.sort();
+    for p in entries {
+        let hidden = p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.') || n == "node_modules" || n == "target");
+        if p.is_dir() {
+            if !hidden {
+                vcwl_files(&p, out)?;
+            }
+        } else if p.extension().is_some_and(|e| e == "vcwl") {
+            out.push(p);
+        }
+    }
+    Ok(())
+}

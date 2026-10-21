@@ -1,7 +1,7 @@
 //! `vcwl test [paths...]`: compiles each test file and runs its `test_*` functions in Node.
 //! A test passes unless it panics or traps. Without paths, runs `tests/**/*.vcwl` of the project.
 use crate::node::{self, TEST_MARK};
-use crate::project::{compile_entry, Project};
+use crate::project::{self, compile_entry, Project};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -13,7 +13,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     };
     let mut files = Vec::new();
     for r in &roots {
-        collect(r, &mut files)?;
+        project::vcwl_files(r, &mut files)?;
     }
     if files.is_empty() {
         return Err("no test files (*.vcwl) found".into());
@@ -69,22 +69,4 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     println!("\n{passed} passed, {failed} failed in {:.0?}", start.elapsed());
     if failed == 0 { Ok(()) } else { Err(String::new()) }
-}
-
-fn collect(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    if path.is_file() {
-        out.push(path.to_path_buf());
-        return Ok(());
-    }
-    let rd = std::fs::read_dir(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    let mut entries: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
-    entries.sort();
-    for p in entries {
-        if p.is_dir() {
-            collect(&p, out)?;
-        } else if p.extension().is_some_and(|e| e == "vcwl") {
-            out.push(p);
-        }
-    }
-    Ok(())
 }
