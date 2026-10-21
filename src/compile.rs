@@ -106,13 +106,16 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
         }
     }
     let app_out = match app {
-        Some(a) => Some(crate::app::lower_app(&mut lw, &ck, a, opts).map_err(|d| Failure { diags: vec![d] })?),
+        Some(a) => Some(crate::app::lower_app(&mut lw, sm, a, opts).map_err(|d| Failure { diags: vec![d] })?),
         None => None,
     };
     lw.drain();
     let mut module = lw.m;
     opt::optimize(&mut module);
     let wasm = codegen::emit(&module);
+    if let Ok(path) = std::env::var("VCWL_DUMP_WASM") {
+        let _ = std::fs::write(path, &wasm);
+    }
     if let Err(e) = codegen::validate(&wasm) {
         return Err(Failure { diags: vec![Diag::compile(Span::default(), format!("internal compiler error: generated module is invalid: {e}"))] });
     }

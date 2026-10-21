@@ -83,7 +83,7 @@ pub fn visit_children(e: &mut IExpr, mut f: impl FnMut(&mut IExpr)) {
     use IExpr::*;
     match e {
         LocalSet(_, a) | LocalTee(_, a) | GlobalSet(_, a) | Un(_, a) | Drop(a) | StructGet(_, _, a) | ArrayNewDefault(_, a)
-        | ArrayLen(a) | RefCast(_, a) | RefTest(_, a) | Load8U(a) | Load32(a) | MemoryGrow(a) | BrIf(_, a) => f(a),
+        | ArrayLen(a) | RefCast(_, a) | RefTest(_, a) | Load8U(a) | Load32(a) | MemoryGrow(a) | BrIf(_, a) | MemoryInit(a, _, _) => f(a),
         Bin(_, a, b2) | StructSet(_, _, a, b2) | ArrayNew(_, a, b2) | ArrayGet(_, a, b2) | ArrayGetU(_, a, b2) | RefEq(a, b2)
         | Store8(a, b2) | Store32(a, b2) => {
             f(a);
@@ -103,7 +103,7 @@ pub fn visit_children(e: &mut IExpr, mut f: impl FnMut(&mut IExpr)) {
         }
         Return(Some(a)) => f(a),
         I32(_) | I64(_) | F64(_) | Null(_) | NullAny | LocalGet(_) | GlobalGet(_) | Br(_) | Return(None) | Unreachable
-        | ArrayNewData(..) | MemorySize => {}
+        | ArrayNewData(..) | MemorySize | StructNewDefault(_) => {}
     }
 }
 

@@ -51,8 +51,6 @@ pub enum TK {
     Local(LocalId),
     /// Component property, state or derived value (index into the component's vars).
     CompVar(usize),
-    /// Value bound by an enclosing view fragment (`for` item/index, view `match` binding).
-    FragVar(usize),
     /// The current route path (a global reactive value).
     Route,
     Bin(BinOp, Box<TExpr>, Box<TExpr>),

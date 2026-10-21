@@ -274,6 +274,7 @@ impl Emit<'_> {
                 fs.iter().for_each(|x| self.expr(x));
                 self.i(I::StructNew(*t));
             }
+            StructNewDefault(t) => self.i(I::StructNewDefault(*t)),
             StructGet(t, i, o) => {
                 self.expr(o);
                 self.i(I::StructGet { struct_type_index: *t, field_index: *i });
@@ -357,6 +358,12 @@ impl Emit<'_> {
                 self.i(I::I32Store(Self::mem(0)));
             }
             MemorySize => self.i(I::MemorySize(0)),
+            MemoryInit(dst, off, len) => {
+                self.expr(dst);
+                self.i(I::I32Const(*off as i32));
+                self.i(I::I32Const(*len as i32));
+                self.i(I::MemoryInit { mem: 0, data_index: 0 });
+            }
             MemoryGrow(n) => {
                 self.expr(n);
                 self.i(I::MemoryGrow(0));

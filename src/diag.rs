@@ -17,6 +17,7 @@ impl Span {
     }
 }
 
+#[derive(Clone)]
 pub struct SourceFile {
     pub path: String,
     pub text: String,
@@ -24,7 +25,7 @@ pub struct SourceFile {
 }
 
 /// All loaded files share one global offset space so a `Span` alone identifies a location.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SourceMap {
     pub files: Vec<SourceFile>,
 }

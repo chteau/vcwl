@@ -1067,6 +1067,19 @@ impl<'a> Checker<'a> {
             "navigate" if self.ctx != Ctx::Handler => {
                 return Err(Diag::ty(callee.span, "`navigate` can only be called from an event handler"));
             }
+            "assert" => {
+                if args.len() != 2 {
+                    return Err(Diag::ty(span, "`assert` takes a Bool condition and a String message"));
+                }
+                let c = self.check_expr(&args[0].value, Some(&Type::Bool))?;
+                self.coerce(&c.ty, &Type::Bool, args[0].value.span)?;
+                let m = self.check_expr(&args[1].value, Some(&Type::Str))?;
+                self.coerce(&m.ty, &Type::Str, args[1].value.span)?;
+                let panic = TExpr { kind: TK::Intrinsic("__panic", vec![], vec![m]), ty: Type::Never, span };
+                let not = TExpr { kind: TK::Not(Box::new(c)), ty: Type::Bool, span };
+                let then = TExpr { kind: TK::Block(vec![TStmt::Expr(panic)], None), ty: Type::Never, span };
+                return Ok(TExpr { kind: TK::If(Box::new(not), Box::new(then), None), ty: Type::Unit, span });
+            }
             "navigate" | "print" => {
                 if args.len() != 1 {
                     return Err(Diag::ty(span, format!("`{name}` takes exactly one String")));
@@ -1089,7 +1102,7 @@ impl<'a> Checker<'a> {
                 }
                 let cands: Vec<String> = self.scopes[self.file].iter().filter(|(_, s)| matches!(s, Sym::Fn(_))).map(|(n, _)| n.clone()).collect();
                 let mut d = Diag::ty(callee.span, format!("unknown function `{name}`"));
-                if let Some(s) = suggest(name, cands.iter().map(|s| s.as_str()).chain(["print", "navigate"])) {
+                if let Some(s) = suggest(name, cands.iter().map(|s| s.as_str()).chain(["print", "navigate", "assert"])) {
                     d = d.help(format!("did you mean `{s}`?"));
                 }
                 Err(d)

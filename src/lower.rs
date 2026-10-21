@@ -26,7 +26,7 @@ pub struct Lower<'a> {
     insts: HashMap<(usize, Vec<Type>), u32>,
     queue: Vec<(usize, Vec<Type>, u32)>,
     helpers: HashMap<&'static str, u32>,
-    strings: HashMap<String, (u32, u32)>,
+    pub strings: HashMap<String, (u32, u32)>,
     pub ui: Option<Box<crate::lower_ui::UiState>>,
 }
 
@@ -41,11 +41,13 @@ pub struct FnCx {
     pub loops: Vec<(Label, Label)>,
     /// UI scope of the function, when it is generated for a component.
     pub scope: Option<crate::lower_ui::ScopeRef>,
+    /// View-bound locals temporarily held in plain wasm locals (e.g. while computing list keys).
+    pub unbound: Vec<LocalId>,
 }
 
 impl FnCx {
     pub fn new(params: Vec<VT>, tlocals: Vec<tir::Local>, subst: Vec<(String, Type)>) -> FnCx {
-        FnCx { n_params: params.len() as u32, locals: params, map: HashMap::new(), tlocals, subst, next_label: 0, loops: Vec::new(), scope: None }
+        FnCx { n_params: params.len() as u32, locals: params, map: HashMap::new(), tlocals, subst, next_label: 0, loops: Vec::new(), scope: None, unbound: Vec::new() }
     }
     pub fn temp(&mut self, t: VT) -> u32 {
         self.locals.push(t);
@@ -224,11 +226,12 @@ impl<'a> Lower<'a> {
             TK::Bool(v) => IExpr::I32(*v as i32),
             TK::Str(s) => self.string_const(s),
             TK::Unit => IExpr::Seq(vec![]),
+            TK::Local(id) if self.ui_bound(cx, *id) => self.ui_read(cx, e),
             TK::Local(id) => match self.local(cx, *id) {
                 Some(l) => get(l),
                 None => IExpr::Seq(vec![]),
             },
-            TK::CompVar(_) | TK::FragVar(_) | TK::Route => self.ui_read(cx, e),
+            TK::CompVar(_) | TK::Route => self.ui_read(cx, e),
             TK::Bin(op, a, bb) => self.binop(cx, *op, a, bb),
             TK::Not(a) => un(UnOp::I32Eqz, self.expr(cx, a)),
             TK::Neg(a) => {
@@ -512,7 +515,7 @@ impl<'a> Lower<'a> {
     }
 
     /// Condition under which `pat` matches `v`, or `None` when it always matches.
-    fn pat_test(&mut self, cx: &mut FnCx, pat: &TPat, t: &Type, v: &IExpr) -> Option<IExpr> {
+    pub fn pat_test(&mut self, cx: &mut FnCx, pat: &TPat, t: &Type, v: &IExpr) -> Option<IExpr> {
         match pat {
             TPat::Wild | TPat::Bind(_) => None,
             TPat::Int(n) => Some(bin(Op::I64Eq, v.clone(), IExpr::I64(*n))),
@@ -539,7 +542,7 @@ impl<'a> Lower<'a> {
         }
     }
 
-    fn pat_bind(&mut self, cx: &mut FnCx, pat: &TPat, t: &Type, v: &IExpr) -> Vec<IExpr> {
+    pub fn pat_bind(&mut self, cx: &mut FnCx, pat: &TPat, t: &Type, v: &IExpr) -> Vec<IExpr> {
         match pat {
             TPat::Bind(id) => match self.local(cx, *id) {
                 Some(l) => vec![set(l, v.clone())],

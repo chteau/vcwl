@@ -16,3 +16,7 @@ pub mod parser;
 pub mod style;
 pub mod tir;
 pub mod node;
+pub mod project;
+pub mod devserver;
+pub mod fmt;
+pub mod testrunner;

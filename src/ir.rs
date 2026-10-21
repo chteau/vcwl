@@ -86,6 +86,7 @@ pub enum IExpr {
     Seq(Vec<IExpr>),
     Unreachable,
     StructNew(u32, Vec<IExpr>),
+    StructNewDefault(u32),
     StructGet(u32, u32, Box<IExpr>),
     StructSet(u32, u32, Box<IExpr>, Box<IExpr>),
     ArrayNew(u32, Box<IExpr>, Box<IExpr>),
@@ -107,6 +108,8 @@ pub enum IExpr {
     Store32(Box<IExpr>, Box<IExpr>),
     MemorySize,
     MemoryGrow(Box<IExpr>),
+    /// `memory.init` from the passive data segment: (dest address, segment offset, length).
+    MemoryInit(Box<IExpr>, u32, u32),
 }
 
 #[derive(Clone, Debug)]
