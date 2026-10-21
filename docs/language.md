@@ -91,7 +91,18 @@ Operators by precedence: `||`, `&&`, comparisons (`== != < <= > >=`), `+ -`, `* 
 `- !`, then calls, `.field`, `.method()`, `[index]`. `+` concatenates strings. `==` works on
 numbers, booleans, strings and enums without payloads. Indexing is bounds-checked.
 
-The `?` operator is not supported yet; use `match`.
+`x?` unwraps `Ok(v)` / `Some(v)`; on `Err(e)` / `None` it returns that from the enclosing function,
+which must return a `Result` with the same error type (or an optional):
+
+```vcwl
+fn total(parts: [String]) -> Result<Int, String> {
+    var sum = 0
+    for p in parts {
+        sum += parse(p)?
+    }
+    Ok(sum)
+}
+```
 
 ## Methods (prelude)
 

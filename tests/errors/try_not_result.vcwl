@@ -1,0 +1,4 @@
+// error: `?` applies to `Result` or optional values, not `Int`
+fn total(n: Int) -> Int? {
+    Some(n? + 1)
+}

@@ -1,0 +1,44 @@
+// expect: sum = 60
+// expect: error: bad number "x"
+// expect: first even: Some(4)
+// expect: first even: None
+fn parse(s: String) -> Result<Int, String> {
+    match s.trim().parse_int() {
+        Some(n) => Ok(n),
+        None => Err("bad number \"{s}\""),
+    }
+}
+
+fn sum(parts: [String]) -> Result<Int, String> {
+    var total = 0
+    for p in parts {
+        total += parse(p)?
+    }
+    Ok(total)
+}
+
+fn first_even(xs: [Int]) -> Int? {
+    let x = xs.first()?
+    if x % 2 == 0 { Some(x) } else { first_even(xs.slice(1, xs.len())) }
+}
+
+fn show(r: Result<Int, String>) -> String {
+    match r {
+        Ok(n) => "sum = {n}",
+        Err(e) => "error: {e}",
+    }
+}
+
+fn show_opt(o: Int?) -> String {
+    match o {
+        Some(n) => "Some({n})",
+        None => "None",
+    }
+}
+
+fn main() {
+    print(show(sum(["10", " 20", "30 "])))
+    print(show(sum(["1", "x", "3"])))
+    print("first even: {show_opt(first_even([1, 3, 4, 5]))}")
+    print("first even: {show_opt(first_even([1, 3]))}")
+}

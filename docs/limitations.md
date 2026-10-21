@@ -4,7 +4,7 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## Language
 
-- No `?` operator, closures or first-class functions, traits/interfaces, tuples, or maps.
+- No closures or first-class functions, traits/interfaces, tuples, or maps.
 - No `async`; `fetch` is a statement with arms that run on completion.
 - Strings are byte arrays: `len` and `slice` count bytes, not characters.
 - Arrays are immutable values; `push`/`set` copy the array (O(n) per update).

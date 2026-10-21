@@ -769,6 +769,7 @@ impl<'a> Checker<'a> {
                 };
                 mk(TK::Index(Box::new(ta), Box::new(ti)), elem)
             }
+            ExprKind::Try(inner) => self.check_try(inner, e.span)?,
             ExprKind::If { cond, then, els } => {
                 let c = self.check_expr(cond, Some(&Type::Bool))?;
                 self.coerce(&c.ty, &Type::Bool, cond.span)?;
@@ -967,6 +968,45 @@ impl<'a> Checker<'a> {
             d = d.help(format!("did you mean `{s}`?"));
         }
         Err(d)
+    }
+
+    /// `x?` becomes `match x { Ok(v) => v, Err(e) => return Err(e) }` (or the `Option` analogue).
+    fn check_try(&mut self, inner: &ast::Expr, span: Span) -> Result<TExpr> {
+        let v = self.check_expr(inner, None)?;
+        let vt = self.zonk(&v.ty);
+        let ret = self.zonk(&self.ret.clone());
+        let (res, opt) = (self.prelude_adt("Result"), self.prelude_adt("Option"));
+        let (Type::Adt(a, targs), Type::Adt(r, rargs)) = (&vt, &ret) else {
+            return Err(match vt {
+                Type::Adt(a, _) if a == res || a == opt => self.try_context_error(&vt, &ret, span),
+                _ => Diag::ty(inner.span, format!("`?` applies to `Result` or optional values, not `{}`", self.show(&vt))),
+            });
+        };
+        if a != r || (*a != res && *a != opt) {
+            return Err(self.try_context_error(&vt, &ret, span));
+        }
+        if *a == res && !self.unify(&targs[1], &rargs[1]) {
+            return Err(Diag::ty(span, format!("`?` cannot return error `{}` from a function returning `{}`", self.show(&targs[1]), self.show(&ret)))
+                .help("convert the error with `match` first"));
+        }
+        let mk = |kind, ty| TExpr { kind, ty, span };
+        self.local_scopes.push(Vec::new());
+        let ok = self.bind("$ok", targs[0].clone(), false);
+        let fail = if *a == res { vec![self.bind("$err", targs[1].clone(), false)] } else { vec![] };
+        self.local_scopes.pop();
+        let fail_args = fail.iter().map(|&l| mk(TK::Local(l), self.locals[l].ty.clone())).collect();
+        let early = mk(TK::Return(Some(Box::new(mk(TK::Variant(*a, rargs.clone(), 1, fail_args), ret.clone())))), Type::Never);
+        let arms = vec![
+            (TPat::Variant(*a, targs.clone(), 0, vec![TPat::Bind(ok)]), mk(TK::Local(ok), targs[0].clone())),
+            (TPat::Variant(*a, targs.clone(), 1, fail.into_iter().map(TPat::Bind).collect()), early),
+        ];
+        Ok(mk(TK::Match(Box::new(v), arms), targs[0].clone()))
+    }
+
+    fn try_context_error(&self, vt: &Type, ret: &Type, span: Span) -> Diag {
+        let want = if matches!(vt, Type::Adt(a, _) if *a == self.prelude_adt("Result")) { "a `Result`" } else { "an optional" };
+        Diag::ty(span, format!("`?` on `{}` needs a function returning {want}, but this one returns `{}`", self.show(vt), self.show(ret)))
+            .help("handle both cases with `match` instead")
     }
 
     fn qualified_variant(&self, enum_name: &str, variant: &str) -> Option<(usize, usize)> {

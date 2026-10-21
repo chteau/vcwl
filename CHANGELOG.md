@@ -6,6 +6,7 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ### Milestone 6 — networking and tooling
 
+- The `?` operator for `Result` and optional values.
 - `fetch get|post|put|patch|delete(url[, body]) as T { arms }` in event handlers. Responses are
   parsed by the browser and validated at run time by generated decoders; errors are an
   `HttpError` enum (`Network`, `Timeout`, `Status`, `Decode`) and decode errors name the path.

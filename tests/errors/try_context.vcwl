@@ -1,0 +1,8 @@
+// error: needs a function returning a `Result`, but this one returns `Int`
+fn parse(s: String) -> Result<Int, String> {
+    Err(s)
+}
+
+fn total() -> Int {
+    parse("1")? + 1
+}

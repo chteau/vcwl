@@ -519,8 +519,9 @@ impl<'a> Parser<'a> {
                 let span = e.span.to(self.prev_span());
                 e = self.mk(ExprKind::Index(Box::new(e), Box::new(idx)), span);
             } else if self.is("?") && !self.token().nl {
-                return Err(Diag::syntax(self.span(), "the `?` operator is not supported yet")
-                    .help("use `match` to handle `Ok`/`Err` or `Some`/`None` explicitly"));
+                self.bump();
+                let span = e.span.to(self.prev_span());
+                e = self.mk(ExprKind::Try(Box::new(e)), span);
             } else {
                 return Ok(e);
             }

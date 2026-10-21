@@ -202,6 +202,8 @@ pub enum ExprKind {
     Method { recv: Box<Expr>, name: Ident, type_args: Vec<TypeExpr>, args: Vec<Arg> },
     Field(Box<Expr>, Ident),
     Index(Box<Expr>, Box<Expr>),
+    /// `expr?`: unwraps `Ok`/`Some`, or returns the `Err`/`None` from the enclosing function.
+    Try(Box<Expr>),
     If { cond: Box<Expr>, then: Block, els: Option<Box<Expr>> },
     Block(Block),
     Match { scrut: Box<Expr>, arms: Vec<Arm> },

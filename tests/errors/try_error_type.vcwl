@@ -1,0 +1,8 @@
+// error: `?` cannot return error `String` from a function returning `Result<Int, Int>`
+fn parse(s: String) -> Result<Int, String> {
+    Err(s)
+}
+
+fn total() -> Result<Int, Int> {
+    Ok(parse("1")? + 1)
+}
