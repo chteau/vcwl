@@ -1,0 +1,431 @@
+// VCWL standard prelude. Compiled into every program; unused functions are removed.
+// Functions named `<type>_<name>` provide methods: `s.len()` resolves to `str_len(s)`.
+// Only this file may call `__` intrinsics.
+
+export enum Option<T> {
+    Some(T),
+    None,
+}
+
+export enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+export struct HttpError {
+    status: Int,
+    message: String,
+}
+
+// ----- strings (UTF-8 bytes) -----
+
+fn str_concat(a: String, b: String) -> String {
+    let la = __str_len(a)
+    let lb = __str_len(b)
+    let out = __str_alloc(la + lb)
+    __str_copy(out, 0, a, 0, la)
+    __str_copy(out, la, b, 0, lb)
+    out
+}
+
+fn str_eq(a: String, b: String) -> Bool {
+    let n = __str_len(a)
+    if n != __str_len(b) {
+        return false
+    }
+    var i = 0
+    while i < n {
+        if __str_byte(a, i) != __str_byte(b, i) {
+            return false
+        }
+        i += 1
+    }
+    true
+}
+
+fn str_len(s: String) -> Int {
+    __str_len(s)
+}
+
+fn str_is_empty(s: String) -> Bool {
+    __str_len(s) == 0
+}
+
+fn str_slice(s: String, start: Int, end: Int) -> String {
+    let n = __str_len(s)
+    let a = start.clamp(0, n)
+    let b = end.clamp(a, n)
+    let out = __str_alloc(b - a)
+    __str_copy(out, 0, s, a, b - a)
+    out
+}
+
+fn str_index_of(s: String, needle: String) -> Int? {
+    let n = __str_len(s)
+    let m = __str_len(needle)
+    var i = 0
+    while i + m <= n {
+        var j = 0
+        while j < m && __str_byte(s, i + j) == __str_byte(needle, j) {
+            j += 1
+        }
+        if j == m {
+            return Some(i)
+        }
+        i += 1
+    }
+    None
+}
+
+fn str_contains(s: String, needle: String) -> Bool {
+    s.index_of(needle).is_some()
+}
+
+fn str_starts_with(s: String, prefix: String) -> Bool {
+    __str_len(prefix) <= __str_len(s) && s.slice(0, __str_len(prefix)) == prefix
+}
+
+fn str_ends_with(s: String, suffix: String) -> Bool {
+    let n = __str_len(s)
+    let m = __str_len(suffix)
+    m <= n && s.slice(n - m, n) == suffix
+}
+
+fn is_space(c: Int) -> Bool {
+    c == 32 || c == 9 || c == 10 || c == 13
+}
+
+fn str_trim(s: String) -> String {
+    var a = 0
+    var b = __str_len(s)
+    while a < b && is_space(__str_byte(s, a)) {
+        a += 1
+    }
+    while b > a && is_space(__str_byte(s, b - 1)) {
+        b -= 1
+    }
+    s.slice(a, b)
+}
+
+fn map_ascii(s: String, lo: Int, hi: Int, delta: Int) -> String {
+    let n = __str_len(s)
+    let out = __str_alloc(n)
+    for i in 0..n {
+        let c = __str_byte(s, i)
+        __str_set_byte(out, i, if c >= lo && c <= hi { c + delta } else { c })
+    }
+    out
+}
+
+fn str_to_upper(s: String) -> String {
+    map_ascii(s, 97, 122, -32)
+}
+
+fn str_to_lower(s: String) -> String {
+    map_ascii(s, 65, 90, 32)
+}
+
+fn str_repeat(s: String, times: Int) -> String {
+    var out = ""
+    for i in 0..times {
+        out = out + s
+    }
+    out
+}
+
+fn str_split(s: String, sep: String) -> [String] {
+    var parts: [String] = []
+    var rest = s
+    if __str_len(sep) == 0 {
+        return [s]
+    }
+    var going = true
+    while going {
+        match rest.index_of(sep) {
+            Some(i) => {
+                parts = parts.push(rest.slice(0, i))
+                rest = rest.slice(i + __str_len(sep), __str_len(rest))
+            }
+            None => {
+                going = false
+            }
+        }
+    }
+    parts.push(rest)
+}
+
+/// Parses an optionally signed decimal integer; `None` on any other input or overflow.
+fn str_parse_int(s: String) -> Int? {
+    let t = s.trim()
+    let n = __str_len(t)
+    if n == 0 {
+        return None
+    }
+    var i = 0
+    var neg = false
+    let first = __str_byte(t, 0)
+    if first == 45 || first == 43 {
+        neg = first == 45
+        i = 1
+        if n == 1 {
+            return None
+        }
+    }
+    // Accumulate negatively so that the minimum Int parses.
+    var acc = 0
+    while i < n {
+        let c = __str_byte(t, i)
+        if c < 48 || c > 57 {
+            return None
+        }
+        if acc < -922337203685477580 || acc == -922337203685477580 && c - 48 > 8 {
+            return None
+        }
+        acc = acc * 10 - (c - 48)
+        i += 1
+    }
+    if neg {
+        Some(acc)
+    } else if acc == -9223372036854775807 - 1 {
+        None
+    } else {
+        Some(-acc)
+    }
+}
+
+// ----- numbers -----
+
+fn int_to_string(n: Int) -> String {
+    if n == 0 {
+        return "0"
+    }
+    let digits = __str_alloc(20)
+    var i = 20
+    // Work with non-positive values so the minimum Int is representable.
+    var x = if n < 0 { n } else { -n }
+    while x != 0 {
+        i -= 1
+        __str_set_byte(digits, i, 48 - x % 10)
+        x = x / 10
+    }
+    if n < 0 {
+        i -= 1
+        __str_set_byte(digits, i, 45)
+    }
+    let out = __str_alloc(20 - i)
+    __str_copy(out, 0, digits, i, 20 - i)
+    out
+}
+
+fn int_to_float(n: Int) -> Float {
+    __float_from_int(n)
+}
+
+fn int_abs(n: Int) -> Int {
+    if n < 0 { -n } else { n }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn int_clamp(n: Int, lo: Int, hi: Int) -> Int {
+    if n < lo { lo } else if n > hi { hi } else { n }
+}
+
+fn float_to_string(f: Float) -> String {
+    __float_to_string(f)
+}
+
+/// Truncates toward zero; saturates at the Int range, NaN becomes 0.
+fn float_to_int(f: Float) -> Int {
+    __int_from_float(f)
+}
+
+fn float_floor(f: Float) -> Float {
+    __float_floor(f)
+}
+
+fn float_ceil(f: Float) -> Float {
+    __float_ceil(f)
+}
+
+/// Rounds half away from zero.
+fn float_round(f: Float) -> Float {
+    if f < 0.0 { -__float_floor(-f + 0.5) } else { __float_floor(f + 0.5) }
+}
+
+fn float_sqrt(f: Float) -> Float {
+    __float_sqrt(f)
+}
+
+fn float_abs(f: Float) -> Float {
+    if f < 0.0 { -f } else { f }
+}
+
+fn float_min(a: Float, b: Float) -> Float {
+    if a < b { a } else { b }
+}
+
+fn float_max(a: Float, b: Float) -> Float {
+    if a > b { a } else { b }
+}
+
+fn bool_to_string(b: Bool) -> String {
+    if b { "true" } else { "false" }
+}
+
+// ----- arrays (immutable: updates return new arrays) -----
+
+fn arr_len<T>(a: [T]) -> Int {
+    __arr_len(a)
+}
+
+fn arr_is_empty<T>(a: [T]) -> Bool {
+    __arr_len(a) == 0
+}
+
+fn arr_get<T>(a: [T], i: Int) -> T? {
+    if i >= 0 && i < __arr_len(a) { Some(a[i]) } else { None }
+}
+
+fn arr_first<T>(a: [T]) -> T? {
+    a.get(0)
+}
+
+fn arr_last<T>(a: [T]) -> T? {
+    a.get(__arr_len(a) - 1)
+}
+
+fn arr_push<T>(a: [T], x: T) -> [T] {
+    let n = __arr_len(a)
+    let out = __arr_alloc(n + 1, x)
+    __arr_copy(out, 0, a, 0, n)
+    out
+}
+
+fn arr_set<T>(a: [T], i: Int, x: T) -> [T] {
+    let n = __arr_len(a)
+    if i < 0 || i >= n {
+        __panic("array index out of bounds")
+    }
+    let out = __arr_alloc(n, x)
+    __arr_copy(out, 0, a, 0, n)
+    __arr_set(out, i, x)
+    out
+}
+
+fn arr_remove_at<T>(a: [T], i: Int) -> [T] {
+    let n = __arr_len(a)
+    if i < 0 || i >= n {
+        __panic("array index out of bounds")
+    }
+    let out = __arr_alloc(n - 1, a[0])
+    __arr_copy(out, 0, a, 0, i)
+    __arr_copy(out, i, a, i + 1, n - i - 1)
+    out
+}
+
+fn arr_concat<T>(a: [T], b: [T]) -> [T] {
+    let la = __arr_len(a)
+    let lb = __arr_len(b)
+    if la == 0 {
+        return b
+    }
+    let out = __arr_alloc(la + lb, a[0])
+    __arr_copy(out, la, b, 0, lb)
+    __arr_copy(out, 0, a, 0, la)
+    out
+}
+
+fn arr_slice<T>(a: [T], start: Int, end: Int) -> [T] {
+    let n = __arr_len(a)
+    let s = start.clamp(0, n)
+    let e = end.clamp(s, n)
+    if e == s {
+        return []
+    }
+    let out = __arr_alloc(e - s, a[s])
+    __arr_copy(out, 0, a, s, e - s)
+    out
+}
+
+fn arr_reverse<T>(a: [T]) -> [T] {
+    let n = __arr_len(a)
+    if n == 0 {
+        return a
+    }
+    let out = __arr_alloc(n, a[0])
+    for i in 0..n {
+        __arr_set(out, i, a[n - 1 - i])
+    }
+    out
+}
+
+fn arr_join(a: [String], sep: String) -> String {
+    var out = ""
+    for i in 0..__arr_len(a) {
+        if i > 0 {
+            out = out + sep
+        }
+        out = out + a[i]
+    }
+    out
+}
+
+fn arr_sum(a: [Int]) -> Int {
+    var total = 0
+    for x in a {
+        total += x
+    }
+    total
+}
+
+// ----- Option / Result -----
+
+fn opt_is_some<T>(o: T?) -> Bool {
+    match o {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+fn opt_is_none<T>(o: T?) -> Bool {
+    !o.is_some()
+}
+
+fn opt_unwrap_or<T>(o: T?, fallback: T) -> T {
+    match o {
+        Some(v) => v,
+        None => fallback,
+    }
+}
+
+fn res_is_ok<T, E>(r: Result<T, E>) -> Bool {
+    match r {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+fn res_is_err<T, E>(r: Result<T, E>) -> Bool {
+    !r.is_ok()
+}
+
+fn res_unwrap_or<T, E>(r: Result<T, E>, fallback: T) -> T {
+    match r {
+        Ok(v) => v,
+        Err(_) => fallback,
+    }
+}
+
+fn res_ok<T, E>(r: Result<T, E>) -> T? {
+    match r {
+        Ok(v) => Some(v),
+        Err(_) => None,
+    }
+}

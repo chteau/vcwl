@@ -1,0 +1,4 @@
+// error: comparison operators cannot be chained
+fn main() -> Bool {
+    1 < 2 < 3
+}

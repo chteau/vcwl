@@ -1,0 +1,90 @@
+//! Runs compiled modules with Node.js (V8), an engine independent of this compiler.
+
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+pub const RUNTIME_JS: &str = include_str!("../runtime/vcwl.js");
+
+pub struct RunResult {
+    pub ok: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+fn runtime_url() -> String {
+    format!("data:text/javascript;base64,{}", base64(RUNTIME_JS.as_bytes()))
+}
+
+pub fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= c.len() {
+                out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Instantiates the module (read from stdin) and calls each export in `calls`, printing
+/// `name => value` for functions that return a value.
+fn script(calls: &[&str], show_names: bool) -> String {
+    format!(
+        r#"import {{ createHost, instantiate, describeError }} from "{url}";
+const chunks = [];
+for await (const c of process.stdin) chunks.push(c);
+const host = createHost();
+let failed = false;
+try {{
+  const inst = await instantiate(Buffer.concat(chunks), host);
+  for (const name of {calls:?}) {{
+    try {{
+      const r = inst.exports[name]();
+      if (r !== undefined) console.log({prefix}String(r));
+      else if ({show}) console.log(name + " => ok");
+    }} catch (e) {{
+      failed = true;
+      console.log({prefix}describeError(e));
+    }}
+  }}
+}} catch (e) {{
+  failed = true;
+  console.error(describeError(e));
+}}
+process.exitCode = failed ? 1 : 0;
+"#,
+        url = runtime_url(),
+        calls = calls,
+        prefix = if show_names { "name + \" => \" + " } else { "" },
+        show = show_names,
+    )
+}
+
+fn run(wasm: &[u8], script: &str) -> std::io::Result<RunResult> {
+    let mut child = Command::new("node")
+        .args(["--input-type=module", "-e", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child.stdin.take().unwrap().write_all(wasm)?;
+    let out = child.wait_with_output()?;
+    Ok(RunResult {
+        ok: out.status.success(),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    })
+}
+
+pub fn run_main(wasm: &[u8], export: &str) -> std::io::Result<RunResult> {
+    run(wasm, &script(&[export], false))
+}
+
+pub fn run_tests(wasm: &[u8], names: &[&str]) -> std::io::Result<RunResult> {
+    run(wasm, &script(names, true))
+}

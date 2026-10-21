@@ -1,0 +1,4 @@
+// expect: 42
+fn main() -> Int {
+    return 42
+}

@@ -1,0 +1,6 @@
+// error: the value may be absent
+fn get() -> Int? { None }
+fn main() -> Int {
+    let x: Int = get()
+    x
+}

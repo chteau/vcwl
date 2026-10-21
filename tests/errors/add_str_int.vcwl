@@ -1,0 +1,4 @@
+// error: type error: cannot apply `+` to `String` and `Int`
+fn main() -> String {
+    "a" + 1
+}

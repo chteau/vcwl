@@ -1,0 +1,3 @@
+// error: unknown function `helper`
+import "../programs/lib/geometry.vcwl"
+fn main() -> Int { helper() }

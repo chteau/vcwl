@@ -1,0 +1,2 @@
+// error: Int and Float do not mix implicitly
+fn main() -> Float { 1 + 2.5 }

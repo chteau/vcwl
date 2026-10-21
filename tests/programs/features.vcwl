@@ -1,0 +1,114 @@
+// expect: fib(20) = 6765
+// expect: area = 12.5
+// expect: Circle(2.0) Rect(1.5, 3.0) Empty
+// expect: shapes: 3
+// expect: 7 / -2 = -3, 7 % -2 = 1
+// expect: [1, 2, 3, 4]
+// expect: sum = 10
+// expect: found 3 at Some(2)
+// expect: missing: none
+// expect: HELLO, vcwl!
+// expect: parse: 123 -45 err
+// expect: min int: -9223372036854775808
+// expect: boxed: 9
+// expect: words: a|b|c
+// expect: classify: negative zero small large
+import "./lib/geometry.vcwl"
+
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+struct Box<T> {
+    value: T,
+}
+
+fn fib(n: Int) -> Int {
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn describe(s: Shape) -> String {
+    match s {
+        Circle(r) => "Circle({r})",
+        Rect(w, h) => "Rect({w}, {h})",
+        Shape.Empty => "Empty",
+    }
+}
+
+fn find<T>(items: [T], pred_value: Int, key: Int) -> Int? {
+    if key == pred_value { Some(key) } else { None }
+}
+
+fn index_of(items: [Int], x: Int) -> Int? {
+    var i = 0
+    for it in items {
+        if it == x {
+            return Some(i)
+        }
+        i += 1
+    }
+    None
+}
+
+fn show_opt(o: Int?) -> String {
+    match o {
+        Some(v) => "Some({v})",
+        None => "none",
+    }
+}
+
+fn map_box<T>(b: Box<T>, f: T) -> Box<T> {
+    Box { ..b, value: f }
+}
+
+fn classify(n: Int) -> String {
+    match n {
+        0 => "zero",
+        n => if n < 0 { "negative" } else if n < 10 { "small" } else { "large" },
+    }
+}
+
+fn main() {
+    print("fib(20) = {fib(20)}")
+    let r = Rect(5.0, 2.5)
+    print("area = {area(r)}")
+    let shapes = [Circle(2.0), Rect(1.5, 3.0), Shape.Empty]
+    var line = ""
+    for s in shapes {
+        if line != "" {
+            line = line + " "
+        }
+        line = line + describe(s)
+    }
+    print(line)
+    print("shapes: {shapes.len()}")
+    print("7 / -2 = {7 / -2}, 7 % -2 = {7 % -2}")
+    var xs: [Int] = []
+    for i in 1..5 {
+        xs = xs.push(i)
+    }
+    var parts: [String] = []
+    for x in xs {
+        parts = parts.push(x.to_string())
+    }
+    print("[" + parts.join(", ") + "]")
+    print("sum = {xs.sum()}")
+    print("found 3 at {show_opt(index_of(xs, 3))}")
+    print("missing: {show_opt(index_of(xs, 99))}")
+    let greeting = "  hello, VCWL!  ".trim().to_upper()
+    print(greeting.slice(0, 7) + "vcwl!")
+    let bad = match "x1".parse_int() {
+        Some(_) => "ok",
+        None => "err",
+    }
+    let a = "123".parse_int().unwrap_or(0)
+    let c = "-45".parse_int().unwrap_or(0)
+    print("parse: {a} {c} {bad}")
+    print("min int: {-9223372036854775807 - 1}")
+    let p = Point { x: 4, y: 5 }
+    let b = map_box(Box { value: p.x }, p.x + p.y)
+    print("boxed: {b.value}")
+    print("words: " + "a,b,c".split(",").join("|"))
+    print("classify: {classify(-5)} {classify(0)} {classify(3)} {classify(42)}")
+}

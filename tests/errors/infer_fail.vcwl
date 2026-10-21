@@ -1,0 +1,5 @@
+// error: cannot infer the type
+fn main() {
+    let xs = []
+    print("x")
+}

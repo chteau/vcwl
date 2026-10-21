@@ -1,0 +1,8 @@
+// error: non-exhaustive match: `Some(false)` is not covered
+fn main() -> Int {
+    let o: Bool? = Some(true)
+    match o {
+        Some(true) => 1,
+        None => 0,
+    }
+}

@@ -1,0 +1,5 @@
+// error: must return a value of type `Int` on every path
+fn f(b: Bool) -> Int {
+    if b { return 1 }
+}
+fn main() -> Int { f(true) }

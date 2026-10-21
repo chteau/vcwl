@@ -1,0 +1,4 @@
+// error: syntax error: expected `)`
+fn main() -> Int {
+    f(1, 2
+}

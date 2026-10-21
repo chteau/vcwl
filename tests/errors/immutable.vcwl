@@ -1,0 +1,5 @@
+// error: cannot assign to `x`: it is immutable
+fn main() {
+    let x = 1
+    x = 2
+}

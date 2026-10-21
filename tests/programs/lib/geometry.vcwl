@@ -1,0 +1,18 @@
+export enum Shape {
+    Circle(Float),
+    Rect(Float, Float),
+    Empty,
+}
+
+export fn area(s: Shape) -> Float {
+    match s {
+        Circle(r) => 3.14159 * r * r,
+        Rect(w, h) => w * h,
+        Empty => 0.0,
+    }
+}
+
+// Not exported: invisible to importers.
+fn helper() -> Int {
+    1
+}

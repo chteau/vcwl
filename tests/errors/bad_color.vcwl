@@ -1,0 +1,2 @@
+// error: invalid color literal
+fn main() { let c = #12345 }

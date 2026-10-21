@@ -1,0 +1,5 @@
+// error: arrays are immutable
+fn main() {
+    var a = [1, 2]
+    a[0] = 3
+}

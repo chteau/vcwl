@@ -1,0 +1,4 @@
+// error: internal standard-library intrinsic
+fn main() -> Int {
+    __str_len("x")
+}

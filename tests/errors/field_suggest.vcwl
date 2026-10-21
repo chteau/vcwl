@@ -1,0 +1,6 @@
+// error: did you mean `width`?
+struct Size { width: Int, height: Int }
+fn main() -> Int {
+    let s = Size { width: 1, height: 2 }
+    s.widht
+}

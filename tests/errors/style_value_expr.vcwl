@@ -1,0 +1,5 @@
+// error: is a style value
+fn main() -> Int {
+    let x = 12px
+    0
+}

@@ -1,0 +1,4 @@
+target/
+dist/
+*.wasm
+/node_modules/

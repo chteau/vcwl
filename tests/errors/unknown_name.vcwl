@@ -1,0 +1,5 @@
+// error: did you mean `count`?
+fn main() -> Int {
+    let count = 1
+    cout
+}
