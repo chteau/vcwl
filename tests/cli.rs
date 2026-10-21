@@ -98,6 +98,6 @@ fn dev_server_serves_and_rebuilds() {
 
 #[test]
 fn repository_sources_are_formatted() {
-    let o = vcwl(".", &["fmt", "--check", "src", "examples", "tests/programs", "tests/cli"]);
+    let o = vcwl(".", &["fmt", "--check", "src", "examples", "tests/programs", "tests/cli", "tests/browser/fixtures"]);
     assert!(o.status.success(), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
 }

@@ -50,6 +50,14 @@ pub struct Checker<'a> {
     pub ui: Option<crate::check_ui::UiEnv>,
     /// Spans of expressions whose type contained inference variables, for error reporting.
     pending: Vec<(Span, Type)>,
+    /// Generated JSON functions by role and type; see `json.rs`.
+    pub json_fns: HashMap<(crate::json::Role, Type), usize>,
+    /// `local_scopes` index of the current handler's own scope (fetch arms cannot see it).
+    pub handler_base: usize,
+    /// Handler scopes hidden while checking `fetch` arms (for diagnostics).
+    pub fetch_hidden: Vec<Vec<(String, LocalId, bool)>>,
+    /// First `fetch` in the program (it requires the network capability).
+    pub fetch_span: Option<Span>,
 }
 
 const INTRINSICS: &[(&str, &[&str], &str)] = &[
@@ -72,6 +80,13 @@ const INTRINSICS: &[(&str, &[&str], &str)] = &[
     ("__print", &["String"], "()"),
     ("__panic", &["String"], "!"),
     ("__now_ms", &[], "Float"),
+    ("__str_from_io", &["Int"], "String"),
+    ("__json_kind", &["Int"], "Int"),
+    ("__json_bool", &["Int"], "Bool"),
+    ("__json_num", &["Int"], "Float"),
+    ("__json_str", &["Int"], "String"),
+    ("__json_num_text", &["Float"], "String"),
+    ("__json_quote", &["String"], "String"),
 ];
 
 impl<'a> Checker<'a> {
@@ -93,6 +108,10 @@ impl<'a> Checker<'a> {
             ctx: Ctx::Fn,
             ui: None,
             pending: Vec::new(),
+            json_fns: HashMap::new(),
+            handler_base: 0,
+            fetch_span: None,
+            fetch_hidden: Vec::new(),
         }
     }
 
@@ -940,7 +959,9 @@ impl<'a> Checker<'a> {
             return self.check_variant(adt, v, &[], span, expected);
         }
         let mut d = Diag::ty(span, format!("unknown name `{name}`"));
-        if matches!(self.scopes[self.file].get(name), Some(Sym::Fn(_))) {
+        if self.fetch_hidden.iter().flatten().any(|(n, ..)| n == name) {
+            d = d.help("`fetch` arms run after the handler has returned, so they cannot use its local values; store the value in component state first");
+        } else if matches!(self.scopes[self.file].get(name), Some(Sym::Fn(_))) {
             d = d.help(format!("`{name}` is a function; call it with `{name}(...)`"));
         } else if let Some(s) = suggest(name, self.visible_value_names().iter().map(|s| s.as_str())) {
             d = d.help(format!("did you mean `{s}`?"));
@@ -1118,6 +1139,7 @@ impl<'a> Checker<'a> {
             "Int" => Type::Int,
             "Float" => Type::Float,
             "String" => Type::Str,
+            "Bool" => Type::Bool,
             "()" => Type::Unit,
             "!" => Type::Never,
             "T" => t.clone(),
@@ -1193,6 +1215,7 @@ impl<'a> Checker<'a> {
             Type::Array(_) => Some("arr"),
             Type::Adt(id, _) if *id == self.prelude_adt("Option") => Some("opt"),
             Type::Adt(id, _) if *id == self.prelude_adt("Result") => Some("res"),
+            Type::Adt(id, _) if *id == self.prelude_adt("HttpError") => Some("http"),
             _ => None,
         };
         let args_e: Vec<ast::Expr> = args.iter().map(|a| a.value.clone()).collect();

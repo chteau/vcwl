@@ -1,0 +1,22 @@
+// error: Err(Timeout)
+app "T" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+component App {
+    state msg: String = ""
+    button("go") {
+        on click {
+            fetch get("/n") as Int {
+                Ok(_) => {}
+                Err(Network(m)) => {
+                    msg = m
+                }
+                Err(Status(_, _)) => {}
+                Err(Decode(_)) => {}
+            }
+        }
+    }
+}

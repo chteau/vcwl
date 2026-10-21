@@ -1,11 +1,12 @@
 // Minimal static file server for browser tests (serves `root` under an optional base path).
+// `api(req, res, path)` may handle a request first by returning true.
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".json": "application/json" };
 
-export function serve(root, base = "/") {
+export function serve(root, base = "/", api = null) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://x");
     if (!url.pathname.startsWith(base)) {
@@ -13,6 +14,7 @@ export function serve(root, base = "/") {
       return;
     }
     let rel = decodeURIComponent(url.pathname.slice(base.length)) || "index.html";
+    if (api?.(req, res, rel)) return;
     if (rel.endsWith("/")) rel += "index.html";
     const file = path.join(root, path.normalize(rel));
     if (!file.startsWith(path.resolve(root))) {

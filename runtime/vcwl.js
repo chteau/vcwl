@@ -40,8 +40,35 @@ export function createHost(opts = {}) {
     },
     fmt_f64: (x) => host.writeIO(formatFloat(x)),
     now: () => (globalThis.performance ?? Date).now(),
+    // JSON values parsed by the host, read by generated decoders through integer handles.
+    // Handle 0 is the response being delivered; handles are dropped after delivery.
+    json_kind: (h) => jsonKind(json[h]),
+    json_bool: (h) => (json[h] ? 1 : 0),
+    json_num: (h) => json[h],
+    json_str: (h) => host.writeIO(json[h]),
+    json_len: (h) => json[h].length,
+    json_index: (h, i) => json.push(json[h][i]) - 1,
+    json_field: (h, len) => {
+      const key = host.readIO(len), obj = json[h];
+      return json.push(Object.hasOwn(obj, key) ? obj[key] : undefined) - 1;
+    },
+    json_num_text: (x) => host.writeIO(JSON.stringify(x)),
+    json_quote: (len) => host.writeIO(JSON.stringify(host.readIO(len))),
   };
+  const json = (host.json = []);
   return host;
+}
+
+/** -1 missing, 0 null, 1 boolean, 2 number, 3 string, 4 array, 5 object. */
+function jsonKind(v) {
+  if (v === undefined) return -1;
+  if (v === null) return 0;
+  switch (typeof v) {
+    case "boolean": return 1;
+    case "number": return 2;
+    case "string": return 3;
+    default: return Array.isArray(v) ? 4 : 5;
+  }
 }
 
 /** Shortest round-trip decimal text; integral values keep a `.0` suffix. */
@@ -69,8 +96,12 @@ export function describeError(e) {
 const OP = {
   CREATE: 1, TEXT: 2, COMMENT: 3, INSERT: 4, REMOVE: 5, SET_TEXT: 6, SET_ATTR: 7, REMOVE_ATTR: 8,
   SET_PROP: 9, SET_CHECKED: 10, LISTEN: 11, CLASS: 12, TOGGLE_CLASS: 13, TITLE: 14, NAVIGATE: 15,
-  WARN: 16, CLEAR: 17,
+  WARN: 16, CLEAR: 17, FETCH: 18,
 };
+
+const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+// Result kinds passed to `fetch_done`.
+const FETCH_OK = 0, FETCH_NETWORK = 1, FETCH_TIMEOUT = 2, FETCH_STATUS = 3, FETCH_INVALID = 4;
 
 const URL_ATTRS = new Set(["href", "src", "action", "formaction"]);
 const SAFE_URL = /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
@@ -97,6 +128,61 @@ export function createDomHost(root, opts = {}) {
   host.stats = { mutations: 0, flushes: 0 };
 
   const report = opts.onError ?? ((msg) => console.error(msg));
+  const win = root.ownerDocument.defaultView;
+
+  /** Resolves `raw` against the page and checks it against the app's network capability. */
+  function allowedUrl(raw) {
+    let url;
+    try {
+      url = new URL(raw, root.ownerDocument.baseURI);
+    } catch {
+      return [null, `invalid URL "${raw}"`];
+    }
+    const hosts = opts.caps?.network ?? [];
+    if (url.origin === win.location.origin && hosts.includes("self")) return [url, null];
+    if (url.protocol === "https:" && hosts.includes(url.host)) return [url, null];
+    return [null, `${url.origin} is not allowed by the app's network capability`];
+  }
+
+  /** Performs a request with the browser's fetch and reports the outcome to `fetch_done`. */
+  async function startFetch(slot, method, raw, body) {
+    const finish = (kind, status, value) =>
+      host.call((x) => {
+        const json = host.json;
+        json.length = 0;
+        let len = 0;
+        if (kind === FETCH_OK) json.push(value);
+        else len = host.writeIO(value);
+        try {
+          x.fetch_done(slot, kind, status, len);
+        } finally {
+          json.length = 0;
+        }
+      });
+    const [url, refused] = allowedUrl(raw);
+    if (refused) return finish(FETCH_NETWORK, 0, refused);
+    const init = { method, headers: { accept: "application/json" }, signal: AbortSignal.timeout(opts.fetchTimeout ?? 30000) };
+    if (body !== null) {
+      init.body = body;
+      init.headers["content-type"] = "application/json";
+    }
+    let resp, text;
+    try {
+      resp = await win.fetch(url, init);
+      text = await resp.text();
+    } catch (e) {
+      return finish(e.name === "TimeoutError" ? FETCH_TIMEOUT : FETCH_NETWORK, resp?.status ?? 0, e.message);
+    }
+    if (!resp.ok) return finish(FETCH_STATUS, resp.status, text.slice(0, 4096));
+    if (text.trim() === "") return finish(FETCH_OK, resp.status, undefined);
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch (e) {
+      return finish(FETCH_INVALID, resp.status, `invalid JSON: ${e.message}`);
+    }
+    finish(FETCH_OK, resp.status, value);
+  }
 
   function fail(e) {
     host.dead = true;
@@ -264,6 +350,12 @@ export function createDomHost(root, opts = {}) {
         case OP.WARN:
           console.warn("[vcwl] " + str());
           break;
+        case OP.FETCH: {
+          const slot = int(), method = METHODS[int()], hasBody = int();
+          const url = str(), body = str();
+          startFetch(slot, method, url, hasBody ? body : null);
+          break;
+        }
         case OP.CLEAR: {
           const el = nodes[int()];
           for (const c of [...el.childNodes]) forget(c);
@@ -277,7 +369,7 @@ export function createDomHost(root, opts = {}) {
   };
 
   host.attach = (instance) => {
-    exports = instance.exports;
+    exports = host.exports = instance.exports;
   };
   host.liveNodes = () => nodes.reduce((n, x, i) => n + (i > 0 && x !== undefined ? 1 : 0), 0);
   host.liveListeners = () => [...listeners.values()].reduce((n, l) => n + l.length, 0);
@@ -311,7 +403,7 @@ export async function boot(doc = document) {
     if (cfg.dev) showError(doc, msg);
   };
   const root = doc.body;
-  const host = createDomHost(root, { onError: report });
+  const host = createDomHost(root, { onError: report, caps: cfg.caps });
   try {
     const url = new URL(cfg.wasm ?? "app.wasm", import.meta.url);
     const resp = await fetch(url);

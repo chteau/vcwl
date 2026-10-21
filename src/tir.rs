@@ -86,13 +86,14 @@ pub enum TStmt {
 
 #[derive(Clone, Debug)]
 pub struct TFetch {
+    /// HTTP method in upper case.
     pub method: &'static str,
     pub url: TExpr,
+    /// The request body, already encoded as JSON text.
     pub body: Option<TExpr>,
-    /// Decoded payload type (`T` in `as T`).
-    pub ty: Type,
-    /// Local holding the `Result<T, HttpError>` passed to the arms.
-    pub result_local: LocalId,
+    /// Locals receiving the host's result kind, HTTP status and text length.
+    pub params: [LocalId; 3],
+    /// Runs when the response arrives: decodes it and evaluates the arms.
     pub on_done: TExpr,
     pub span: Span,
 }

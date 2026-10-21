@@ -12,9 +12,13 @@ export enum Result<T, E> {
     Err(E),
 }
 
-export struct HttpError {
-    status: Int,
-    message: String,
+/// Why a `fetch` failed. `Status` carries the HTTP status and the response text; `Decode`
+/// says where the response did not match the expected type.
+export enum HttpError {
+    Network(String),
+    Timeout,
+    Status(Int, String),
+    Decode(String),
 }
 
 // ----- strings (UTF-8 bytes) -----
@@ -428,4 +432,75 @@ fn res_ok<T, E>(r: Result<T, E>) -> T? {
         Ok(v) => Some(v),
         Err(_) => None,
     }
+}
+
+// ----- HTTP and JSON (used by `fetch`; decoders for other types are generated) -----
+
+fn http_message(e: HttpError) -> String {
+    match e {
+        Network(m) => "network error: " + m,
+        Timeout => "the request timed out",
+        Status(code, _) => "HTTP status {code}",
+        Decode(m) => "unexpected response: " + m,
+    }
+}
+
+// Host result kinds: 1 network error, 2 timeout, 3 HTTP status, 4 invalid JSON.
+fn http_error(kind: Int, status: Int, len: Int) -> HttpError {
+    let text = __str_from_io(len)
+    match kind {
+        2 => Timeout,
+        3 => Status(status, text),
+        4 => Decode(text),
+        _ => Network(text),
+    }
+}
+
+fn json_kind_name(h: Int) -> String {
+    match __json_kind(h) {
+        0 => "null",
+        1 => "a boolean",
+        2 => "a number",
+        3 => "a string",
+        4 => "an array",
+        5 => "an object",
+        _ => "nothing",
+    }
+}
+
+// Decoding errors start with ": "; enclosing decoders prepend `.field` or `[index]`.
+fn json_expected(what: String, h: Int) -> String {
+    ": expected " + what + ", found " + json_kind_name(h)
+}
+
+fn json_bool(h: Int) -> Result<Bool, String> {
+    if __json_kind(h) == 1 { Ok(__json_bool(h)) } else { Err(json_expected("a boolean", h)) }
+}
+
+fn json_float(h: Int) -> Result<Float, String> {
+    if __json_kind(h) == 2 { Ok(__json_num(h)) } else { Err(json_expected("a number", h)) }
+}
+
+fn json_int(h: Int) -> Result<Int, String> {
+    if __json_kind(h) != 2 {
+        return Err(json_expected("an integer", h))
+    }
+    let f = __json_num(h)
+    // Only integers that a JSON number (an f64) represents exactly are accepted.
+    if f != f.floor() || f.abs() > 9007199254740991.0 {
+        return Err(": expected an integer, found " + f.to_string())
+    }
+    Ok(f.to_int())
+}
+
+fn json_string(h: Int) -> Result<String, String> {
+    if __json_kind(h) == 3 { Ok(__json_str(h)) } else { Err(json_expected("a string", h)) }
+}
+
+fn json_float_text(f: Float) -> String {
+    __json_num_text(f)
+}
+
+fn json_quote(s: String) -> String {
+    __json_quote(s)
 }

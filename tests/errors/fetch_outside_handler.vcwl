@@ -1,0 +1,17 @@
+// error: `fetch` can only be used in a component's event handler
+app "T" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+fn load() {
+    fetch get("/x") as Int {
+        Ok(_) => {}
+        Err(_) => {}
+    }
+}
+
+component App {
+    text("x")
+}

@@ -641,6 +641,46 @@ impl<'a> Lower<'a> {
                 let call = IExpr::Call(f, vec![IExpr::Call(to, vec![take()])]);
                 if name == "__panic" { IExpr::Seq(vec![call, IExpr::Unreachable]) } else { call }
             }
+            "__str_from_io" => {
+                let from = self.helper_str_from_mem();
+                IExpr::Call(from, vec![wrap(take())])
+            }
+            "__json_kind" | "__json_len" => {
+                let host = if name == "__json_kind" { "json_kind" } else { "json_len" };
+                let f = self.m.import(host, vec![VT::I32], Some(VT::I32));
+                un(UnOp::I64ExtendI32S, IExpr::Call(f, vec![wrap(take())]))
+            }
+            "__json_bool" => {
+                let f = self.m.import("json_bool", vec![VT::I32], Some(VT::I32));
+                IExpr::Call(f, vec![wrap(take())])
+            }
+            "__json_num" => {
+                let f = self.m.import("json_num", vec![VT::I32], Some(VT::F64));
+                IExpr::Call(f, vec![wrap(take())])
+            }
+            "__json_index" => {
+                let f = self.m.import("json_index", vec![VT::I32, VT::I32], Some(VT::I32));
+                let (h, i) = (take(), take());
+                ext(IExpr::Call(f, vec![wrap(h), wrap(i)]))
+            }
+            "__json_field" => {
+                let f = self.m.import("json_field", vec![VT::I32, VT::I32], Some(VT::I32));
+                let to = self.helper_str_to_mem();
+                let (h, key) = (take(), take());
+                ext(IExpr::Call(f, vec![wrap(h), IExpr::Call(to, vec![key])]))
+            }
+            // Host functions returning text write it to the I/O region and return its length.
+            "__json_str" | "__json_num_text" | "__json_quote" => {
+                let from = self.helper_str_from_mem();
+                let arg = take();
+                let (host, param, arg) = match name {
+                    "__json_str" => ("json_str", VT::I32, wrap(arg)),
+                    "__json_num_text" => ("json_num_text", VT::F64, arg),
+                    _ => ("json_quote", VT::I32, IExpr::Call(self.helper_str_to_mem(), vec![arg])),
+                };
+                let f = self.m.import(host, vec![param], Some(VT::I32));
+                IExpr::Call(from, vec![IExpr::Call(f, vec![arg])])
+            }
             _ => self.ui_intrinsic(name, targs, a),
         }
     }

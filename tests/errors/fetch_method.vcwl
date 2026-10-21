@@ -1,0 +1,17 @@
+// error: did you mean `post`?
+app "T" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+component App {
+    button("go") {
+        on click {
+            fetch pots("/x", 1) as Int {
+                Ok(_) => {}
+                Err(_) => {}
+            }
+        }
+    }
+}

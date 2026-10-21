@@ -100,6 +100,15 @@ pub fn check_app(ck: &mut Checker) -> Option<AppInfo> {
             return None;
         }
     };
+    if let Some(span) = ck.fetch_span
+        && caps.network.is_empty()
+    {
+        ck.diags.push(Diag::compile(span, "`fetch` requires the network capability").help(format!(
+            "declare the hosts the app may contact: `app \"{}\" {{ capabilities {{ network: allow(\"self\") }} }}`",
+            app.title
+        )));
+        return None;
+    }
     Some(AppInfo { title: app.title.clone(), caps, comps, sigs, root, css: sheet.output() })
 }
 

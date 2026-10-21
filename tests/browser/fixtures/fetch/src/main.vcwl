@@ -1,0 +1,166 @@
+// Browser-test fixture for `fetch`: typed decoding, request bodies and every error kind.
+app "Fetch test" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+enum Kind {
+    Book,
+    Film,
+}
+
+struct Item {
+    id: Int,
+    name: String,
+    tags: [String],
+    note: String?,
+    kind: Kind,
+}
+
+struct NewItem {
+    name: String,
+    kind: Kind,
+}
+
+fn describe(it: Item) -> String {
+    let tags = it.tags.join(", ")
+    let note = it.note.unwrap_or("-")
+    "{it.id}: {it.name} [{tags}] {note}"
+}
+
+component Loader(url: String) {
+    event loaded(String)
+
+    button("Load {url}") {
+        on click {
+            fetch get(url) as [Item] {
+                Ok(items) => {
+                    emit loaded("loaded {items.len()}")
+                }
+                Err(e) => {
+                    emit loaded(e.message())
+                }
+            }
+        }
+    }
+}
+
+component App {
+    state items: [Item] = []
+    state status: String = "idle"
+    state show_loader: Bool = true
+
+    column {
+        button("Load") {
+            on click {
+                status = "loading"
+                fetch get("api/items") as [Item] {
+                    Ok(list) => {
+                        items = list
+                        status = "loaded {list.len()}"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        button("Create") {
+            on click {
+                fetch post("api/items", NewItem { name: "Dune", kind: Book }) as Item {
+                    Ok(it) => {
+                        status = "created {it.id} {it.name}"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        button("Delete") {
+            on click {
+                fetch delete("api/items/1") as () {
+                    Ok(_) => {
+                        status = "deleted"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        button("Bad shape") {
+            on click {
+                fetch get("api/bad") as [Item] {
+                    Ok(_) => {
+                        status = "unexpected success"
+                    }
+                    Err(Decode(m)) => {
+                        status = "decode: {m}"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        button("Missing") {
+            on click {
+                fetch get("api/missing") as [Item] {
+                    Ok(_) => {
+                        status = "unexpected success"
+                    }
+                    Err(Status(code, body)) => {
+                        status = "status {code}: {body}"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        button("Invalid") {
+            on click {
+                fetch get("api/invalid") as [Item] {
+                    Ok(_) => {
+                        status = "unexpected success"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        button("Blocked") {
+            on click {
+                fetch get("https://blocked.example/api") as [Item] {
+                    Ok(_) => {
+                        status = "unexpected success"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        button("Toggle loader") {
+            on click {
+                show_loader = !show_loader
+            }
+        }
+        if show_loader {
+            Loader(url: "api/slow") {
+                on loaded(msg) {
+                    status = "child: " + msg
+                }
+            }
+        }
+        paragraph(status)
+        list {
+            for it in items key it.id {
+                item(describe(it))
+            }
+        }
+    }
+}

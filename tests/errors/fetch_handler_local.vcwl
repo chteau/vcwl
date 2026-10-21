@@ -1,0 +1,21 @@
+// error: cannot use its local values
+app "T" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+component App {
+    state total: Int = 0
+    button("go") {
+        on click {
+            let base = 10
+            fetch get("/n") as Int {
+                Ok(n) => {
+                    total = base + n
+                }
+                Err(_) => {}
+            }
+        }
+    }
+}

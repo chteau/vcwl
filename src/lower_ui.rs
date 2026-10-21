@@ -46,7 +46,11 @@ pub mod opc {
     pub const NAVIGATE: i32 = 15;
     pub const WARN: i32 = 16;
     pub const CLEAR: i32 = 17;
+    pub const FETCH: i32 = 18;
 }
+
+/// Handler-slot kinds at or above this value are pending `fetch` requests.
+const FETCH_KIND_BASE: i32 = 1 << 16;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScopeRef {
@@ -104,6 +108,8 @@ pub struct UiState {
     handler_kinds: Vec<(usize, u32, Payload)>,
     /// Handler function per (component, handler index).
     handler_fns: HashMap<(usize, usize), u32>,
+    /// Continuations of `fetch` statements: (scope, function).
+    fetch_kinds: Vec<(usize, u32)>,
     defaults: HashMap<(usize, usize), u32>,
     g: Globals,
     any_arr: u32,
@@ -153,7 +159,7 @@ fn nullable(v: VT) -> VT {
 impl UiState {
     pub fn new(comps: Vec<TComp>, sigs: Vec<CompSig>, sm: SourceMap, dev: bool, title: String) -> UiState {
         UiState {
-            comps, sigs, scopes: Vec::new(), comp_scope: Vec::new(), handler_kinds: Vec::new(), handler_fns: HashMap::new(),
+            comps, sigs, scopes: Vec::new(), comp_scope: Vec::new(), handler_kinds: Vec::new(), handler_fns: HashMap::new(), fetch_kinds: Vec::new(),
             defaults: HashMap::new(), g: Globals::default(), any_arr: 0, i32_arr: 0, sm, dev, title,
         }
     }
@@ -388,8 +394,51 @@ impl Lower<'_> {
         unreachable!("unknown intrinsic {name}")
     }
 
-    pub fn lower_fetch(&mut self, _cx: &mut FnCx, _f: &TFetch) -> IExpr {
-        unreachable!("fetch is checked away before lowering")
+    /// Starts a request: the continuation and the handler's scope go into a handler slot,
+    /// and a FETCH command asks the host to perform it. The host answers with `fetch_done`.
+    pub fn lower_fetch(&mut self, cx: &mut FnCx, f: &TFetch) -> IExpr {
+        let sr = cx.scope.expect("fetch outside a handler");
+        let cont = self.fetch_fn(sr.scope, f);
+        let kind = {
+            let u = self.u();
+            u.fetch_kinds.push((sr.scope, cont));
+            FETCH_KIND_BASE + u.fetch_kinds.len() as i32 - 1
+        };
+        let alloc = self.helper_alloc_slot();
+        let slot = cx.temp(VT::I32);
+        let method = ["GET", "POST", "PUT", "PATCH", "DELETE"].iter().position(|m| *m == f.method).unwrap() as i32;
+        let url = self.expr(cx, &f.url);
+        let body = match &f.body {
+            Some(e) => S::Dyn(self.expr(cx, e)),
+            None => S::Static(String::new()),
+        };
+        let has_body = IExpr::I32(f.body.is_some() as i32);
+        let cmd = self.op(cx, opc::FETCH, vec![get(slot), IExpr::I32(method), has_body], vec![S::Dyn(url), body]);
+        IExpr::Seq(vec![set(slot, IExpr::Call(alloc, vec![get(sr.local), IExpr::I32(kind)])), cmd])
+    }
+
+    /// `(scope, kind: i64, status: i64, len: i64)`: runs a fetch's arms, then updates the
+    /// component like a handler. Responses for destroyed components are discarded.
+    fn fetch_fn(&mut self, si: usize, f: &TFetch) -> u32 {
+        let idx = self.placeholder_fn();
+        let comp = self.u().scopes[si].comp;
+        let c = self.u().comps[comp].clone();
+        let params = vec![VT::Ref(self.scope_ty(si)), VT::I64, VT::I64, VT::I64];
+        let mut cx = FnCx::new(params.clone(), c.locals.clone(), vec![]);
+        cx.scope = Some(ScopeRef { scope: si, local: 0 });
+        for (i, p) in f.params.iter().enumerate() {
+            cx.map.insert(*p, i as u32 + 1);
+        }
+        let root = self.comp_root_of(si);
+        let (rty, dead) = (self.scope_ty(root), self.u().scopes[root].comp_fields.dead);
+        let path = self.scope_path(&cx, root);
+        let mut body = vec![self.stmt_expr(&mut cx, &f.on_done)];
+        body.extend(self.handler_epilogue(&mut cx, si));
+        // The dead check stays outside `wrap_returns`, which turns returns into jumps to the epilogue.
+        let mut body = wrap_returns(body);
+        body.insert(0, IExpr::If(None, b(IExpr::StructGet(rty, dead, b(un(UnOp::RefAsNonNull, path)))), vec![IExpr::Return(None)], vec![]));
+        self.m.funcs[idx as usize] = Func { name: format!("{}_fetch{idx}", c.name), params, result: None, locals: cx.body_locals(), body, export: None };
+        idx
     }
 
     // ----- dependencies -----
@@ -1744,25 +1793,32 @@ impl Lower<'_> {
             cx.map.insert(p, 1);
         }
         let mut body = vec![self.stmt_expr(&mut cx, &hd.body)];
+        body.extend(self.handler_epilogue(&mut cx, si));
+        // `return` inside a handler must still run the update: wrap the body in a block.
+        let body = wrap_returns(body);
+        self.m.funcs[idx as usize] = Func { name: format!("{}_on{h}", c.name), params, result: None, locals: cx.body_locals(), body, export: None };
+        idx
+    }
+
+    /// Updates the component of scope `si` if a handler changed any of its state.
+    fn handler_epilogue(&mut self, cx: &mut FnCx, si: usize) -> Vec<IExpr> {
         let root = self.comp_root_of(si);
         let rty = self.scope_ty(root);
         let rfns = self.u().scopes[root].fns;
         let cl = cx.temp(VT::Ref(rty));
         let m = cx.temp(VT::I64);
-        let path = self.scope_path(&cx, root);
-        body.push(set(cl, un(UnOp::RefAsNonNull, path)));
-        body.push(set(m, IExpr::StructGet(rty, 0, b(get(cl)))));
+        let path = self.scope_path(cx, root);
         // A handler may have caused its own component to be destroyed (e.g. via an event).
         let dead = self.u().scopes[root].comp_fields.dead;
-        body.push(IExpr::If(None, b(IExpr::StructGet(rty, dead, b(get(cl)))), vec![set(m, IExpr::I64(0))], vec![]));
-        body.push(IExpr::If(None, b(bin(Op::I64Ne, get(m), IExpr::I64(0))), vec![
-            IExpr::StructSet(rty, 0, b(get(cl)), b(IExpr::I64(0))),
-            IExpr::Call(FuncRef::Local(rfns.update), vec![get(cl), get(m)]),
-        ], vec![]));
-        // `return` inside a handler must still run the update: wrap the body in a block.
-        let body = wrap_returns(body);
-        self.m.funcs[idx as usize] = Func { name: format!("{}_on{h}", c.name), params, result: None, locals: cx.body_locals(), body, export: None };
-        idx
+        vec![
+            set(cl, un(UnOp::RefAsNonNull, path)),
+            set(m, IExpr::StructGet(rty, 0, b(get(cl)))),
+            IExpr::If(None, b(IExpr::StructGet(rty, dead, b(get(cl)))), vec![set(m, IExpr::I64(0))], vec![]),
+            IExpr::If(None, b(bin(Op::I64Ne, get(m), IExpr::I64(0))), vec![
+                IExpr::StructSet(rty, 0, b(get(cl)), b(IExpr::I64(0))),
+                IExpr::Call(FuncRef::Local(rfns.update), vec![get(cl), get(m)]),
+            ], vec![]),
+        ]
     }
 
     fn gen_entry_points(&mut self, root_comp: usize) {
@@ -1843,6 +1899,33 @@ impl Lower<'_> {
             ],
             export: Some("dispatch".into()),
         });
+        // fetch_done(slot, kind, status, len): the host's answer to a FETCH command.
+        let fetches = self.u().fetch_kinds.clone();
+        if !fetches.is_empty() {
+            let release = self.helper_release_slot();
+            let (slot, kind, status, len, scope, k) = (0, 1, 2, 3, 4, 5);
+            let ext = |i| un(UnOp::I64ExtendI32S, get(i));
+            let arms = fetches.iter().enumerate().map(|(i, &(si, f))| {
+                let sty = self.scope_ty(si);
+                (i, IExpr::Call(FuncRef::Local(f), vec![IExpr::RefCast(sty, b(get(scope))), ext(kind), ext(status), ext(len)]))
+            }).collect();
+            self.m.funcs.push(Func {
+                name: "fetch_done".into(),
+                params: vec![VT::I32; 4],
+                result: None,
+                locals: vec![VT::Any, VT::I32],
+                body: vec![
+                    IExpr::If(None, b(bin(Op::I32GeU, get(slot), IExpr::GlobalGet(g.slot_n))), vec![IExpr::Return(None)], vec![]),
+                    set(scope, IExpr::ArrayGet(any_arr, b(IExpr::GlobalGet(g.slot_scope)), b(get(slot)))),
+                    set(k, IExpr::ArrayGet(i32_arr, b(IExpr::GlobalGet(g.slot_kind)), b(get(slot)))),
+                    IExpr::If(None, b(bin(Op::I32Or, un(UnOp::RefIsNull, get(scope)), bin(Op::I32LtS, get(k), IExpr::I32(FETCH_KIND_BASE)))), vec![IExpr::Return(None)], vec![]),
+                    IExpr::Call(release, vec![get(slot)]),
+                    switch_on(bin(Op::I32Sub, get(k), IExpr::I32(FETCH_KIND_BASE)), arms),
+                    IExpr::Call(flush, vec![]),
+                ],
+                export: Some("fetch_done".into()),
+            });
+        }
         // live_slots(): handler slots currently registered (for leak tests).
         self.m.funcs.push(Func {
             name: "live_slots".into(),

@@ -8,6 +8,7 @@ pub mod codegen;
 pub mod compile;
 pub mod diag;
 pub mod ir;
+pub mod json;
 pub mod lexer;
 pub mod lower;
 pub mod lower_ui;

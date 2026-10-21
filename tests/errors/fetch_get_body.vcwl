@@ -1,0 +1,17 @@
+// error: `get` requests cannot have a body
+app "T" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+component App {
+    button("go") {
+        on click {
+            fetch get("/x", 1) as Int {
+                Ok(_) => {}
+                Err(_) => {}
+            }
+        }
+    }
+}

@@ -1,0 +1,13 @@
+// error: `fetch` requires the network capability
+app "T"
+
+component App {
+    button("go") {
+        on click {
+            fetch get("/x") as Int {
+                Ok(_) => {}
+                Err(_) => {}
+            }
+        }
+    }
+}

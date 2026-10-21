@@ -1,0 +1,17 @@
+// error: cannot decode JSON for type `Result<Int, String>`
+app "T" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+component App {
+    button("go") {
+        on click {
+            fetch get("/x") as Result<Int, String> {
+                Ok(_) => {}
+                Err(_) => {}
+            }
+        }
+    }
+}

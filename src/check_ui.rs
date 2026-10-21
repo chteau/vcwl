@@ -623,6 +623,7 @@ impl Checker<'_> {
     fn check_handler(&mut self, param: Option<&ast::Ident>, payload: Payload, event_ty: Option<Type>, body: &ast::Block) -> Result<THandler> {
         self.ctx = Ctx::Handler;
         self.ret = Type::Unit;
+        self.handler_base = self.local_scopes.len();
         self.local_scopes.push(Vec::new());
         let r = (|| {
             let p = match param {
@@ -944,8 +945,58 @@ impl Checker<'_> {
         }
     }
 
+    /// `fetch method(url[, body]) as T { arms }`. The arms run when the response arrives,
+    /// after the handler has returned, so they see component values but not handler locals.
     pub fn check_fetch(&mut self, f: &ast::Fetch) -> Result<TStmt> {
-        Err(Diag::ty(f.span, "`fetch` can only be used inside an event handler"))
+        if self.ctx != Ctx::Handler || self.ui.is_none() {
+            return Err(Diag::ty(f.span, "`fetch` can only be used in a component's event handler"));
+        }
+        const METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
+        let Some(m) = METHODS.iter().position(|m| *m == f.method.name) else {
+            let d = Diag::ty(f.method.span, format!("unknown HTTP method `{}`", f.method.name));
+            return Err(match suggest(&f.method.name, METHODS.iter().copied()) {
+                Some(s) => d.help(format!("did you mean `{s}`?")),
+                None => d.help("use get, post, put, patch or delete"),
+            });
+        };
+        let method = ["GET", "POST", "PUT", "PATCH", "DELETE"][m];
+        let url = self.check_expr(&f.url, Some(&Type::Str))?;
+        self.coerce(&url.ty, &Type::Str, f.url.span)?;
+        let body = match &f.body {
+            Some(b) if matches!(method, "GET" | "DELETE") => {
+                return Err(Diag::ty(b.span, format!("`{}` requests cannot have a body", f.method.name)));
+            }
+            Some(b) => {
+                let v = self.check_expr(b, None)?;
+                let ty = self.zonk(&v.ty);
+                let enc = self.json_encoder(&ty, b.span)?;
+                Some(TExpr { kind: TK::Call(enc, vec![], vec![v]), ty: Type::Str, span: b.span })
+            }
+            None => None,
+        };
+        let ty = self.resolve_type(&f.ty)?;
+        let result_fn = self.fetch_result_fn(&ty, f.ty.span)?;
+        self.fetch_span.get_or_insert(f.span);
+
+        self.fetch_hidden = self.local_scopes.split_off(self.handler_base);
+        self.local_scopes.push(Vec::new());
+        let r = (|| {
+            let params = ["$kind", "$status", "$len"].map(|n| self.bind(n, Type::Int, false));
+            let http = Type::Adt(self.prelude_adt("HttpError"), vec![]);
+            let rty = Type::Adt(self.prelude_adt("Result"), vec![ty.clone(), http]);
+            let result = self.bind("$result", rty.clone(), false);
+            let args = params.iter().map(|&p| TExpr { kind: TK::Local(p), ty: Type::Int, span: f.span }).collect();
+            let call = TExpr { kind: TK::Call(result_fn, vec![], args), ty: rty, span: f.span };
+            let scrut = ast::Expr { id: 0, kind: ast::ExprKind::Ident("$result".into()), span: f.span };
+            let m = ast::Expr { id: 0, kind: ast::ExprKind::Match { scrut: Box::new(scrut), arms: f.arms.clone() }, span: f.span };
+            let arms = self.check_expr(&m, Some(&Type::Unit))?;
+            let on_done = TExpr { kind: TK::Block(vec![TStmt::Let(result, call), TStmt::Expr(arms)], None), ty: Type::Unit, span: f.span };
+            Ok(TStmt::Fetch(Box::new(TFetch { method, url, body, params, on_done, span: f.span })))
+        })();
+        self.local_scopes.pop();
+        let hidden = std::mem::take(&mut self.fetch_hidden);
+        self.local_scopes.extend(hidden);
+        r
     }
 }
 
