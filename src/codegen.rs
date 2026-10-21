@@ -1,7 +1,7 @@
 //! IR -> WebAssembly binary (GC proposal, standardized in Wasm 3.0).
 
 use wasm_encoder::{
-    AbstractHeapType, ArrayType, BlockType, CodeSection, CompositeInnerType, CompositeType, ConstExpr, DataCountSection,
+    AbstractHeapType, ArrayType, BlockType, CodeSection, ElementSection, Elements, CompositeInnerType, CompositeType, ConstExpr, DataCountSection,
     DataSection, EntityType, ExportKind, ExportSection, FieldType, FuncType, Function, FunctionSection, GlobalSection,
     GlobalType, HeapType, ImportSection, Instruction as I, MemArg, MemorySection, MemoryType, RefType, StorageType,
     StructType, SubType, TypeSection, ValType,
@@ -48,7 +48,12 @@ pub fn emit(m: &Module) -> Vec<u8> {
         n_gc + i as u32
     };
     let import_sigs: Vec<u32> = m.imports.iter().map(|im| sig(&im.params, im.result)).collect();
-    let func_sigs: Vec<u32> = m.funcs.iter().map(|f| sig(&f.params, f.result)).collect();
+    let func_sigs: Vec<u32> = m.funcs.iter().enumerate().map(|(i, f)| {
+        match m.sig_override.iter().find(|(fi, _)| *fi == i as u32) {
+            Some((_, t)) => *t,
+            None => sig(&f.params, f.result),
+        }
+    }).collect();
 
     let mut types = TypeSection::new();
     if n_gc > 0 {
@@ -64,6 +69,11 @@ pub fn emit(m: &Module) -> Vec<u8> {
                 is_final: true,
                 supertype_idxs: vec![],
                 composite_type: composite(CompositeInnerType::Array(ArrayType(FieldType { element_type: storage(*elem), mutable: true }))),
+            },
+            TypeDef::Func { params, result } => SubType {
+                is_final: true,
+                supertype_idxs: vec![],
+                composite_type: composite(CompositeInnerType::Func(FuncType::new(params.iter().map(|t| val(*t)), result.iter().map(|t| val(*t))))),
             },
         }).collect();
         types.ty().rec(subs);
@@ -122,12 +132,35 @@ pub fn emit(m: &Module) -> Vec<u8> {
     }
     module.section(&exports);
 
+    // Functions referenced with `ref.func` must be declared.
+    let mut refs = Vec::new();
+    for f in &m.funcs {
+        for e in &f.body {
+            collect_ref_funcs(e, &mut refs);
+        }
+    }
+    if !refs.is_empty() {
+        refs.sort();
+        refs.dedup();
+        let idx: Vec<u32> = refs.iter().map(|r| n_imports + r).collect();
+        let mut elems = ElementSection::new();
+        elems.declared(Elements::Functions(std::borrow::Cow::Borrowed(&idx)));
+        module.section(&elems);
+    }
+
     module.section(&DataCountSection { count: 1 });
 
     let mut code = CodeSection::new();
     for f in &m.funcs {
-        let mut func = Function::new_with_locals_types(f.locals.iter().map(|t| val(*t)));
-        let mut cx = Emit { f: &mut func, labels: Vec::new(), n_imports };
+        // Non-null reference locals are declared nullable: Wasm only tracks initialization
+        // within a block, so every read re-asserts non-nullness instead.
+        let declared = f.locals.iter().map(|t| match t {
+            VT::Ref(i) => VT::RefNull(*i),
+            t => *t,
+        });
+        let mut func = Function::new_with_locals_types(declared.map(val));
+        let non_null: Vec<bool> = f.params.iter().map(|_| false).chain(f.locals.iter().map(|t| matches!(t, VT::Ref(_)))).collect();
+        let mut cx = Emit { f: &mut func, labels: Vec::new(), n_imports, non_null };
         for e in &f.body {
             cx.expr(e);
         }
@@ -148,6 +181,8 @@ struct Emit<'f> {
     /// Enclosing structured-control labels, innermost last (`None` for unlabeled `if`).
     labels: Vec<Option<Label>>,
     n_imports: u32,
+    /// Locals declared nullable that hold non-null references.
+    non_null: Vec<bool>,
 }
 
 impl Emit<'_> {
@@ -176,7 +211,12 @@ impl Emit<'_> {
             F64(v) => self.i(I::F64Const((*v).into())),
             Null(t) => self.i(I::RefNull(HeapType::Concrete(*t))),
             NullAny => self.i(I::RefNull(HeapType::Abstract { shared: false, ty: AbstractHeapType::Any })),
-            LocalGet(l) => self.i(I::LocalGet(*l)),
+            LocalGet(l) => {
+                self.i(I::LocalGet(*l));
+                if self.non_null[*l as usize] {
+                    self.i(I::RefAsNonNull);
+                }
+            }
             LocalSet(l, v) => {
                 self.expr(v);
                 self.i(I::LocalSet(*l));
@@ -184,6 +224,9 @@ impl Emit<'_> {
             LocalTee(l, v) => {
                 self.expr(v);
                 self.i(I::LocalTee(*l));
+                if self.non_null[*l as usize] {
+                    self.i(I::RefAsNonNull);
+                }
             }
             GlobalGet(g) => self.i(I::GlobalGet(*g)),
             GlobalSet(g, v) => {
@@ -275,6 +318,12 @@ impl Emit<'_> {
                 self.i(I::StructNew(*t));
             }
             StructNewDefault(t) => self.i(I::StructNewDefault(*t)),
+            RefFunc(f) => self.i(I::RefFunc(self.n_imports + f)),
+            CallRef(t, args, f) => {
+                args.iter().for_each(|a| self.expr(a));
+                self.expr(f);
+                self.i(I::CallRef(*t));
+            }
             StructGet(t, i, o) => {
                 self.expr(o);
                 self.i(I::StructGet { struct_type_index: *t, field_index: *i });
@@ -370,6 +419,17 @@ impl Emit<'_> {
             }
         }
     }
+}
+
+fn collect_ref_funcs(e: &IExpr, out: &mut Vec<u32>) {
+    let mut e = e.clone();
+    fn walk(e: &mut IExpr, out: &mut Vec<u32>) {
+        if let IExpr::RefFunc(f) = e {
+            out.push(*f);
+        }
+        crate::opt::visit_children(e, |c| walk(c, out));
+    }
+    walk(&mut e, out);
 }
 
 fn bin_ins(op: Op) -> I<'static> {

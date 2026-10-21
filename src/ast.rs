@@ -107,6 +107,8 @@ pub enum Stmt {
     For { var: Ident, iter: Expr, body: Block, span: Span },
     Break(Span),
     Continue(Span),
+    /// `emit name(value)` raises a component event (event handlers only).
+    Emit { name: Ident, value: Option<Expr>, span: Span },
     /// `fetch get(url) as T { Ok(v) => ..., Err(e) => ... }` (event handlers only).
     Fetch(Box<Fetch>),
 }
@@ -255,6 +257,8 @@ pub enum View {
     For { var: Ident, index: Option<Ident>, iter: Expr, key: Option<Expr>, body: Vec<View>, span: Span },
     Match { scrut: Expr, arms: Vec<(Pattern, Vec<View>)>, span: Span },
     On { event: Ident, param: Option<Ident>, body: Block, span: Span },
+    /// `event name(Type)` declares an event the component can emit to its parent.
+    Event { name: Ident, ty: Option<TypeExpr>, span: Span },
     Style(StyleBlock),
     StyleRef(Ident),
     StyleIf { cond: Expr, block: StyleBlock, span: Span },

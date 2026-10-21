@@ -24,6 +24,8 @@ pub enum Storage {
 pub enum TypeDef {
     Struct { fields: Vec<(Storage, bool)>, sup: Option<u32>, is_final: bool },
     Array { elem: Storage },
+    /// A function type inside the GC rec group (for typed function references).
+    Func { params: Vec<VT>, result: Option<VT> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -87,6 +89,9 @@ pub enum IExpr {
     Unreachable,
     StructNew(u32, Vec<IExpr>),
     StructNewDefault(u32),
+    RefFunc(u32),
+    /// `call_ref` through a function reference of rec-group type `u32`.
+    CallRef(u32, Vec<IExpr>, Box<IExpr>),
     StructGet(u32, u32, Box<IExpr>),
     StructSet(u32, u32, Box<IExpr>, Box<IExpr>),
     ArrayNew(u32, Box<IExpr>, Box<IExpr>),
@@ -145,6 +150,8 @@ pub struct Module {
     pub data: Vec<u8>,
     /// Exported linear memory used for host I/O (pages).
     pub memory_pages: u32,
+    /// Functions whose type must be a specific rec-group function type (targets of `ref.func`).
+    pub sig_override: Vec<(u32, u32)>,
 }
 
 impl Module {

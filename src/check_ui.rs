@@ -16,6 +16,8 @@ pub enum VarKind {
 /// Component-level names visible while checking a component.
 pub struct UiEnv {
     pub vars: Vec<(String, Type, VarKind)>,
+    /// Events this component can emit, with their payload types.
+    pub events: Vec<(String, Option<Type>)>,
     /// Locals bound by views (`for` items, view `match` bindings).
     pub bound: Vec<LocalId>,
 }
@@ -30,6 +32,7 @@ impl UiEnv {
 pub struct CompSig {
     pub name: String,
     pub params: Vec<(String, Type)>,
+    pub events: Vec<(String, Option<Type>)>,
     pub file: usize,
     pub item: usize,
 }
@@ -54,12 +57,15 @@ pub enum Payload {
     None,
     Str,
     Bool,
+    /// Component event raised with `emit`; the payload type is in `THandler::event_ty`.
+    Event,
 }
 
 #[derive(Clone, Debug)]
 pub struct THandler {
     pub param: Option<LocalId>,
     pub payload: Payload,
+    pub event_ty: Option<Type>,
     pub body: TExpr,
 }
 
@@ -121,7 +127,8 @@ pub enum TView {
     Text(TExpr),
     Switch { kind: SwitchKind, branches: Vec<Vec<TView>> },
     For { item: LocalId, index: Option<LocalId>, iter: TExpr, key: Option<TExpr>, body: Vec<TView>, span: Span },
-    Component { comp: usize, props: Vec<TExpr>, span: Span },
+    /// Child component; `events` maps the child's event index to a handler of this component.
+    Component { comp: usize, props: Vec<TExpr>, events: Vec<(usize, usize)>, span: Span },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -187,7 +194,12 @@ fn spec(name: &str) -> Option<Spec> {
         "code" => texty("code"),
         "heading" => texty("h"),
         "button" => Spec {
-            args: &[("disabled", ArgTy::Bool, AttrKind::BoolAttr("disabled")), ("label", ArgTy::Str, AttrKind::Attr("aria-label")), ("title", ArgTy::Str, AttrKind::Attr("title"))],
+            args: &[
+                ("disabled", ArgTy::Bool, AttrKind::BoolAttr("disabled")),
+                ("pressed", ArgTy::Bool, AttrKind::Attr("aria-pressed")),
+                ("label", ArgTy::Str, AttrKind::Attr("aria-label")),
+                ("title", ArgTy::Str, AttrKind::Attr("title")),
+            ],
             ..texty("button")
         },
         "link" => Spec {
@@ -289,10 +301,29 @@ impl Checker<'_> {
                         Err(d) => self.diags.push(d),
                     }
                 }
+                let mut events: Vec<(String, Option<Type>)> = Vec::new();
+                for v in &c.body {
+                    if let View::Event { name, ty, .. } = v {
+                        if events.iter().any(|e| e.0 == name.name) {
+                            self.diags.push(Diag::ty(name.span, format!("event `{}` is declared twice", name.name)));
+                        }
+                        let t = match ty {
+                            Some(t) => match self.resolve_type(t) {
+                                Ok(t) => Some(t),
+                                Err(d) => {
+                                    self.diags.push(d);
+                                    None
+                                }
+                            },
+                            None => None,
+                        };
+                        events.push((name.name.clone(), t));
+                    }
+                }
                 if !c.name.name.starts_with(char::is_uppercase) {
                     self.diags.push(Diag::ty(c.name.span, format!("component names must start with an uppercase letter: `{}`", c.name.name)));
                 }
-                sigs.push(CompSig { name: c.name.name.clone(), params, file: fi, item: ii });
+                sigs.push(CompSig { name: c.name.name.clone(), params, events, file: fi, item: ii });
             }
         }
         sigs
@@ -300,7 +331,8 @@ impl Checker<'_> {
 
     pub fn check_component(&mut self, c: &ast::Component, sigs: &[CompSig], sheet: &mut Sheet) -> Result<(TComp, Option<String>)> {
         self.begin_body(Vec::new(), Type::Unit, Ctx::Render);
-        self.ui = Some(UiEnv { vars: Vec::new(), bound: Vec::new() });
+        let events = sigs.iter().find(|s| s.name == c.name.name && s.file == self.file).map(|s| s.events.clone()).unwrap_or_default();
+        self.ui = Some(UiEnv { vars: Vec::new(), events, bound: Vec::new() });
         let r = self.check_component_inner(c, sigs, sheet);
         self.ui = None;
         r
@@ -433,6 +465,11 @@ impl Checker<'_> {
         let mut out = Vec::new();
         for v in views {
             match v {
+                View::Event { span, .. } => {
+                    if !top {
+                        return Err(Diag::ty(*span, "`event` must be declared at the top level of a component"));
+                    }
+                }
                 View::State { span, .. } | View::Let { span, .. } => {
                     if !top {
                         return Err(Diag::ty(*span, "`state` and `let` must appear at the top level of a component"));
@@ -537,7 +574,7 @@ impl Checker<'_> {
                     if let Some(p) = param {
                         return Err(Diag::ty(p.span, "`mount` events carry no value"));
                     }
-                    let h = self.check_handler(None, Payload::None, body)?;
+                    let h = self.check_handler(None, Payload::None, None, body)?;
                     cx.handlers.push(h);
                     cx.mount.push(cx.handlers.len() - 1);
                 }
@@ -583,17 +620,24 @@ impl Checker<'_> {
         }
     }
 
-    fn check_handler(&mut self, param: Option<&ast::Ident>, payload: Payload, body: &ast::Block) -> Result<THandler> {
+    fn check_handler(&mut self, param: Option<&ast::Ident>, payload: Payload, event_ty: Option<Type>, body: &ast::Block) -> Result<THandler> {
         self.ctx = Ctx::Handler;
         self.ret = Type::Unit;
         self.local_scopes.push(Vec::new());
         let r = (|| {
             let p = match param {
-                Some(p) => Some(self.bind(&p.name, if payload == Payload::Bool { Type::Bool } else { Type::Str }, false)),
+                Some(p) => {
+                    let t = match payload {
+                        Payload::Bool => Type::Bool,
+                        Payload::Event => event_ty.clone().unwrap(),
+                        _ => Type::Str,
+                    };
+                    Some(self.bind(&p.name, t, false))
+                }
                 None => None,
             };
             let b = self.check_block(body, None)?;
-            Ok(THandler { param: p, payload, body: b })
+            Ok(THandler { param: p, payload, event_ty: event_ty.clone(), body: b })
         })();
         self.local_scopes.pop();
         self.ctx = Ctx::Render;
@@ -642,6 +686,7 @@ impl Checker<'_> {
         let mut level = None;
         let mut checkbox_label = None;
         let mut options = None;
+        let mut submit = false;
         for a in &el.args {
             match a {
                 ElemArg::Style(id, toks, span) => {
@@ -685,6 +730,12 @@ impl Checker<'_> {
                             };
                             te.static_attrs.push(("type", k));
                         }
+                        ("button", "submit") => {
+                            let ast::ExprKind::Bool(b) = arg.value.kind else {
+                                return Err(Diag::ty(arg.value.span, "`submit` must be `true` or `false`"));
+                            };
+                            submit = b;
+                        }
                         ("checkbox", "label") => {
                             checkbox_label = Some(self.render_expr(&arg.value, Some(&Type::Str))?);
                         }
@@ -706,7 +757,7 @@ impl Checker<'_> {
                                 ArgTy::Int => Type::Int,
                             };
                             let mut t = self.render_expr(&arg.value, Some(&want))?;
-                            if ty == ArgTy::Int {
+                            if ty == ArgTy::Int || ty == ArgTy::Bool && matches!(kind, AttrKind::Attr(_)) {
                                 t = self.to_string_expr(t)?;
                             }
                             te.attrs.push((kind, t));
@@ -729,7 +780,7 @@ impl Checker<'_> {
             te.tag = format!("h{}", level.unwrap_or(2));
         }
         if name == "button" {
-            te.static_attrs.push(("type", "button".into()));
+            te.static_attrs.push(("type", if submit { "submit" } else { "button" }.into()));
         }
         if name == "link" && te.attrs.iter().any(|(k, _)| *k == AttrKind::Attr("href")) {
             te.static_attrs.push(("rel", "noopener noreferrer".into()));
@@ -763,7 +814,7 @@ impl Checker<'_> {
                         return Err(Diag::ty(p.span, format!("`{}` events carry no value", event.name)).help(format!("write `on {} {{ ... }}`", event.name)));
                     }
                     let _ = span;
-                    let h = self.check_handler(param.as_ref(), payload, body)?;
+                    let h = self.check_handler(param.as_ref(), payload, None, body)?;
                     cx.handlers.push(h);
                     te.events.push((host.to_string(), cx.handlers.len() - 1));
                 }
@@ -802,11 +853,35 @@ impl Checker<'_> {
                 return Err(d);
             }
         };
-        if !el.children.is_empty() {
-            return Err(Diag::ty(el.span, format!("component `{name}` cannot take child content"))
-                .help("pass data through properties; child content (slots) is not supported yet"));
-        }
         let sig = cx.sigs[idx].clone();
+        let mut events = Vec::new();
+        for c in &el.children {
+            let View::On { event, param, body, .. } = c else {
+                return Err(Diag::ty(el.span, format!("component `{name}` cannot take child content"))
+                    .help("pass data through properties; only `on <event> { ... }` handlers are allowed here"));
+            };
+            let Some(ei) = sig.events.iter().position(|e| e.0 == event.name) else {
+                let mut d = Diag::ty(event.span, format!("component `{name}` has no event `{}`", event.name));
+                if let Some(s) = suggest(&event.name, sig.events.iter().map(|e| e.0.as_str())) {
+                    d = d.help(format!("did you mean `{s}`?"));
+                } else if sig.events.is_empty() {
+                    d = d.help(format!("declare it in `{name}` with `event {}(Type)`", event.name));
+                }
+                return Err(d);
+            };
+            let ety = sig.events[ei].1.clone();
+            if let Some(p) = param
+                && ety.is_none()
+            {
+                return Err(Diag::ty(p.span, format!("event `{}` carries no value", event.name)));
+            }
+            if events.iter().any(|(e, _)| *e == ei) {
+                return Err(Diag::ty(event.span, format!("event `{}` is handled twice", event.name)));
+            }
+            let h = self.check_handler(param.as_ref(), Payload::Event, ety, body)?;
+            cx.handlers.push(h);
+            events.push((ei, cx.handlers.len() - 1));
+        }
         let ast::Item::Component(decl) = &self.files[sig.file].items[sig.item] else { unreachable!() };
         let mut given: Vec<Option<TExpr>> = vec![None; sig.params.len()];
         for a in &el.args {
@@ -841,7 +916,32 @@ impl Checker<'_> {
                 None => return Err(Diag::ty(el.name.span, format!("component `{name}` requires property `{}`", sig.params[i].0))),
             }
         }
-        Ok(TView::Component { comp: idx, props, span: el.span })
+        Ok(TView::Component { comp: idx, props, events, span: el.span })
+    }
+
+    pub fn check_emit(&mut self, name: &ast::Ident, value: Option<&ast::Expr>, span: Span) -> Result<TStmt> {
+        if self.ctx != Ctx::Handler || self.ui.is_none() {
+            return Err(Diag::ty(span, "`emit` can only be used in a component's event handler"));
+        }
+        let events = self.ui.as_ref().unwrap().events.clone();
+        let Some(i) = events.iter().position(|e| e.0 == name.name) else {
+            let mut d = Diag::ty(name.span, format!("this component has no event `{}`", name.name));
+            d = match suggest(&name.name, events.iter().map(|e| e.0.as_str())) {
+                Some(s) => d.help(format!("did you mean `{s}`?")),
+                None => d.help(format!("declare it at the top of the component: `event {}(Type)`", name.name)),
+            };
+            return Err(d);
+        };
+        match (&events[i].1, value) {
+            (None, None) => Ok(TStmt::Emit(i, None)),
+            (Some(t), Some(v)) => {
+                let tv = self.check_expr(v, Some(t))?;
+                self.coerce(&tv.ty, t, v.span)?;
+                Ok(TStmt::Emit(i, Some(tv)))
+            }
+            (None, Some(v)) => Err(Diag::ty(v.span, format!("event `{}` carries no value", name.name))),
+            (Some(t), None) => Err(Diag::ty(span, format!("event `{}` needs a value of type `{}`", name.name, self.show(t)))),
+        }
     }
 
     pub fn check_fetch(&mut self, f: &ast::Fetch) -> Result<TStmt> {

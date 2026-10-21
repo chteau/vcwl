@@ -1,0 +1,4 @@
+# VCWL example: todo list
+name = "todo"
+entry = "src/main.vcwl"
+out = "dist"

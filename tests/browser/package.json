@@ -1,15 +1,10 @@
 {
-  "name": "browser",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "vcwl-browser-tests",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "puppeteer-core": "24.43.1"
   }

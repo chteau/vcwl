@@ -96,6 +96,10 @@ pub fn visit_children(e: &mut IExpr, mut f: impl FnMut(&mut IExpr)) {
         }
         ArrayCopy(_, xs) => xs.iter_mut().for_each(|x| f(x)),
         Call(_, xs) | Seq(xs) | StructNew(_, xs) | ArrayNewFixed(_, xs) | Block(_, _, xs) | Loop(_, xs) => xs.iter_mut().for_each(f),
+        CallRef(_, xs, g) => {
+            xs.iter_mut().for_each(&mut f);
+            f(g);
+        }
         If(_, c, t, el) => {
             f(c);
             t.iter_mut().for_each(&mut f);
@@ -103,13 +107,15 @@ pub fn visit_children(e: &mut IExpr, mut f: impl FnMut(&mut IExpr)) {
         }
         Return(Some(a)) => f(a),
         I32(_) | I64(_) | F64(_) | Null(_) | NullAny | LocalGet(_) | GlobalGet(_) | Br(_) | Return(None) | Unreachable
-        | ArrayNewData(..) | MemorySize | StructNewDefault(_) => {}
+        | ArrayNewData(..) | MemorySize | StructNewDefault(_) | RefFunc(_) => {}
     }
 }
 
 fn calls(e: &mut IExpr, out: &mut Vec<FuncRef>) {
-    if let IExpr::Call(f, _) = e {
-        out.push(*f);
+    match e {
+        IExpr::Call(f, _) => out.push(*f),
+        IExpr::RefFunc(f) => out.push(FuncRef::Local(*f)),
+        _ => {}
     }
     visit_children(e, |c| calls(c, out));
 }
@@ -146,14 +152,19 @@ fn tree_shake(m: &mut Module) {
     let fmap = remap(&live);
     let imap = remap(&live_imports);
     fn rewrite(e: &mut IExpr, fmap: &[Option<u32>], imap: &[Option<u32>]) {
-        if let IExpr::Call(f, _) = e {
-            *f = match *f {
-                FuncRef::Local(j) => FuncRef::Local(fmap[j as usize].unwrap()),
-                FuncRef::Import(j) => FuncRef::Import(imap[j as usize].unwrap()),
-            };
+        match e {
+            IExpr::Call(f, _) => {
+                *f = match *f {
+                    FuncRef::Local(j) => FuncRef::Local(fmap[j as usize].unwrap()),
+                    FuncRef::Import(j) => FuncRef::Import(imap[j as usize].unwrap()),
+                };
+            }
+            IExpr::RefFunc(f) => *f = fmap[*f as usize].unwrap(),
+            _ => {}
         }
         visit_children(e, |c| rewrite(c, fmap, imap));
     }
+    m.sig_override = m.sig_override.iter().filter_map(|&(f, t)| fmap[f as usize].map(|nf| (nf, t))).collect();
     let funcs = std::mem::take(&mut m.funcs);
     m.funcs = funcs.into_iter().zip(&live).filter(|(_, l)| **l).map(|(f, _)| f).collect();
     for f in &mut m.funcs {

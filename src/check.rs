@@ -356,7 +356,8 @@ impl<'a> Checker<'a> {
                 }
                 self.zonk_expr(&mut f.on_done);
             }
-            TStmt::Break | TStmt::Continue => {}
+            TStmt::Emit(_, Some(e)) => self.zonk_expr(e),
+            TStmt::Break | TStmt::Continue | TStmt::Emit(_, None) => {}
         }
     }
 
@@ -644,6 +645,7 @@ impl<'a> Checker<'a> {
                 if matches!(s, Stmt::Break(_)) { TStmt::Break } else { TStmt::Continue }
             }
             Stmt::Fetch(f) => self.check_fetch(f)?,
+            Stmt::Emit { name, value, span } => self.check_emit(name, value.as_ref(), *span)?,
         })
     }
 

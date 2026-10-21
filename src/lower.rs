@@ -481,6 +481,7 @@ impl<'a> Lower<'a> {
             TStmt::Break => IExpr::Br(cx.loops.last().expect("break outside loop").0),
             TStmt::Continue => IExpr::Br(cx.loops.last().expect("continue outside loop").1),
             TStmt::Fetch(f) => self.lower_fetch(cx, f),
+            TStmt::Emit(ev, v) => self.ui_emit(cx, *ev, v.as_ref()),
         }
     }
 

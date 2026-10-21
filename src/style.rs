@@ -168,6 +168,7 @@ fn prop(name: &str) -> Option<Prop> {
         "shadow" => p(&["box-shadow"], Shadow),
         "fit" => p(&["object-fit"], Keyword(&[("cover", "cover"), ("contain", "contain"), ("fill", "fill"), ("none", "none")])),
         "container" => p(&["container-type"], Keyword(&[("inline", "inline-size"), ("size", "size"), ("none", "normal")])),
+        "list-style" => p(&["list-style"], Keyword(&[("none", "none"), ("disc", "disc"), ("decimal", "decimal"), ("square", "square"), ("circle", "circle")])),
         "user-select" => p(&["user-select"], Keyword(&[("none", "none"), ("text", "text"), ("all", "all"), ("auto", "auto")])),
         _ => None,
     }
@@ -179,7 +180,7 @@ const PROPS: &[&str] = &[
     "letter-spacing", "italic", "text-align", "decoration", "case", "white-space", "direction", "align", "align-self", "justify",
     "wrap", "grow", "shrink", "basis", "display", "columns", "rows", "span", "position", "top", "right", "bottom", "left", "inset",
     "z", "overflow", "overflow-x", "overflow-y", "opacity", "transform", "transition", "cursor", "shadow", "fit", "container",
-    "user-select",
+    "user-select", "list-style",
 ];
 
 const NAMED_COLORS: &[&str] = &["transparent", "currentcolor", "white", "black", "inherit"];
@@ -408,11 +409,30 @@ impl Sheet {
 }
 
 fn condition(toks: &[Token], span: Span) -> Result<(Vec<String>, String)> {
-    let vals = parse_vals(toks)?;
-    let kw = |v: &Val| if let Val::Kw(k) = v { Some(k.clone()) } else { None };
-    if vals.len() == 1
-        && let Some(k) = kw(&vals[0].0)
+    // `viewport < 600px` / `container >= 30rem`
+    if let [Token { tok: Tok::Ident(target), .. }, Token { tok: Tok::Punct(op), .. }, rest @ ..] = toks
+        && matches!(target.as_str(), "viewport" | "container")
+        && matches!(*op, "<" | "<=" | ">" | ">=")
     {
+        let vals = parse_vals(rest)?;
+        let [(Val::Len(n, u), _)] = vals.as_slice() else {
+            return Err(Diag::ty(span, format!("`{target}` must be compared with a length, e.g. `{target} < 600px`")));
+        };
+        if matches!(u.as_str(), "%" | "fr" | "ms" | "s" | "deg" | "turn") {
+            return Err(Diag::ty(span, format!("`{target}` must be compared with px, rem or em")));
+        }
+        let at = if target == "viewport" { "@media" } else { "@container" };
+        let eps = if u == "px" { 0.02 } else { 0.001 };
+        let q = match *op {
+            "<" => format!("(max-width:{}{u})", num(n - eps)),
+            "<=" => format!("(max-width:{}{u})", num(*n)),
+            ">" => format!("(min-width:{}{u})", num(n + eps)),
+            _ => format!("(min-width:{}{u})", num(*n)),
+        };
+        return Ok((vec![format!("{at} {q}")], String::new()));
+    }
+    let vals = parse_vals(toks)?;
+    if let [(Val::Kw(k), _)] = vals.as_slice() {
         return Ok(match k.as_str() {
             "hover" => (vec![], ":hover".into()),
             "focus" => (vec![], ":focus-visible".into()),
@@ -426,23 +446,6 @@ fn condition(toks: &[Token], span: Span) -> Result<(Vec<String>, String)> {
             "print" => (vec!["@media print".into()], String::new()),
             _ => return Err(cond_err(span)),
         });
-    }
-    // `viewport < 600px` / `container >= 30rem`
-    let ops: Vec<&Token> = toks.iter().filter(|t| matches!(t.tok, Tok::Punct("<" | "<=" | ">" | ">="))).collect();
-    let target = toks.first().and_then(|t| if let Tok::Ident(n) = &t.tok { Some(n.as_str()) } else { None });
-    if let (Some(target @ ("viewport" | "container")), [op]) = (target, ops.as_slice())
-        && let [_, (Val::Len(n, u), _)] = vals.as_slice()
-        && u != "%"
-        && u != "fr"
-    {
-        let at = if target == "viewport" { "@media" } else { "@container" };
-        let q = match op.tok {
-            Tok::Punct("<") => format!("(max-width:{}{u})", num(n - if u == "px" { 0.02 } else { 0.001 })),
-            Tok::Punct("<=") => format!("(max-width:{}{u})", num(*n)),
-            Tok::Punct(">") => format!("(min-width:{}{u})", num(n + if u == "px" { 0.02 } else { 0.001 })),
-            _ => format!("(min-width:{}{u})", num(*n)),
-        };
-        return Ok((vec![format!("{at} {q}")], String::new()));
     }
     Err(cond_err(span))
 }

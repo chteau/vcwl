@@ -1,0 +1,70 @@
+// Application data and pure update functions.
+
+export struct Todo {
+    id: Int,
+    title: String,
+    done: Bool,
+}
+
+export enum Filter {
+    All,
+    Active,
+    Done,
+}
+
+export fn visible(todos: [Todo], filter: Filter) -> [Todo] {
+    var out: [Todo] = []
+    for t in todos {
+        let keep = match filter {
+            All => true,
+            Active => !t.done,
+            Done => t.done,
+        }
+        if keep {
+            out = out.push(t)
+        }
+    }
+    out
+}
+
+export fn count_active(todos: [Todo]) -> Int {
+    var n = 0
+    for t in todos {
+        if !t.done {
+            n += 1
+        }
+    }
+    n
+}
+
+export fn toggle(todos: [Todo], id: Int) -> [Todo] {
+    var out: [Todo] = []
+    for t in todos {
+        out = out.push(if t.id == id { Todo { ..t, done: !t.done } } else { t })
+    }
+    out
+}
+
+export fn remove(todos: [Todo], id: Int) -> [Todo] {
+    var out: [Todo] = []
+    for t in todos {
+        if t.id != id {
+            out = out.push(t)
+        }
+    }
+    out
+}
+
+export fn clear_done(todos: [Todo]) -> [Todo] {
+    var out: [Todo] = []
+    for t in todos {
+        if !t.done {
+            out = out.push(t)
+        }
+    }
+    out
+}
+
+export fn plural(n: Int, word: String) -> String {
+    if n == 1 { "{n} {word}" } else { "{n} {word}s" }
+}

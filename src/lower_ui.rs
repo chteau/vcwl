@@ -63,8 +63,17 @@ pub struct ScopeFns {
     pub first: u32,
 }
 
+/// Fields of a component scope beyond its values: the `dead` flag and, per event, the
+/// listener's function reference, scope and function type.
+#[derive(Clone, Default)]
+pub struct CompFields {
+    pub dead: u32,
+    pub events: Vec<(u32, u32, u32)>,
+}
+
 pub struct Scope {
     pub comp: usize,
+    pub comp_fields: CompFields,
     pub parent: Option<usize>,
     pub ty: u32,
     pub fields: Vec<(Storage, bool)>,
@@ -192,6 +201,28 @@ impl Lower<'_> {
             let si = self.new_scope(ci, None);
             self.u().comp_scope.push(si);
         }
+        // Component layout: dirty mask, values (fields 1..=n), dead flag, event listeners.
+        for ci in 0..n {
+            let si = self.u().comp_scope[ci];
+            let comp = self.u().comps[ci].clone();
+            for v in &comp.vars {
+                let vt = self.vt(&v.ty).unwrap();
+                self.add_field(si, vt);
+            }
+            let dead = self.add_field(si, VT::I32);
+            let mut events = Vec::new();
+            for (_, ety) in self.u().sigs[ci].events.clone() {
+                let mut params = vec![VT::Any];
+                if let Some(vt) = ety.as_ref().and_then(|t| self.vt(t)) {
+                    params.push(vt);
+                }
+                let sig = self.m.add_type(TypeDef::Func { params, result: None });
+                let f = self.add_field(si, VT::RefNull(sig));
+                let s = self.add_field(si, VT::Any);
+                events.push((f, s, sig));
+            }
+            self.u().scopes[si].comp_fields = CompFields { dead, events };
+        }
         for ci in 0..n {
             let comp = self.u().comps[ci].clone();
             let si = self.u().comp_scope[ci];
@@ -222,7 +253,7 @@ impl Lower<'_> {
             None => (Storage::Val(VT::I64), true),
         };
         let u = self.u();
-        u.scopes.push(Scope { comp, parent, ty, fields: vec![first_field], bound: HashMap::new(), key_field: None, fns });
+        u.scopes.push(Scope { comp, comp_fields: CompFields::default(), parent, ty, fields: vec![first_field], bound: HashMap::new(), key_field: None, fns });
         u.scopes.len() - 1
     }
 
@@ -715,8 +746,7 @@ impl Lower<'_> {
         let ty = self.scope_ty(si);
         for (i, v) in comp.vars.iter().enumerate() {
             let vt = self.vt(&v.ty).unwrap();
-            let f = self.add_field(si, vt);
-            debug_assert_eq!(f, Self::var_field(i));
+            let f = Self::var_field(i);
             match &v.kind {
                 TVarKind::Prop(_) => {}
                 TVarKind::State(init) | TVarKind::Derived(init) => {
@@ -812,6 +842,10 @@ impl Lower<'_> {
         // Destroy: nested cleanup always runs; root nodes are removed only when detaching.
         let mut db = g.db;
         db.push(IExpr::If(None, b(get(1)), detach, vec![]));
+        if self.u().scopes[si].parent.is_none() {
+            let dead = self.u().scopes[si].comp_fields.dead;
+            db.push(IExpr::StructSet(ty, dead, b(get(0)), b(IExpr::I32(1))));
+        }
         let funcs = [
             (fns.mount, format!("{name}_mount"), vec![VT::Ref(ty), VT::I32, VT::I32], None, g.mount.body_locals(), g.mb),
             (fns.update, format!("{name}_update"), vec![VT::Ref(ty), VT::I64], None, g.update.body_locals(), g.ub),
@@ -855,7 +889,7 @@ impl Lower<'_> {
             TView::Element(el) => self.view_element(g, comp, el, pos),
             TView::Switch { kind, branches } => self.view_switch(g, comp, kind, branches, pos),
             TView::For { item, index, iter, key, body, span } => self.view_for(g, comp, *item, *index, iter, key.as_ref(), body, *span, pos),
-            TView::Component { comp: child, props, .. } => self.view_component(g, *child, props, pos),
+            TView::Component { comp: child, props, events, .. } => self.view_component(g, *child, props, events, pos),
         }
     }
 
@@ -1547,7 +1581,49 @@ impl Lower<'_> {
         ])
     }
 
-    fn view_component(&mut self, g: &mut Gen, child: usize, props: &[TExpr], pos: Pos) {
+    /// `emit name(value)`: calls the parent's listener, if any.
+    pub fn ui_emit(&mut self, cx: &mut FnCx, ev: usize, value: Option<&TExpr>) -> IExpr {
+        let root = self.comp_root_of(cx.scope.unwrap().scope);
+        let rty = self.scope_ty(root);
+        let (ff, sf, sig) = self.u().scopes[root].comp_fields.events[ev];
+        let c = cx.temp(VT::Ref(rty));
+        let path = self.scope_path(cx, root);
+        let mut args = vec![IExpr::StructGet(rty, sf, b(get(c)))];
+        if let Some(v) = value {
+            let vt = self.vt(&self.ty(cx, &v.ty));
+            args.push(self.expr_as(cx, v, vt));
+        }
+        IExpr::Seq(vec![
+            set(c, un(UnOp::RefAsNonNull, path)),
+            IExpr::If(None, b(un(UnOp::I32Eqz, un(UnOp::RefIsNull, IExpr::StructGet(rty, ff, b(get(c)))))), vec![
+                IExpr::CallRef(sig, args, b(IExpr::StructGet(rty, ff, b(get(c))))),
+            ], vec![]),
+        ])
+    }
+
+    /// `(anyref scope, payload)` adapter calling a parent's handler for a child event.
+    fn event_wrapper(&mut self, comp: usize, h: usize, si: usize, sig: u32) -> u32 {
+        let target = self.handler_fn(comp, h, si);
+        let TypeDef::Func { params, .. } = self.m.types[sig as usize].clone() else { unreachable!() };
+        let sty = self.scope_ty(si);
+        let mut args = vec![IExpr::RefCast(sty, b(get(0)))];
+        if params.len() > 1 {
+            args.push(get(1));
+        }
+        self.m.funcs.push(Func {
+            name: format!("event_wrapper_{comp}_{h}"),
+            params,
+            result: None,
+            locals: vec![],
+            body: vec![IExpr::Call(FuncRef::Local(target), args)],
+            export: None,
+        });
+        let idx = self.m.funcs.len() as u32 - 1;
+        self.m.sig_override.push((idx, sig));
+        idx
+    }
+
+    fn view_component(&mut self, g: &mut Gen, child: usize, props: &[TExpr], events: &[(usize, usize)], pos: Pos) {
         let si = g.si;
         let ty = self.scope_ty(si);
         let cs = self.u().comp_scope[child];
@@ -1584,6 +1660,13 @@ impl Lower<'_> {
                     ], vec![]),
                 ], vec![]));
             }
+        }
+        let parent_comp = self.u().scopes[si].comp;
+        for &(ev, h) in events {
+            let (ff, sf, sig) = self.u().scopes[cs].comp_fields.events[ev];
+            let w = self.event_wrapper(parent_comp, h, si, sig);
+            g.mb.push(IExpr::StructSet(cty, ff, b(get(c)), b(IExpr::RefFunc(w))));
+            g.mb.push(IExpr::StructSet(cty, sf, b(get(c)), b(get(0))));
         }
         let (pn, an) = match pos {
             Pos::Root => (get(1), get(2)),
@@ -1648,6 +1731,11 @@ impl Lower<'_> {
         match hd.payload {
             Payload::Str => params.push(VT::Ref(self.str_ty)),
             Payload::Bool => params.push(VT::I32),
+            Payload::Event => {
+                if let Some(vt) = hd.event_ty.as_ref().and_then(|t| self.vt(t)) {
+                    params.push(vt);
+                }
+            }
             Payload::None => {}
         }
         let mut cx = FnCx::new(params.clone(), c.locals.clone(), vec![]);
@@ -1664,6 +1752,9 @@ impl Lower<'_> {
         let path = self.scope_path(&cx, root);
         body.push(set(cl, un(UnOp::RefAsNonNull, path)));
         body.push(set(m, IExpr::StructGet(rty, 0, b(get(cl)))));
+        // A handler may have caused its own component to be destroyed (e.g. via an event).
+        let dead = self.u().scopes[root].comp_fields.dead;
+        body.push(IExpr::If(None, b(IExpr::StructGet(rty, dead, b(get(cl)))), vec![set(m, IExpr::I64(0))], vec![]));
         body.push(IExpr::If(None, b(bin(Op::I64Ne, get(m), IExpr::I64(0))), vec![
             IExpr::StructSet(rty, 0, b(get(cl)), b(IExpr::I64(0))),
             IExpr::Call(FuncRef::Local(rfns.update), vec![get(cl), get(m)]),
@@ -1731,6 +1822,7 @@ impl Lower<'_> {
                 Payload::Str => args.push(IExpr::Call(from, vec![get(len)])),
                 Payload::Bool => args.push(bin(Op::I32Ne, get(len), IExpr::I32(0))),
                 Payload::None => {}
+                Payload::Event => unreachable!("component events are not dispatched by the host"),
             }
             arms.push((k, IExpr::Call(FuncRef::Local(*f), args)));
         }

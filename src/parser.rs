@@ -356,6 +356,20 @@ impl<'a> Parser<'a> {
             self.stmt_end()?;
             return Ok(Stmt::Continue(start));
         }
+        if self.is_kw("emit") && matches!(self.peek_at(1), Tok::Ident(_)) && !self.toks[self.pos + 1].nl {
+            self.bump();
+            let name = self.ident()?;
+            let value = if self.is("(") && !self.token().nl {
+                self.bump();
+                let v = self.expr()?;
+                self.expect(")")?;
+                Some(v)
+            } else {
+                None
+            };
+            self.stmt_end()?;
+            return Ok(Stmt::Emit { name, value, span: start.to(self.prev_span()) });
+        }
         if self.is_kw("fetch") && matches!(self.peek_at(1), Tok::Ident(_)) && matches!(self.peek_at(2), Tok::Punct("(")) {
             return self.fetch();
         }
@@ -833,6 +847,19 @@ impl<'a> Parser<'a> {
                 self.eat(",");
             }
             return Ok(View::Match { scrut, arms, span: start.to(self.prev_span()) });
+        }
+        if self.is_kw("event") && matches!(self.peek_at(1), Tok::Ident(_)) {
+            self.bump();
+            let name = self.ident()?;
+            let ty = if self.eat("(") {
+                let t = self.type_expr()?;
+                self.expect(")")?;
+                Some(t)
+            } else {
+                None
+            };
+            self.stmt_end()?;
+            return Ok(View::Event { name, ty, span: start.to(self.prev_span()) });
         }
         if self.is_kw("on") && matches!(self.peek_at(1), Tok::Ident(_)) {
             self.bump();

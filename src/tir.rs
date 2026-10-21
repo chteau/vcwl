@@ -79,6 +79,8 @@ pub enum TStmt {
     ForArray(LocalId, TExpr, TExpr),
     Break,
     Continue,
+    /// Raise component event `idx` with an optional payload.
+    Emit(usize, Option<TExpr>),
     Fetch(Box<TFetch>),
 }
 

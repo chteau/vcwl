@@ -1,0 +1,201 @@
+app "VCWL Todos"
+
+import "./model.vcwl"
+import "./components/todo_item.vcwl"
+
+component App {
+    style {
+        background: #0b0d10
+        color: #e8ecf1
+        min-height: 100vh
+    }
+
+    column {
+        style {
+            max-width: 640px
+            margin: 0 auto
+            padding: 32px 16px
+            gap: 24px
+
+            when viewport < 600px {
+                padding: 16px 12px
+                gap: 16px
+            }
+        }
+
+        nav(gap: 16px) {
+            style {
+                display: flex
+            }
+            link("Todos", to: "/") {
+                style NavLink
+            }
+            link("About", to: "/about") {
+                style NavLink
+            }
+        }
+
+        routes {
+            "/" => TodoPage()
+            "/about" => About()
+            _ => NotFound()
+        }
+    }
+}
+
+component TodoPage {
+    state todos: [Todo] = []
+    state draft: String = ""
+    state next_id: Int = 1
+    state filter: Filter = All
+
+    let shown = visible(todos, filter)
+    let left = count_active(todos)
+
+    main(gap: 16px) {
+        heading("Todos", level: 1)
+
+        form(gap: 8px) {
+            row(gap: 8px) {
+                input(value: draft, placeholder: "What needs doing?", label: "New todo") {
+                    on input(v) {
+                        draft = v
+                    }
+                    style Field
+                }
+                button("Add", submit: true, disabled: draft.trim().is_empty()) {
+                    style Primary
+                }
+            }
+            on submit {
+                let title = draft.trim()
+                if !title.is_empty() {
+                    todos = todos.push(Todo { id: next_id, title: title, done: false })
+                    next_id += 1
+                    draft = ""
+                }
+            }
+        }
+
+        if todos.is_empty() {
+            paragraph("Nothing to do yet. Add a task above.") {
+                style {
+                    color: #9aa4b2
+                }
+            }
+        } else {
+            list(gap: 8px) {
+                style {
+                    list-style: none
+                    padding: 0
+                }
+                for t in shown key t.id {
+                    TodoItem(todo: t) {
+                        on toggle(id) {
+                            todos = toggle(todos, id)
+                        }
+                        on remove(id) {
+                            todos = remove(todos, id)
+                        }
+                    }
+                }
+            }
+            footer(gap: 12px, align: center) {
+                style {
+                    display: flex
+                    wrap: yes
+                    color: #9aa4b2
+                }
+                text(plural(left, "item") + " left")
+                row(gap: 6px) {
+                    FilterButton(name: "All", active: filter == All) {
+                        on pick {
+                            filter = All
+                        }
+                    }
+                    FilterButton(name: "Active", active: filter == Active) {
+                        on pick {
+                            filter = Active
+                        }
+                    }
+                    FilterButton(name: "Done", active: filter == Done) {
+                        on pick {
+                            filter = Done
+                        }
+                    }
+                }
+                if left < todos.len() {
+                    button("Clear done") {
+                        on click {
+                            todos = clear_done(todos)
+                        }
+                        style Ghost
+                    }
+                }
+            }
+        }
+    }
+}
+
+component FilterButton(name: String, active: Bool) {
+    event pick
+
+    button(name, pressed: active) {
+        on click {
+            emit pick
+        }
+        style Ghost
+        style if active {
+            color: #111111
+            background: #b6ff6c
+            border: 1px solid #b6ff6c
+        }
+    }
+}
+
+component About {
+    article(gap: 12px) {
+        heading("About", level: 1)
+        paragraph("This app is written entirely in VCWL and compiled to WebAssembly.")
+        paragraph("The browser host only applies DOM commands produced by the module.")
+    }
+}
+
+component NotFound {
+    column(gap: 8px) {
+        heading("Page not found", level: 1)
+        link("Back to todos", to: "/")
+    }
+}
+
+style NavLink {
+    color: #b6ff6c
+    decoration: none
+
+    when hover {
+        decoration: underline
+    }
+}
+
+style Field {
+    grow: 1
+    padding: 10px 12px
+    radius: 8px
+    border: 1px solid #2a313b
+    background: #161a20
+    color: #e8ecf1
+}
+
+style Primary {
+    padding: 10px 16px
+    radius: 8px
+    border: none
+    background: #b6ff6c
+    color: #111111
+    weight: 600
+
+    when disabled {
+        opacity: 0.5
+        cursor: not-allowed
+    }
+}
