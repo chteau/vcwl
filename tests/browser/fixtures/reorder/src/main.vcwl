@@ -1,0 +1,37 @@
+// Browser-test fixture: renders a keyed list from a comma-separated list of keys.
+app "Reorder"
+
+fn parse(text: String) -> [Int] {
+    var out: [Int] = []
+    for part in text.split(",") {
+        match part.trim().parse_int() {
+            Some(n) => {
+                out = out.push(n)
+            }
+            None => {}
+        }
+    }
+    out
+}
+
+component App {
+    state draft: String = ""
+    state keys: [Int] = []
+
+    form {
+        input(label: "keys", value: draft) {
+            on input(v) {
+                draft = v
+            }
+        }
+        button("Apply", submit: true)
+        on submit {
+            keys = parse(draft)
+        }
+    }
+    list {
+        for k in keys key k {
+            item("{k}")
+        }
+    }
+}

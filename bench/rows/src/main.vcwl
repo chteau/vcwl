@@ -1,0 +1,70 @@
+// Keyed-list benchmark: the same operations as bench/vanilla/index.html.
+app "Rows (VCWL)"
+
+struct Row {
+    id: Int,
+    label: String,
+}
+
+fn make(start: Int, n: Int) -> [Row] {
+    var rows: [Row] = []
+    for i in start..start + n {
+        rows = rows.push(Row { id: i, label: "row {i}" })
+    }
+    rows
+}
+
+fn update_every_10th(rows: [Row]) -> [Row] {
+    var out = rows
+    var i = 0
+    while i < out.len() {
+        let r = out[i]
+        out = out.set(i, Row { ..r, label: r.label + " !!!" })
+        i += 10
+    }
+    out
+}
+
+fn swap(rows: [Row], a: Int, b: Int) -> [Row] {
+    if rows.len() <= b {
+        return rows
+    }
+    let x = rows[a]
+    rows.set(a, rows[b]).set(b, x)
+}
+
+component App {
+    state rows: [Row] = []
+    state next: Int = 1
+
+    column {
+        row {
+            button("Create 1000", label: "create") {
+                on click {
+                    rows = make(next, 1000)
+                    next += 1000
+                }
+            }
+            button("Update every 10th", label: "update") {
+                on click {
+                    rows = update_every_10th(rows)
+                }
+            }
+            button("Swap rows", label: "swap") {
+                on click {
+                    rows = swap(rows, 1, 998)
+                }
+            }
+            button("Clear", label: "clear") {
+                on click {
+                    rows = []
+                }
+            }
+        }
+        list {
+            for r in rows key r.id {
+                item(r.label)
+            }
+        }
+    }
+}

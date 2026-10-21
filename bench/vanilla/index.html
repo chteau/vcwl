@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Rows (vanilla JS)</title>
+<link rel="icon" href="data:,">
+<!-- Hand-written baseline for bench/rows: direct DOM operations specialised for each action. -->
+<body>
+<div>
+  <div>
+    <button aria-label="create">Create 1000</button>
+    <button aria-label="update">Update every 10th</button>
+    <button aria-label="swap">Swap rows</button>
+    <button aria-label="clear">Clear</button>
+  </div>
+  <ul></ul>
+</div>
+<script type="module">
+const list = document.querySelector("ul");
+let rows = [];
+let next = 1;
+const on = (label, fn) => document.querySelector(`[aria-label=${label}]`).addEventListener("click", fn);
+on("create", () => {
+  list.textContent = "";
+  rows = [];
+  const frag = document.createDocumentFragment();
+  for (let i = next; i < next + 1000; i++) {
+    const li = document.createElement("li");
+    li.textContent = `row ${i}`;
+    rows.push({ id: i, label: `row ${i}`, el: li });
+    frag.append(li);
+  }
+  next += 1000;
+  list.append(frag);
+});
+on("update", () => {
+  for (let i = 0; i < rows.length; i += 10) {
+    rows[i].label += " !!!";
+    rows[i].el.firstChild.data = rows[i].label;
+  }
+});
+on("swap", () => {
+  if (rows.length <= 998) return;
+  const a = rows[1], b = rows[998];
+  const after = b.el.nextSibling;
+  list.insertBefore(b.el, a.el);
+  list.insertBefore(a.el, after);
+  rows[1] = b;
+  rows[998] = a;
+});
+on("clear", () => {
+  list.textContent = "";
+  rows = [];
+});
+window.ready = true;
+</script>

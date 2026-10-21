@@ -1466,7 +1466,6 @@ impl Lower<'_> {
             let ix = cx.temp(VT::I64);
             let kl = cx.temp(key_vt);
             let f = cx.temp(VT::Ref(fty));
-            let last = cx.temp(VT::I32);
             let anchor = cx.temp(VT::I32);
             let mask = cx.temp(VT::I64);
             let arr = self.expr(cx, iter);
@@ -1480,6 +1479,11 @@ impl Lower<'_> {
             let (b3, l3) = lb(cx);
             let (b4, l4) = lb(cx);
             let (b5, l5) = lb(cx);
+            let (b6, l6) = lb(cx);
+            let (b7, l7) = lb(cx);
+            let (len, lo, hi, mid) = (cx.temp(VT::I32), cx.temp(VT::I32), cx.temp(VT::I32), cx.temp(VT::I32));
+            let (pred, tails) = (cx.temp(VT::Ref(i32_arr)), cx.temp(VT::Ref(i32_arr)));
+            let src_at = |at: IExpr| IExpr::ArrayGet(i32_arr, b(get(src)), b(at));
             let pnode = IExpr::StructGet(ty, fp, b(get(0)));
             let reconcile = vec![
                 set(a, arr),
@@ -1552,20 +1556,49 @@ impl Lower<'_> {
                     set(j, bin(Op::I32Add, get(j), IExpr::I32(1))),
                     IExpr::Br(l3),
                 ])]),
-                // Mark kept fragments that are out of order (old index decreasing) as moved: src < 0.
-                set(last, IExpr::I32(-1)),
+                // Keep the longest run of fragments whose old order is preserved (longest
+                // increasing subsequence of old indices); every other kept fragment moves: src < 0.
+                set(len, IExpr::I32(0)),
+                set(pred, IExpr::ArrayNewDefault(i32_arr, b(get(n)))),
+                set(tails, IExpr::ArrayNewDefault(i32_arr, b(get(n)))),
                 set(i, IExpr::I32(0)),
                 IExpr::Block(b4, None, vec![IExpr::Loop(l4, vec![
                     IExpr::BrIf(b4, b(bin(Op::I32GeU, get(i), get(n)))),
-                    set(j, IExpr::ArrayGet(i32_arr, b(get(src)), b(get(i)))),
+                    set(j, src_at(get(i))),
                     IExpr::If(None, b(bin(Op::I32GtS, get(j), IExpr::I32(0))), vec![
-                        IExpr::If(None, b(bin(Op::I32LtS, get(j), get(last))), vec![
-                            IExpr::ArraySet(i32_arr, b(get(src)), b(get(i)), b(IExpr::I32(-1))),
-                        ], vec![set(last, get(j))]),
+                        // Binary search: first tail whose value is >= j.
+                        set(lo, IExpr::I32(0)),
+                        set(hi, get(len)),
+                        IExpr::Block(b6, None, vec![IExpr::Loop(l6, vec![
+                            IExpr::BrIf(b6, b(bin(Op::I32GeS, get(lo), get(hi)))),
+                            set(mid, bin(Op::I32ShrU, bin(Op::I32Add, get(lo), get(hi)), IExpr::I32(1))),
+                            // Entries already visited hold their negated old index.
+                            IExpr::If(None, b(bin(Op::I32LtS, bin(Op::I32Sub, IExpr::I32(0), src_at(IExpr::ArrayGet(i32_arr, b(get(tails)), b(get(mid))))), get(j))), vec![
+                                set(lo, bin(Op::I32Add, get(mid), IExpr::I32(1))),
+                            ], vec![set(hi, get(mid))]),
+                            IExpr::Br(l6),
+                        ])]),
+                        IExpr::If(None, b(bin(Op::I32GtS, get(lo), IExpr::I32(0))), vec![
+                            IExpr::ArraySet(i32_arr, b(get(pred)), b(get(i)), b(IExpr::ArrayGet(i32_arr, b(get(tails)), b(bin(Op::I32Sub, get(lo), IExpr::I32(1)))))),
+                        ], vec![]),
+                        IExpr::ArraySet(i32_arr, b(get(tails)), b(get(lo)), b(get(i))),
+                        IExpr::If(None, b(bin(Op::I32Eq, get(lo), get(len))), vec![set(len, bin(Op::I32Add, get(len), IExpr::I32(1)))], vec![]),
+                        // Provisionally mark as moved; the subsequence is restored below.
+                        IExpr::ArraySet(i32_arr, b(get(src)), b(get(i)), b(bin(Op::I32Sub, IExpr::I32(0), get(j)))),
                     ], vec![]),
                     set(i, bin(Op::I32Add, get(i), IExpr::I32(1))),
                     IExpr::Br(l4),
                 ])]),
+                IExpr::If(None, b(bin(Op::I32GtS, get(len), IExpr::I32(0))), vec![
+                    set(i, IExpr::ArrayGet(i32_arr, b(get(tails)), b(bin(Op::I32Sub, get(len), IExpr::I32(1))))),
+                    IExpr::Block(b7, None, vec![IExpr::Loop(l7, vec![
+                        IExpr::BrIf(b7, b(bin(Op::I32LeS, get(len), IExpr::I32(0)))),
+                        IExpr::ArraySet(i32_arr, b(get(src)), b(get(i)), b(bin(Op::I32Sub, IExpr::I32(0), src_at(get(i))))),
+                        set(i, IExpr::ArrayGet(i32_arr, b(get(pred)), b(get(i)))),
+                        set(len, bin(Op::I32Sub, get(len), IExpr::I32(1))),
+                        IExpr::Br(l7),
+                    ])]),
+                ], vec![]),
                 // Place from the end: mount new fragments and move displaced ones before the next sibling.
                 set(anchor, IExpr::StructGet(ty, fa, b(get(0)))),
                 set(i, get(n)),

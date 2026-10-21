@@ -15,7 +15,7 @@ export function build(projectDir, args = []) {
   return path.join(projectDir, "dist");
 }
 
-export async function open(dist, { base = "/", hash = "", viewport = { width: 1000, height: 800 }, api = null } = {}) {
+export async function open(dist, { base = "/", hash = "", viewport = { width: 1000, height: 800 }, api = null, ready = () => window.vcwl } = {}) {
   const { server, url } = await serve(dist, base, api);
   const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ["--no-sandbox"] });
   const page = await browser.newPage();
@@ -26,7 +26,7 @@ export async function open(dist, { base = "/", hash = "", viewport = { width: 10
   });
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(url + hash);
-  await page.waitForFunction(() => window.vcwl, { timeout: 10000 });
+  await page.waitForFunction(ready, { timeout: 10000 });
   return {
     page,
     errors,
