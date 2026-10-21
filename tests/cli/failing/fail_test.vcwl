@@ -1,0 +1,8 @@
+fn test_passes() {
+    assert(true, "fine")
+}
+
+fn test_fails() {
+    print("context line")
+    assert(false, "deliberate failure")
+}

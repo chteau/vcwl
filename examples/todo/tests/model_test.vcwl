@@ -1,0 +1,33 @@
+import "../src/model.vcwl"
+
+fn sample() -> [Todo] {
+    [
+        Todo { id: 1, title: "a", done: false },
+        Todo { id: 2, title: "b", done: true },
+        Todo { id: 3, title: "c", done: false },
+    ]
+}
+
+fn test_count_and_filter() {
+    let todos = sample()
+    assert(count_active(todos) == 2, "two active")
+    assert(visible(todos, Done).len() == 1, "one done")
+    assert(visible(todos, All).len() == 3, "all visible")
+}
+
+fn test_toggle_is_pure() {
+    let todos = sample()
+    let next = toggle(todos, 1)
+    assert(next[0].done, "toggled")
+    assert(!todos[0].done, "original unchanged")
+}
+
+fn test_remove_and_clear() {
+    assert(remove(sample(), 2).len() == 2, "removed one")
+    assert(clear_done(sample()).len() == 2, "cleared done")
+}
+
+fn test_plural() {
+    assert(plural(1, "item") == "1 item", "singular")
+    assert(plural(3, "item") == "3 items", "plural")
+}

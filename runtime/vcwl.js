@@ -291,13 +291,15 @@ function routeFromLocation(loc) {
 }
 
 /** Shows a runtime error on the page (dev builds) using safe text insertion. */
-function showError(doc, msg) {
+/** Shows `msg` in a fixed overlay (development builds); returns the overlay element. */
+export function showError(doc, msg) {
   const box = doc.createElement("pre");
   box.setAttribute("role", "alert");
   box.style.cssText = "position:fixed;inset:auto 1rem 1rem 1rem;z-index:2147483647;margin:0;padding:1rem;" +
     "background:#2b0b0b;color:#ffd7d7;border:1px solid #ff6b6b;border-radius:8px;font:13px/1.4 ui-monospace,monospace;white-space:pre-wrap";
   box.textContent = "VCWL " + msg;
   doc.body.append(box);
+  return box;
 }
 
 /** Loads `app.wasm` next to this script and starts the application in `document.body`. */

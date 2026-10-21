@@ -10,7 +10,7 @@ commands:
   dev [--port N]         build in development mode, serve and rebuild on changes
   check [file]           parse and type-check without producing artifacts
   build [--dev]          compile the project to static files in dist/
-  test                   run `test_*` functions in tests/*.vcwl
+  test [paths]           run `test_*` functions (default: tests/**/*.vcwl)
   fmt [--check] [files]  format source files
   clean                  remove build artifacts
   run <file>             compile a program and run its `main` with Node.js

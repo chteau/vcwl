@@ -5,6 +5,10 @@ use std::process::{Command, Stdio};
 
 pub const RUNTIME_JS: &str = include_str!("../runtime/vcwl.js");
 
+/// Starts a `PASS name` / `FAIL name` line in `run_tests` output; a test's own output
+/// (prints and the failure message) comes before its marker line.
+pub const TEST_MARK: char = '\u{1}';
+
 pub struct RunResult {
     pub ok: bool,
     pub stdout: String,
@@ -33,7 +37,7 @@ pub fn base64(data: &[u8]) -> String {
 
 /// Instantiates the module (read from stdin) and calls each export in `calls`, printing
 /// `name => value` for functions that return a value.
-fn script(calls: &[&str], show_names: bool) -> String {
+fn script(calls: &[&str], tests: bool) -> String {
     format!(
         r#"import {{ createHost, instantiate, describeError }} from "{url}";
 const chunks = [];
@@ -45,11 +49,12 @@ try {{
   for (const name of {calls:?}) {{
     try {{
       const r = inst.exports[name]();
-      if (r !== undefined) console.log({prefix}String(r));
-      else if ({show}) console.log(name + " => ok");
+      if ({tests}) console.log("{mark}PASS " + name);
+      else if (r !== undefined) console.log(String(r));
     }} catch (e) {{
       failed = true;
-      console.log({prefix}describeError(e));
+      console.log(describeError(e));
+      if ({tests}) console.log("{mark}FAIL " + name);
     }}
   }}
 }} catch (e) {{
@@ -60,8 +65,8 @@ process.exitCode = failed ? 1 : 0;
 "#,
         url = runtime_url(),
         calls = calls,
-        prefix = if show_names { "name + \" => \" + " } else { "" },
-        show = show_names,
+        tests = tests,
+        mark = TEST_MARK.escape_unicode(),
     )
 }
 
