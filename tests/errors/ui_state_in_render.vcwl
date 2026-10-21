@@ -1,0 +1,8 @@
+// error: cannot assign to `n` while rendering
+app "T"
+
+component App {
+    state n: Int = 0
+    text("{n}")
+    n += 1
+}

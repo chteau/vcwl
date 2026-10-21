@@ -1,0 +1,9 @@
+// error: unknown style property
+app "T"
+
+component App {
+    style {
+        colr: #fff
+    }
+    text("x")
+}

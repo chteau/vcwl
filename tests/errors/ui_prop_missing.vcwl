@@ -1,0 +1,10 @@
+// error: missing
+app "T"
+
+component Child(n: Int) {
+    text("{n}")
+}
+
+component App {
+    Child()
+}

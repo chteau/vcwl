@@ -1,0 +1,15 @@
+// error: event
+app "T"
+
+component Child {
+    event done(Int)
+    text("c")
+}
+
+component App {
+    Child() {
+        on finished(x) {
+            print("{x}")
+        }
+    }
+}

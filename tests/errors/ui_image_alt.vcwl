@@ -1,0 +1,6 @@
+// error: requires an `alt` argument
+app "T"
+
+component App {
+    image(src: "a.png")
+}

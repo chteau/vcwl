@@ -1,0 +1,7 @@
+// error: level
+app "T"
+
+component App {
+    let l = 2
+    heading("x", level: l)
+}

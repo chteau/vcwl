@@ -1,0 +1,10 @@
+// error: invalid host
+app "T" {
+    capabilities {
+        network: allow("http://evil.example/path")
+    }
+}
+
+component App {
+    text("x")
+}

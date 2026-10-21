@@ -1,0 +1,7 @@
+// error: label
+app "T"
+
+component App {
+    state name: String = ""
+    input(value: name)
+}

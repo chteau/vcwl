@@ -773,7 +773,7 @@ impl Checker<'_> {
                     "label" => " (an accessible name is required)",
                     _ => "",
                 };
-                return Err(Diag::ty(el.name.span, format!("`{name}` requires a `{r}` argument{why}")));
+                return Err(Diag::ty(el.name.span, format!("`{name}` requires {} `{r}` argument{why}", if r.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" })));
             }
         }
         if name == "heading" {

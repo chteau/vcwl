@@ -1,0 +1,14 @@
+// error: event
+app "T"
+
+component Child {
+    button("go") {
+        on click {
+            emit missing(1)
+        }
+    }
+}
+
+component App {
+    Child()
+}

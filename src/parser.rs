@@ -942,6 +942,10 @@ impl<'a> Parser<'a> {
             Diag::syntax(d.span, format!("expected a view item, found {}", self.describe()))
                 .help("component bodies contain `state`, `let`, elements like `text(...)`, `if`, `for`, `on` and `style`")
         })?;
+        if ["=", "+=", "-=", "*=", "/="].iter().any(|op| self.is(op)) && !self.token().nl {
+            return Err(Diag::syntax(self.token().span, format!("cannot assign to `{}` while rendering", name.name))
+                .help("views must not change state; assign inside an event handler such as `on click { ... }`"));
+        }
         let mut args = Vec::new();
         if self.is("(") && !self.token().nl {
             self.bump();

@@ -1,0 +1,6 @@
+// error: App
+app "T"
+
+component App(n: Int) {
+    text("{n}")
+}

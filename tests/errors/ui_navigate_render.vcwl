@@ -1,0 +1,11 @@
+// error: navigate
+app "T"
+
+fn go() -> Int {
+    navigate("/x")
+    1
+}
+
+component App {
+    text("{go()}")
+}
