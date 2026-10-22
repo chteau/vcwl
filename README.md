@@ -112,6 +112,7 @@ render/         the renderer (Rust → render.wasm): element tree, styles, layou
 runtime/        browser/Node host (vcwl.js), boot and dev-reload scripts
 examples/todo/  routed todo app with components, forms and tests
 examples/tokenforge/  remake of the tokenforge website (fetch, charts, docs pages)
+site/           the project's (satirical) GitHub Pages site, in VCWL; .github/workflows/pages.yml
 tests/          compiler tests (Rust), CLI tests, browser tests (puppeteer)
 bench/          keyed-list benchmark against hand-written DOM code
 docs/           reference, architecture, ADRs

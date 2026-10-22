@@ -19,6 +19,8 @@ All notable changes. The project has no release yet; entries are grouped by mile
 - `extern fn` calls JavaScript (sync, or async with `fetch`); `js` in vcwl.toml names the app's
   module; `import "@web"` covers URL, history, popups and postMessage (OAuth), storage and
   cookies, Intl, Web Crypto and device APIs.
+- `site/`: the project's GitHub Pages site, written in VCWL (satire, with a section of real
+  facts), and a Pages workflow that builds it.
 
 ### Milestone 15 — the rest of the 3D
 

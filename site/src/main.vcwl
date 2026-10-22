@@ -1,0 +1,417 @@
+// vcwl's GitHub Pages site. Every word of marketing on it is satire; the "Honestly" section is not.
+app "VCWL — revolutionizing web development (no)" {
+    capabilities {
+        storage: none
+    }
+}
+
+import "@web"
+import "./theme.vcwl"
+
+struct Quote {
+    who: String,
+    role: String,
+    text: String,
+}
+
+struct Plan {
+    name: String,
+    price: String,
+    perks: [String],
+    cta: String,
+}
+
+fn quotes() -> [Quote] {
+    [
+        Quote { who: "My mom", role: "Proud, confused", text: "He says it compiles. I said that's nice sweetie. I don't know what a compile is." },
+        Quote { who: "A guy on the 7:42 train", role: "Unsolicited", text: "Rewrote our checkout in VCWL during my commute. Now nobody can check out. Including the bugs." },
+        Quote { who: "Your linter", role: "Exhausted", text: "warning[unused-fn]: function `career` is never used." },
+        Quote { who: "Senior Staff Principal Distinguished Thought Leader", role: "LinkedIn", text: "Agree? 🙏 VCWL taught me more about leadership than my three divorces. Repost if you're hiring." },
+        Quote { who: "The canvas renderer", role: "Drawing everything by hand", text: "You people have the DOM. You had the DOM. Why am I doing this." },
+        Quote { who: "A WebAssembly module", role: "Sandboxed", text: "Being memory safe at the bytecode level does not make your app secure. Please stop putting that on slides." },
+    ]
+}
+
+fn hot_takes() -> [String] {
+    [
+        "CSS was a mistake. So we reimplemented it. On a canvas. By hand. Checkmate.",
+        "Your framework has a virtual DOM. Ours has no DOM. That's 100% less DOM. Do the math.",
+        "Every web language eventually becomes a JavaScript wrapper. We got there in Milestone 16. Speedrun.",
+        "Type safety is when the compiler yells at you before your users do. We prefer both.",
+        "We put the package registry on a git branch because buying a domain felt like commitment.",
+        "Hydration is for plants. We prerender and pray.",
+        "npm has two million packages. We have five, and one of them is is-odd. Quality over quantity, bitch.",
+        "Server components? We have server functions. They're functions. On a server. Revolutionary.",
+        "Our build tool has zero config because we forgot to add config.",
+        "If it compiles it ships. If it doesn't compile, it ships anyway, as a vibe.",
+    ]
+}
+
+fn plans() -> [Plan] {
+    [
+        Plan { name: "Hobbyist", price: "$0", perks: ["The whole fucking language", "Five packages", "A changelog longer than your attention span"], cta: "Take it" },
+        Plan { name: "Startup", price: "$0, angrily", perks: ["Same as Hobbyist", "We look at you disapprovingly", "A pitch deck that says 'AI'"], cta: "Disrupt" },
+        Plan { name: "Enterprise", price: "Call us", perks: ["We will not pick up", "SSO (Sorry, Shit's Offline)", "A Gantt chart, for vibes"], cta: "Ring ring" },
+    ]
+}
+
+component App {
+    box {
+        style Page
+        link("Skip the bullshit", href: "#real") {
+            style {
+                position: fixed
+                left: -999px
+                top: 8px
+                z: 50
+                padding: 6px 10px
+                background: #111111
+                color: #f4ff3a
+                when focus {
+                    left: 8px
+                }
+            }
+        }
+        column(gap: 56px) {
+            style Wrap
+            Hero()
+            Ticker()
+            Problems()
+            VibeCheck()
+            Quotes()
+            Pricing()
+            Honest()
+            Foot()
+        }
+    }
+}
+
+component Hero {
+    state adopted: Int = 0
+
+    header {
+        grid(gap: 28px) {
+            style TwoCols
+            column(gap: 18px) {
+                span("Breaking: a programming language") {
+                    style Sticker
+                }
+                heading("VCWL is going to revolutionize web development.", level: 1) {
+                    style Shout
+                }
+                paragraph("The Vibe Coded Web Language compiles to WebAssembly, draws your website on a canvas like it's 1997 and Flash never died, and ships with a package manager nobody asked for. Thought leaders are calling it \"a language\".") {
+                    style {
+                        size: 19px
+                        font: Georgia, serif
+                    }
+                }
+                paragraph("(It will not revolutionize shit. It's a joke project. It does compile, though, which is frankly worse.)") {
+                    style Fine
+                    style {
+                        background: #ffffff
+                        padding: 8px 10px
+                        transform: rotate(1deg)
+                    }
+                }
+                row(gap: 14px, wrap: yes, align: center) {
+                    button("Adopt VCWL in production") {
+                        style Big
+                        on click {
+                            adopted += 1
+                            if adopted == 1 {
+                                alert("Bold move. Your CTO has been notified. They are crying.")
+                            } else {
+                                alert("You've adopted it {adopted} times. That's not how adoption works. Please seek help.")
+                            }
+                        }
+                    }
+                    link("Wait, is any of this real?", href: "#real") {
+                        style {
+                            color: #111111
+                            decoration: underline
+                            weight: 900
+                        }
+                    }
+                }
+            }
+            column(gap: 10px) {
+                scene(label: "The Vibe Core: a pink torus orbiting a slowly spinning black box", camera: vec3(0.0, 1.2, 5.5), orbit: true, shadows: true, background: "#ff2e88") {
+                    style {
+                        height: 380px
+                        sketch: 3px #111111
+                        radius: 28px
+                        corner: squircle
+                    }
+                    light(kind: "ambient", intensity: 0.45)
+                    light(position: vec3(3.0, 5.0, 4.0))
+                    group(spin: vec3(0.0, 40.0, 0.0)) {
+                        mesh(shape: "box", label: "The compiler (it's a box)", size: vec3(0.8, 0.8, 0.8), rotation: vec3(20.0, 30.0, 0.0), color: "#111111")
+                        group(spin: vec3(90.0, 0.0, 30.0)) {
+                            mesh(shape: "torus", label: "The vibes", position: vec3(0.0, 0.0, 0.0), size: vec3(2.6, 2.6, 2.6), color: "#f4ff3a")
+                        }
+                    }
+                    mesh(shape: "plane", label: "The floor (load-bearing)", position: vec3(0.0, -1.6, 0.0), size: vec3(5.0, 1.0, 5.0), color: "#f4ff3a")
+                }
+                paragraph("Fig. 1: The Vibe Core™. Drag it. It's WebGL. We made a 3D engine for a joke. We need help.") {
+                    style Fine
+                }
+            }
+        }
+    }
+}
+
+component Ticker {
+    row(gap: 28px, wrap: yes, justify: center) {
+        style Ink
+        style {
+            size: 15px
+            case: upper
+            letter-spacing: 1px
+            transform: rotate(-1deg)
+        }
+        span("★ zero dependencies (we wrote them all, badly)")
+        span("★ blazingly something")
+        span("★ 0 GitHub stars")
+        span("★ 100% vibe coded")
+        span("★ no DOM was harmed")
+    }
+}
+
+component Problems {
+    section(label: "Problems") {
+        grid(gap: 20px) {
+            style TwoCols
+            article {
+                style Panel
+                style Reveal
+                column(gap: 10px) {
+                    heading("Problems VCWL solves", level: 2)
+                    list {
+                        style {
+                            padding: 0 0 0 20px
+                            font: Georgia, serif
+                        }
+                        item("Having too much free time")
+                        item("Not knowing what a WasmGC struct is")
+                        item("Your website being selectable, searchable and cheap to render")
+                        item("The crushing silence of an empty changelog")
+                    }
+                }
+            }
+            article {
+                style Pink
+                style Reveal
+                column(gap: 10px) {
+                    heading("Problems VCWL causes", level: 2)
+                    list {
+                        style {
+                            padding: 0 0 0 20px
+                            font: Georgia, serif
+                        }
+                        item("All of the above, but in production")
+                        item("Explaining to your manager why the text is drawn with a canvas")
+                        item("An irrational urge to put grain on everything")
+                        item("Arguments about whether `|>` is a language feature or a lifestyle")
+                    }
+                }
+            }
+        }
+    }
+}
+
+component VibeCheck {
+    state take: String = "Press the button. Receive wisdom. Regret nothing."
+    state score: Int = -1
+    state checks: Int = 0
+
+    let verdict = if score < 0 {
+        "unmeasured"
+    } else if score < 20 {
+        "catastrophic (have you tried a rewrite?)"
+    } else if score < 60 {
+        "mid. very mid."
+    } else if score < 95 {
+        "immaculate"
+    } else {
+        "illegal in 14 countries"
+    }
+
+    section(label: "Vibe check") {
+        article {
+            style Panel
+            style Reveal
+            column(gap: 16px) {
+                span("Interactive! Written in VCWL!") {
+                    style Sticker
+                }
+                heading("The Hot Take Generator™", level: 2) {
+                    style {
+                        size: 36px
+                    }
+                }
+                paragraph("\"{take}\"") {
+                    style {
+                        size: 22px
+                        font: Georgia, serif
+                        italic: yes
+                    }
+                }
+                row(gap: 14px, wrap: yes, align: center) {
+                    button("Generate hot take") {
+                        style Big
+                        on click {
+                            let all = hot_takes()
+                            take = all.get(random_int(0, all.len() - 1)).unwrap_or("Error: take too hot")
+                            score = random_int(0, 100)
+                            checks += 1
+                        }
+                    }
+                    strong("Vibe score: {if score < 0 { 0 } else { score }}/100, {verdict}")
+                }
+                paragraph(if checks > 4 { "You've generated {checks} takes. That's enough to start a newsletter. Please don't." } else { "Randomness courtesy of crypto.getRandomValues, called through `@web`, because we're nothing if not secure about our jokes." }) {
+                    style Fine
+                }
+            }
+        }
+    }
+}
+
+component Quotes {
+    section(label: "Testimonials") {
+        column(gap: 18px) {
+            heading("What people are saying", level: 2) {
+                style Shout
+                style {
+                    size: 44px
+                }
+            }
+            paragraph("All testimonials are made up. That's what makes them authentic in this industry.") {
+                style Fine
+            }
+            grid(gap: 18px) {
+                style ThreeCols
+                for q in quotes() key q.who {
+                    article {
+                        style Panel
+                        style Reveal
+                        column(gap: 10px) {
+                            paragraph("“{q.text}”") {
+                                style {
+                                    font: Georgia, serif
+                                    size: 17px
+                                }
+                            }
+                            strong(q.who)
+                            span(q.role) {
+                                style Fine
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component Pricing {
+    state chosen: String = ""
+
+    section(label: "Pricing") {
+        column(gap: 18px) {
+            heading("Pricing", level: 2) {
+                style Shout
+                style {
+                    size: 44px
+                }
+            }
+            grid(gap: 18px) {
+                style ThreeCols
+                for p in plans() key p.name {
+                    article {
+                        style Ink
+                        style Reveal
+                        column(gap: 12px) {
+                            heading(p.name, level: 3)
+                            strong(p.price) {
+                                style {
+                                    size: 34px
+                                    color: #ff2e88
+                                }
+                            }
+                            list {
+                                style {
+                                    padding: 0 0 0 18px
+                                    color: #ffffff
+                                    font: Georgia, serif
+                                }
+                                for perk in p.perks key perk {
+                                    item(perk)
+                                }
+                            }
+                            button(p.cta) {
+                                style Big
+                                on click {
+                                    chosen = p.name
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if chosen != "" {
+                paragraph("Congratulations on choosing {chosen}. Your invoice for $0.00 is on its way. Late fees apply (also $0.00).") {
+                    style Pink
+                }
+            }
+        }
+    }
+}
+
+component Honest {
+    section(id: "real", label: "Honestly") {
+        article {
+            style Panel
+            style {
+                background: #ffffff
+            }
+            column(gap: 12px) {
+                span("Okay, for real for a second") {
+                    style Sticker
+                }
+                heading("What VCWL actually is", level: 2)
+                paragraph("An experimental language and compiler written in Rust, built for fun. Everything below exists and has tests; nothing here is a claim that it's fast, safe or a good idea.") {
+                    style Fine
+                }
+                list {
+                    style {
+                        padding: 0 0 0 20px
+                        font: Georgia, serif
+                    }
+                    item("Statically typed source compiled to WasmGC; components, state and styles checked at compile time.")
+                    item("A Rust renderer (also WebAssembly) that lays out and paints on a canvas, with an accessibility tree mirrored into the page.")
+                    item("Server functions, fetch, routing, prerendering, fonts, 3D scenes with glTF models.")
+                    item("A package manager whose registry is a git branch, with a security review before install.")
+                    item("A linter, a language server, VS Code and Zed extensions.")
+                    item("`extern fn` and `@web` for calling JavaScript and the browser's Web APIs.")
+                }
+                paragraph("Performance: we have benchmarks in bench/, with their methods and limits. This page cites none of them, because this page is a bit.") {
+                    style Fine
+                }
+                paragraph("WebAssembly sandboxes the module. It does not make an application secure; your bugs are still your bugs, just compiled.") {
+                    style Fine
+                }
+            }
+        }
+    }
+}
+
+component Foot {
+    footer {
+        column(gap: 6px) {
+            style Fine
+            text("This entire page is written in VCWL and drawn on a canvas. Yes, even this sentence. Select it. We dare you. (You can, it's mirrored. Ugh, fine.)")
+            text("Satire. VCWL is not affiliated with anyone sensible. No frameworks were killed; they're fine, they're thriving, leave them alone.")
+            text("© whenever. All vibes reserved.")
+        }
+    }
+}

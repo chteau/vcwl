@@ -1,0 +1,126 @@
+// Late-night infomercial meets photocopied zine: acid yellow, hot pink, ink, grain, wobbly lines.
+
+export style Page {
+    background: #f4ff3a
+    color: #111111
+    min-height: 100vh
+    font: "Arial Black", "Helvetica Neue", Arial, sans-serif
+    size: 16px
+    line-height: 1.45
+    grain: 0.35
+}
+
+export style Wrap {
+    max-width: 1100px
+    margin: 0 auto
+    padding: 32px 24px 48px
+    when viewport < 700px {
+        padding: 20px 16px 32px
+    }
+}
+
+export style Shout {
+    margin: 0
+    size: 64px
+    weight: 900
+    line-height: 1.0
+    letter-spacing: -2px
+    case: upper
+    when viewport < 700px {
+        size: 38px
+        letter-spacing: -1px
+    }
+}
+
+export style Panel {
+    padding: 22px 24px
+    background: #ffffff
+    sketch: 3px #111111
+    radius: 22px
+    corner: squircle
+}
+
+export style Pink {
+    padding: 22px 24px
+    background: #ff2e88
+    color: #ffffff
+    sketch: 3px #111111
+    radius: 18px
+    corner: scoop
+}
+
+export style Ink {
+    padding: 22px 24px
+    background: #111111
+    color: #f4ff3a
+    radius: 16px
+    corner: cut
+    grain: 0.5
+}
+
+export style Sticker {
+    padding: 6px 12px
+    background: #111111
+    color: #f4ff3a
+    size: 13px
+    case: upper
+    letter-spacing: 1px
+    radius: 999px
+    transform: rotate(-4deg)
+    align-self: start
+}
+
+export style Fine {
+    size: 13px
+    line-height: 1.5
+    font: Georgia, "Times New Roman", serif
+}
+
+export style Big {
+    padding: 14px 22px
+    background: #ff2e88
+    color: #ffffff
+    size: 18px
+    weight: 900
+    case: upper
+    sketch: 3px #111111
+    radius: 14px
+    corner: squircle
+    cursor: pointer
+    transition: transform 500ms spring
+    when hover {
+        transform: rotate(-3deg) scale(1.08)
+    }
+    when active {
+        transform: scale(0.94)
+    }
+    when focus {
+        background: #111111
+    }
+}
+
+export style Reveal {
+    transition: opacity 700ms ease-out, transform 700ms bounce
+    when appear {
+        opacity: 0
+        transform: translateY(40px) rotate(2deg)
+    }
+}
+
+export style TwoCols {
+    display: grid
+    columns: 1fr 1fr
+    gap: 20px
+    when viewport < 760px {
+        columns: 1fr
+    }
+}
+
+export style ThreeCols {
+    display: grid
+    columns: 1fr 1fr 1fr
+    gap: 18px
+    when viewport < 860px {
+        columns: 1fr
+    }
+}

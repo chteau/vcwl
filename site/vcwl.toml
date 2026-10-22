@@ -1,0 +1,7 @@
+# The project's GitHub Pages site, written in VCWL. Satire; see the footer.
+name = "vcwl-site"
+entry = "src/main.vcwl"
+out = "dist"
+prerender = true
+description = "VCWL: the Vibe Coded Web Language. It will revolutionize web development. (It will not.)"
+theme_color = "#f4ff3a"
