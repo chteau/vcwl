@@ -55,7 +55,10 @@ The [website](https://vcwl.chteau.bzh/) is itself written in VCWL, docs included
 
 ## Install
 
-On Windows, `irm https://vcwl.chteau.bzh/install.ps1 | iex` in PowerShell installs it and puts it on your PATH.
+```sh
+curl -fsSL https://vcwl.chteau.bzh/install.sh | sh     # Linux, macOS
+irm https://vcwl.chteau.bzh/install.ps1 | iex           # Windows (PowerShell)
+```
 
 Grab a binary from the [latest release](https://github.com/chteau/vcwl/releases/latest)
 (Linux x86_64, macOS Apple silicon and Intel, Windows x64), or build it:

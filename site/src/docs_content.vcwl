@@ -19,8 +19,8 @@ export fn doc_pages() -> [DocPage] {
     [
         DocPage { slug: "install", group: "Start", title: "Install", blurb: "Get the compiler onto your machine. Point of no return.", blocks: [
                 Block { n: 0, kind: "h", lang: "", text: "Download a release" },
-                Block { n: 1, kind: "p", lang: "", text: "Prebuilt binaries for Linux (x86_64), macOS (Apple silicon and Intel) and Windows (x64) are attached to each GitHub release. Unpack, put `vcwl` on your PATH, done." },
-                Block { n: 2, kind: "code", lang: "sh", text: "# Linux x86_64. macOS: aarch64-apple-darwin (Apple silicon) or x86_64-apple-darwin (Intel)\ncurl -LO https://github.com/chteau/vcwl/releases/latest/download/vcwl-x86_64-unknown-linux-gnu.tar.gz\ntar xzf vcwl-x86_64-unknown-linux-gnu.tar.gz\nsudo mv vcwl /usr/local/bin/\nvcwl --version" },
+                Block { n: 1, kind: "p", lang: "", text: "Prebuilt binaries for Linux (x86_64), macOS (Apple silicon and Intel) and Windows (x64) are attached to each GitHub release. On Linux and macOS, this installs the right one to ~/.local/bin (set VCWL_INSTALL to pick another folder):" },
+                Block { n: 2, kind: "code", lang: "sh", text: "curl -fsSL https://vcwl.chteau.bzh/install.sh | sh" },
                 Block { n: 3, kind: "p", lang: "", text: "On Windows, in PowerShell (installs to %LOCALAPPDATA%\\vcwl\\bin and adds it to your PATH):" },
                 Block { n: 4, kind: "code", lang: "sh", text: "irm https://vcwl.chteau.bzh/install.ps1 | iex" },
                 Block { n: 5, kind: "note", lang: "", text: "The binaries are not signed. A macOS archive downloaded with a browser needs `xattr -d com.apple.quarantine vcwl` before the first run, and Windows SmartScreen may want a second click. We are not paying Apple $99 a year for a joke." },
