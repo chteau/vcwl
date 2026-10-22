@@ -1,0 +1,169 @@
+// `@web`: the browser's Web APIs (MDN: Location, URLSearchParams, History, Window.open and
+// postMessage, Web Storage, document.cookie, Intl, Web Crypto, Clipboard, Notifications,
+// Geolocation, Web Share, Fullscreen, Vibration, Speech Synthesis, Navigator, matchMedia and
+// the window dialogs) as VCWL functions. Implemented by runtime/web.js.
+//
+// Functions marked "async" return a Promise in JavaScript: call them from an event handler
+// with `fetch name(args) { Ok(v) => ... Err(e) => ... }`. The others are ordinary calls.
+// Anything not here: declare your own `extern fn` and implement it in the file named by `js`
+// in vcwl.toml.
+
+export struct Param {
+    name: String,
+    value: String,
+}
+
+export struct Position {
+    latitude: Float,
+    longitude: Float,
+    accuracy: Float,
+}
+
+// ----- URL, history, navigation -----
+
+/// The page's full URL (`location.href`).
+export extern fn location() -> String
+/// The page's origin, e.g. "https://example.com".
+export extern fn origin() -> String
+/// The path part of the URL (`location.pathname`).
+export extern fn pathname() -> String
+/// The fragment without `#`.
+export extern fn url_hash() -> String
+/// A parameter of the query string, or of the fragment (`#access_token=...` in OAuth
+/// implicit flows) when the query does not have it.
+export extern fn url_param(name: String) -> String?
+/// Every parameter of the query string, then of the fragment.
+export extern fn url_params() -> [Param]
+/// Replaces the URL without reloading (`history.replaceState`), e.g. to drop `?code=`.
+export extern fn replace_url(url: String)
+/// Adds a history entry without reloading (`history.pushState`).
+export extern fn push_url(url: String)
+/// Goes back one history entry.
+export extern fn history_back()
+/// Leaves the page for `url` (`location.assign`), e.g. an OAuth provider's authorize page.
+export extern fn redirect(url: String)
+/// Reloads the page.
+export extern fn reload()
+/// `encodeURIComponent`.
+export extern fn encode_uri(s: String) -> String
+/// `decodeURIComponent` (`None` for malformed input).
+export extern fn decode_uri(s: String) -> String?
+/// `url` with the query parameters added (`URLSearchParams`).
+export extern fn with_params(url: String, params: [Param]) -> String
+
+// ----- windows and messages -----
+
+/// Opens a window or popup (`window.open`); `features` like "popup,width=500,height=600".
+/// Returns false when the browser blocked it.
+export extern fn open_window(url: String, name: String, features: String) -> Bool
+/// async: opens a popup on `url` and resolves with the popup's URL once it comes back to this
+/// site's origin (the OAuth redirect), closing it. Fails if it is closed first.
+export extern fn popup_redirect(url: String, features: String) -> String
+/// async: resolves with the next `postMessage` data from `origin` ("*" for any), as text
+/// (JSON for non-string data).
+export extern fn next_message(origin: String) -> String
+/// Sends `message` to the window that opened this one (`window.opener.postMessage`).
+/// Returns false without an opener.
+export extern fn post_to_opener(message: String, target_origin: String) -> Bool
+/// Closes this window (only windows opened by script).
+export extern fn close_window()
+/// Whether this page was opened by another window.
+export extern fn has_opener() -> Bool
+
+// ----- storage (needs the app's `storage` capability) -----
+
+export extern fn local_get(key: String) -> String?
+export extern fn local_set(key: String, value: String)
+export extern fn local_remove(key: String)
+export extern fn session_get(key: String) -> String?
+export extern fn session_set(key: String, value: String)
+export extern fn session_remove(key: String)
+/// A cookie of this page, or `None`.
+export extern fn cookie_get(name: String) -> String?
+/// Sets a cookie for this site's root path, lasting `max_age` seconds (SameSite=Lax).
+export extern fn cookie_set(name: String, value: String, max_age: Int)
+
+// ----- time, dates, numbers (Intl) -----
+
+/// Milliseconds since 1970 (`Date.now()`).
+export extern fn epoch_ms() -> Float
+/// The current time as ISO 8601 text.
+export extern fn now_iso() -> String
+/// The user's time zone, e.g. "Europe/Paris".
+export extern fn time_zone() -> String
+/// `ms` since 1970 as a date in `locale` ("" for the user's), with Intl `dateStyle` and
+/// `timeStyle` ("full", "long", "medium", "short" or "" to leave out).
+export extern fn format_date(ms: Float, locale: String, date_style: String, time_style: String) -> String
+/// A number formatted for `locale` with at most `digits` fraction digits.
+export extern fn format_number(n: Float, locale: String, digits: Int) -> String
+/// An amount of money, e.g. `format_currency(9.5, "EUR", "fr-FR")` is "9,50 €".
+export extern fn format_currency(amount: Float, currency: String, locale: String) -> String
+/// "in 3 days", "5 minutes ago": `amount` of `unit` ("second" ... "year") relative to now.
+export extern fn relative_time(amount: Int, unit: String, locale: String) -> String
+/// Items joined for `locale`: "a, b and c".
+export extern fn format_list(items: [String], locale: String) -> String
+/// async: resolves after `ms` milliseconds.
+export extern fn sleep(ms: Int)
+
+// ----- randomness, hashing, encoding (Web Crypto) -----
+
+/// A random number in [0, 1) from the cryptographic generator.
+export extern fn random() -> Float
+/// A random Int in [low, high].
+export extern fn random_int(low: Int, high: Int) -> Int
+/// A random UUID (v4).
+export extern fn uuid() -> String
+/// `bytes` random bytes as base64url text, e.g. an OAuth `state` or PKCE verifier.
+export extern fn random_token(bytes: Int) -> String
+/// async: the SHA-256 of `text` as base64url, e.g. a PKCE `code_challenge`.
+export extern fn sha256_base64url(text: String) -> String
+/// async: the SHA-256 of `text` as lowercase hex.
+export extern fn sha256_hex(text: String) -> String
+/// UTF-8 `text` as base64.
+export extern fn base64_encode(text: String) -> String
+/// base64 back to text (`None` when invalid).
+export extern fn base64_decode(text: String) -> String?
+/// Decodes the payload (middle part) of a JSON Web Token as JSON text, without verifying it.
+export extern fn jwt_payload(token: String) -> String?
+
+// ----- the page and the device -----
+
+export extern fn title() -> String
+export extern fn set_title(title: String)
+export extern fn user_agent() -> String
+/// The user's preferred language, e.g. "fr-FR".
+export extern fn language() -> String
+export extern fn languages() -> [String]
+export extern fn online() -> Bool
+/// Whether a CSS media query matches (`matchMedia`), e.g. "(prefers-color-scheme: dark)".
+export extern fn media_matches(query: String) -> Bool
+export extern fn viewport_width() -> Int
+export extern fn viewport_height() -> Int
+export extern fn device_pixel_ratio() -> Float
+/// Vibrates for `ms` (where supported); returns whether it did.
+export extern fn vibrate(ms: Int) -> Bool
+/// Reads `text` aloud (Speech Synthesis).
+export extern fn speak(text: String, locale: String)
+/// Saves `text` as a file named `filename` (a download).
+export extern fn download(filename: String, text: String, mime: String)
+export extern fn console_log(message: String)
+export extern fn console_warn(message: String)
+export extern fn console_error(message: String)
+/// The browser's blocking dialogs.
+export extern fn alert(message: String)
+export extern fn confirm(message: String) -> Bool
+export extern fn prompt(message: String, default: String) -> String?
+/// async: the clipboard's text (asks for permission).
+export extern fn read_clipboard() -> String
+/// async: the system share sheet (`navigator.share`); fails when unavailable or dismissed.
+export extern fn share(title: String, text: String, url: String)
+/// async: shows a notification, asking for permission first; resolves with whether it was shown.
+export extern fn notify(title: String, body: String) -> Bool
+/// async: the device's position (asks for permission).
+export extern fn geolocation() -> Position
+/// async: makes the page fullscreen.
+export extern fn fullscreen()
+/// async: leaves fullscreen.
+export extern fn exit_fullscreen()
+/// async: the battery level from 0 to 1 (Chromium browsers only).
+export extern fn battery_level() -> Float

@@ -24,6 +24,8 @@ pub struct FnSig {
     pub item: usize,
     /// `server fn`.
     pub server: bool,
+    /// `extern fn` (JavaScript).
+    pub ext: bool,
 }
 
 /// Where a body is being checked; controls which effects are allowed.
@@ -101,6 +103,8 @@ const INTRINSICS: &[(&str, &[&str], &str)] = &[
     ("__store_get", &["String"], "Int"),
     ("__store_set", &["Int", "String"], "()"),
     ("__store_delete", &["String"], "()"),
+    ("__js_call", &["Int", "String"], "Int"),
+    ("__json_drop", &["Int"], "()"),
 ];
 
 impl<'a> Checker<'a> {
@@ -165,6 +169,7 @@ impl<'a> Checker<'a> {
                             file: fi,
                             item: ii,
                             server: f.server,
+                            ext: f.ext,
                         });
                         self.fns.push(None);
                         (Sym::Fn(self.sigs.len() - 1), &f.name, f.exported)
@@ -323,6 +328,39 @@ impl<'a> Checker<'a> {
             params.push(self.bind(&p.name.name, ty, false));
         }
         let ret = self.ret.clone();
+        if f.ext {
+            // The arguments go to the JavaScript function as JSON; its result comes back the same way.
+            let args = params
+                .iter()
+                .map(|&l| TExpr {
+                    kind: TK::Local(l),
+                    ty: self.locals[l].ty.clone(),
+                    span: f.span,
+                })
+                .collect();
+            let json = self.server_args(args, f.span)?;
+            let wrapper = self.extern_call_fn(&ret, f.span)?;
+            let name = TExpr {
+                kind: TK::Str(f.name.name.clone()),
+                ty: Type::Str,
+                span: f.span,
+            };
+            let body = TExpr {
+                kind: TK::Call(wrapper, vec![], vec![name, json]),
+                ty: ret.clone(),
+                span: f.span,
+            };
+            let body = self.finish_body(body)?;
+            return Ok(TFn {
+                name: f.name.name.clone(),
+                generics: Vec::new(),
+                params,
+                locals: std::mem::take(&mut self.locals),
+                ret,
+                body,
+                exported: f.exported,
+            });
+        }
         let body = self.check_block(&f.body, Some(&ret))?;
         if ret != Type::Unit {
             self.coerce(
@@ -1820,6 +1858,14 @@ impl<'a> Checker<'a> {
             return Err(Diag::ty(n.span, "function arguments are positional"));
         }
         let name = &self.sigs[id].name;
+        if self.sigs[id].ext && self.server {
+            return Err(Diag::ty(
+                span,
+                format!(
+                    "`{name}` is a JavaScript function: it runs in the browser, not in server functions"
+                ),
+            ));
+        }
         let server_only = self.sigs[id].server
             || self.sigs[id].file == 0 && name.starts_with("server_") && self.file != 0;
         if server_only && !self.server {

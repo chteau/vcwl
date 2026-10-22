@@ -4,6 +4,22 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 16 — packages, editors, styles beyond CSS, JavaScript interop
+
+- `vcwl install/add/remove/publish/search`: a package manager whose registry is the `registry`
+  branch of a git repository (like Wally); `^ ~ = *` requirements, `vcwl.lock`,
+  `vcwl_packages/`. Sample packages: is-even, is-odd, left-pad, strings-plus, vibes.
+- Registry packages are reviewed before installation (`vcwl audit`); dangerous findings block
+  until the app trusts the exact version in `[trust]`.
+- `vcwl lint` (unused functions, components, state and bindings; placeholder text; deep views)
+  and `vcwl lsp` (diagnostics, formatting, completion); a tree-sitter grammar, a VS Code and a
+  Zed extension.
+- Styles CSS lacks: `corner` shapes (squircle, cut, scoop), `grain`, `sketch` borders, `spring`
+  and `bounce` easing.
+- `extern fn` calls JavaScript (sync, or async with `fetch`); `js` in vcwl.toml names the app's
+  module; `import "@web"` covers URL, history, popups and postMessage (OAuth), storage and
+  cookies, Intl, Web Crypto and device APIs.
+
 ### Milestone 15 — the rest of the 3D
 
 - Point lights cast shadows (a cube map of distances), like directional lights.

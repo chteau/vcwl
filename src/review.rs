@@ -91,6 +91,7 @@ pub fn review(name: &str, dir: &Path) -> Vec<Finding> {
         false,
         Vec::new(),
     );
+    let mut externs = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&d) else {
@@ -167,6 +168,9 @@ pub fn review(name: &str, dir: &Path) -> Vec<Finding> {
             let punct = |i: usize, p: &str| matches!(toks.get(i).map(|t| &t.tok), Some(Tok::Punct(q)) if *q == p);
             for i in 0..toks.len() {
                 match ident(i) {
+                    Some("extern") if ident(i + 1) == Some("fn") => {
+                        externs.push(ident(i + 2).unwrap_or("?").to_string());
+                    }
                     Some("server") if ident(i + 1) == Some("fn") => {
                         server.push(ident(i + 2).unwrap_or("?").to_string());
                     }
@@ -215,6 +219,15 @@ pub fn review(name: &str, dir: &Path) -> Vec<Finding> {
             format!(
                 "runs code on your server: server functions {}",
                 list(&mut server)
+            ),
+        );
+    }
+    if !externs.is_empty() {
+        add(
+            Level::Notice,
+            format!(
+                "declares JavaScript functions, which run with the page's full privileges if your app's JavaScript provides them: {}",
+                list(&mut externs)
             ),
         );
     }

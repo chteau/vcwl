@@ -501,3 +501,52 @@ component Viewer {
   `intensity`. A scene without lights gets an ambient and a directional light.
 - Arguments can be bound to state; changing it redraws the scene. Spinning and model animations
   stop when the user prefers reduced motion. Prerendered HTML shows an empty box where the scene will be.
+
+### JavaScript interop
+
+An `extern fn` has no body: it is implemented in JavaScript. Its parameters and result must be
+types that serialize (like server function arguments); they cross the boundary as JSON.
+
+```vcwl
+extern fn shout(text: String) -> String
+extern fn wait_for(ms: Int) -> Bool
+```
+
+- An ordinary call (`shout("hi")`) is synchronous: the JavaScript function must return its
+  result directly.
+- A function returning a Promise is called from an event handler with `fetch`, like a server
+  function: `fetch wait_for(500) { Ok(b) => ... Err(e) => ... }`. A rejection reaches `Err` with
+  its message.
+- Extern functions run in the browser: calling one from a `server fn` is an error.
+
+The app names its module in `vcwl.toml` with `js = "src/interop.js"`. It is copied to `dist`
+and loaded before the app starts; its default export (an object) and its named exports are
+the implementations, by name. `this` is `{ caps }`, the app's capabilities.
+
+#### `@web`
+
+`import "@web"` brings about 75 extern functions over the browser's Web APIs (the list with
+their documentation is `runtime/web.vcwl`):
+
+- URL and history: `location`, `origin`, `pathname`, `url_hash`, `url_param` (query, then
+  fragment), `url_params`, `replace_url`, `push_url`, `history_back`, `redirect`, `reload`,
+  `encode_uri`, `decode_uri`, `with_params`.
+- Windows and messages: `open_window`, `popup_redirect` (async: resolves with the popup's URL
+  once it returns to this origin, for OAuth), `next_message` (async, `postMessage`),
+  `post_to_opener`, `close_window`, `has_opener`.
+- Storage, checked against the `storage` capability (`local` allows both stores and cookies,
+  `session` only sessionStorage): `local_get/set/remove`, `session_get/set/remove`,
+  `cookie_get/set`.
+- Time and Intl: `epoch_ms`, `now_iso`, `time_zone`, `format_date`, `format_number`,
+  `format_currency`, `relative_time`, `format_list`, `sleep` (async).
+- Web Crypto and encoding: `random`, `random_int`, `uuid`, `random_token`, `sha256_base64url`
+  and `sha256_hex` (async), `base64_encode/decode`, `jwt_payload` (decoded, not verified).
+- Page and device: `title`, `set_title`, `user_agent`, `language(s)`, `online`, `media_matches`,
+  viewport size, `device_pixel_ratio`, `vibrate`, `speak`, `download`, `console_*`, `alert`,
+  `confirm`, `prompt`, and async `read_clipboard`, `share`, `notify`, `geolocation`,
+  `fullscreen`, `exit_fullscreen`, `battery_level`.
+
+An OAuth PKCE sign-in, for instance: `random_token(32)` for the verifier, `fetch
+sha256_base64url(verifier)` for the challenge, `fetch popup_redirect(authorize_url, "")`, then
+read `code` from the returned URL. Anything missing from `@web`: declare an `extern fn` and
+implement it in the app's module.

@@ -75,6 +75,12 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 - Requires WebGL; without it the scene shows its placeholder. Assistive technology sees the
   scene's `label` and its clickable meshes' labels, nothing else of its content.
 
+## JavaScript interop
+
+- Values cross the boundary as JSON: no functions, DOM nodes, binary data or callbacks; events
+  from JavaScript come back only as Promise results (`fetch`).
+- Sync calls block the UI thread like any JavaScript call.
+
 ## Platform
 
 - Requires WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari 18.2+); there is no fallback.

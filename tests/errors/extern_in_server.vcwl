@@ -1,0 +1,9 @@
+// error: type error: `now_js` is a JavaScript function: it runs in the browser, not in server functions
+extern fn now_js() -> Float
+
+server fn stamp() -> Float {
+    now_js()
+}
+
+fn main() {
+}

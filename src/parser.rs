@@ -243,6 +243,34 @@ impl<'a> Parser<'a> {
             let mut f = self.func(exported)?;
             f.server = true;
             Ok(Item::Fn(f))
+        } else if self.is_kw("extern") && matches!(self.peek_at(1), Tok::Ident(s) if s == "fn") {
+            // `extern fn name(params) -> Ret`: a JavaScript function, declared without a body.
+            let start = self.bump().span;
+            self.expect_kw("fn")?;
+            let name = self.ident()?;
+            self.expect("(")?;
+            let params = self.params(false)?;
+            let ret = if self.eat("->") {
+                Some(self.type_expr()?)
+            } else {
+                None
+            };
+            let span = start.to(self.prev_span());
+            Ok(Item::Fn(FnDecl {
+                name,
+                exported,
+                server: false,
+                ext: true,
+                generics: Vec::new(),
+                params,
+                ret,
+                body: Block {
+                    stmts: Vec::new(),
+                    tail: None,
+                    span,
+                },
+                span,
+            }))
         } else if self.is_kw("fn") {
             self.func(exported).map(Item::Fn)
         } else if self.eat_kw("struct") {
@@ -384,6 +412,7 @@ impl<'a> Parser<'a> {
             name,
             exported,
             server: false,
+            ext: false,
             generics,
             params,
             ret,
@@ -782,11 +811,8 @@ impl<'a> Parser<'a> {
         let save = self.pos;
         self.bump();
         let mut args = Vec::new();
-        loop {
-            match self.type_expr() {
-                Ok(t) => args.push(t),
-                Err(_) => break,
-            }
+        while let Ok(t) = self.type_expr() {
+            args.push(t);
             if !self.eat(",") {
                 break;
             }

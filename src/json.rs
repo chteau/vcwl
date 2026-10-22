@@ -25,6 +25,8 @@ pub enum Role {
     Load,
     /// The exported entry point of a server function (`server fn`).
     Entry,
+    /// Calls a JavaScript function (`extern fn`) and decodes its result.
+    Extern,
 }
 
 struct Gen {
@@ -152,6 +154,7 @@ impl Checker<'_> {
             file: 0,
             item: usize::MAX,
             server: false,
+            ext: false,
         });
         self.fns.push(None);
         let id = self.sigs.len() - 1;
@@ -694,6 +697,84 @@ impl Checker<'_> {
             opt,
         );
         self.finish_json_fn(id, g, vec![key], body);
+        Ok(id)
+    }
+
+    /// `(name: String, args: String) -> t`: calls JavaScript function `name` with the JSON array
+    /// `args` and decodes its result as `t`; a result of another shape panics.
+    pub fn extern_call_fn(&mut self, t: &Type, span: Span) -> Result<usize> {
+        let dec = if *t == Type::Unit {
+            None
+        } else {
+            Some(self.json_decoder(t, span)?)
+        };
+        if let Some(&id) = self.json_fns.get(&(Role::Extern, t.clone())) {
+            return Ok(id);
+        }
+        let id = self.new_json_fn(
+            (Role::Extern, t.clone()),
+            format!("extern<{}>", self.show(t)),
+            vec![Type::Str, Type::Str],
+            t.clone(),
+        );
+        let mut g = Gen {
+            locals: Vec::new(),
+            span,
+        };
+        let (name, args) = (g.local("name", Type::Str), g.local("args", Type::Str));
+        let h = g.local("h", Type::Int);
+        let handle = g.call(
+            self.pf("extern_call_handle"),
+            vec![g.get(name), g.get(args)],
+            Type::Int,
+        );
+        let drop = TStmt::Expr(g.intr("__json_drop", vec![], vec![g.get(h)], Type::Unit));
+        let body = match dec {
+            None => g.block(vec![TStmt::Let(h, handle), drop], g.e(TK::Unit, Type::Unit)),
+            Some(dec) => {
+                let (v, e) = (g.local("v", t.clone()), g.local("e", Type::Str));
+                let result = self.prelude_adt("Result");
+                let rty = self.result_ty(t.clone(), Type::Str);
+                let msg = self.concat(
+                    &g,
+                    vec![
+                        g.str("JavaScript function `"),
+                        g.get(name),
+                        g.str("` returned "),
+                        g.get(e),
+                    ],
+                );
+                let ok = g.block(vec![drop], g.get(v));
+                let decoded = g.e(
+                    TK::Match(
+                        Box::new(g.call(dec, vec![g.get(h)], rty)),
+                        vec![
+                            (
+                                TPat::Variant(
+                                    result,
+                                    vec![t.clone(), Type::Str],
+                                    0,
+                                    vec![TPat::Bind(v)],
+                                ),
+                                ok,
+                            ),
+                            (
+                                TPat::Variant(
+                                    result,
+                                    vec![t.clone(), Type::Str],
+                                    1,
+                                    vec![TPat::Bind(e)],
+                                ),
+                                g.intr("__panic", vec![], vec![msg], Type::Never),
+                            ),
+                        ],
+                    ),
+                    t.clone(),
+                );
+                g.block(vec![TStmt::Let(h, handle)], decoded)
+            }
+        };
+        self.finish_json_fn(id, g, vec![name, args], body);
         Ok(id)
     }
 

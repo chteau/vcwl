@@ -1,0 +1,81 @@
+// JavaScript interop: `@web` and the app's own module.
+app "Interop" {
+    capabilities {
+        storage: local
+    }
+}
+
+import "@web"
+
+struct Point {
+    x: Int,
+    label: String,
+}
+
+extern fn add_big(a: Int, b: Int) -> Int
+extern fn point(x: Int) -> Point
+extern fn slow_upper(s: String) -> String
+extern fn always_fails() -> String
+
+component App {
+    state hashed: String = ""
+    state upper: String = ""
+    state failed: String = ""
+    state stored: String = ""
+    state back: String = ""
+    let code = url_param("code").unwrap_or("-")
+    let st = url_param("state").unwrap_or("-")
+    let encoded = encode_uri("a b&c")
+
+    column(gap: 4px, padding: 8px) {
+        paragraph("code={code} state={st}")
+        paragraph("sum={add_big(40, 2)} point={point(7).label}")
+        paragraph("encoded={encoded} params={url_params().len()}")
+        paragraph("hashed={hashed}")
+        paragraph("upper={upper} failed={failed}")
+        paragraph("stored={stored}")
+        paragraph("back={back}")
+        button("Run") {
+            on click {
+                fetch sha256_base64url("abc") {
+                    Ok(h) => {
+                        hashed = h
+                    }
+                    Err(e) => {
+                        hashed = e.message()
+                    }
+                }
+                fetch slow_upper("vibes") {
+                    Ok(s) => {
+                        upper = s
+                    }
+                    Err(e) => {
+                        upper = e.message()
+                    }
+                }
+                fetch always_fails() {
+                    Ok(s) => {
+                        failed = s
+                    }
+                    Err(e) => {
+                        failed = e.message()
+                    }
+                }
+                local_set("k", "v1")
+                stored = local_get("k").unwrap_or("missing")
+            }
+        }
+        button("Sign in") {
+            on click {
+                fetch popup_redirect(with_params(origin() + "/callback.html", [Param { name: "code", value: "xyz" }]), "") {
+                    Ok(u) => {
+                        back = u
+                    }
+                    Err(e) => {
+                        back = e.message()
+                    }
+                }
+            }
+        }
+    }
+}

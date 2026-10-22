@@ -65,9 +65,32 @@ export function createHost(opts = {}) {
       return json.push(Object.hasOwn(obj, key) ? obj[key] : undefined) - 1;
     },
     json_num_text: (x) => host.writeIO(JSON.stringify(x)),
+    // `extern fn`: name and JSON arguments in the IO buffer; returns the handle of the result,
+    // or -1 minus the length of the error message.
+    js_call: (nameLen, len) => {
+      const text = host.readIO(len), name = text.slice(0, nameLen);
+      try {
+        const value = callJs(name, JSON.parse(text.slice(nameLen)));
+        if (value && typeof value.then === "function") throw new Error("it returned a Promise: call it with `fetch " + name + "(...) { ... }`");
+        // undefined becomes null, like JSON.
+        return json.push(value === undefined ? null : JSON.parse(JSON.stringify(value) ?? "null")) - 1;
+      } catch (e) {
+        return -1 - host.writeIO(String(e?.message ?? e));
+      }
+    },
+    json_drop: (h) => {
+      json.length = Math.min(json.length, h);
+    },
     json_quote: (len) => host.writeIO(JSON.stringify(host.readIO(len))),
   };
   const json = (host.json = []);
+  // Functions of the app's JavaScript modules (`js` in vcwl.toml, and `@web`'s).
+  const fns = opts.js ?? {};
+  const callJs = (host.callJs = (name, args) => {
+    const f = fns[name];
+    if (typeof f !== "function") throw new Error(`no JavaScript function \`${name}\` (export it from the module named by \`js\` in vcwl.toml)`);
+    return f.apply({ caps: opts.caps }, args);
+  });
   return host;
 }
 
@@ -762,6 +785,15 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
           json.length = 0;
         }
       });
+    if (raw.startsWith("js:")) {
+      // An `extern fn` awaited with `fetch`: rejection is an error with its message.
+      try {
+        const value = await host.callJs(raw.slice(3), JSON.parse(body));
+        return finish(FETCH_OK, 200, value === undefined ? null : JSON.parse(JSON.stringify(value) ?? "null"));
+      } catch (e) {
+        return finish(FETCH_NETWORK, 0, String(e?.message ?? e));
+      }
+    }
     const [url, refused] = allowedUrl(raw);
     if (refused) return finish(FETCH_NETWORK, 0, refused);
     const init = { method, headers: { accept: "application/json" }, signal: AbortSignal.timeout(opts.fetchTimeout ?? 30000) };
@@ -1282,7 +1314,12 @@ export async function boot(doc = document) {
     const config = WebAssembly.Module.customSections(app, "vcwl.config")[0];
     if (config) cfg = JSON.parse(decoder.decode(config));
     await loadFonts(doc, cfg.fonts ?? [], root);
-    host = await createCanvasHost(canvas, app, render, { onError: report, caps: cfg.caps, prerendered, routing: cfg.routing, root });
+    const js = {};
+    for (const mod of await Promise.all((cfg.js ?? []).map((f) => import(new URL(f, import.meta.url).href)))) {
+      Object.assign(js, mod.default && typeof mod.default === "object" ? mod.default : {});
+      for (const [k, v] of Object.entries(mod)) if (k !== "default") js[k] = v;
+    }
+    host = await createCanvasHost(canvas, app, render, { onError: report, caps: cfg.caps, prerendered, routing: cfg.routing, root, js });
   } catch (e) {
     const unsupported = typeof WebAssembly === "undefined" || e instanceof WebAssembly.CompileError;
     console.error(e);

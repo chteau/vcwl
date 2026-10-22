@@ -851,6 +851,21 @@ impl<'a> Lower<'a> {
                     IExpr::Call(f, vec![IExpr::Call(to, vec![take()])]),
                 )
             }
+            "__js_call" => {
+                let f = self
+                    .m
+                    .import("js_call", vec![VT::I32, VT::I32], Some(VT::I32));
+                let to = self.helper_str_to_mem();
+                let (name_len, text) = (take(), take());
+                un(
+                    UnOp::I64ExtendI32S,
+                    IExpr::Call(f, vec![wrap(name_len), IExpr::Call(to, vec![text])]),
+                )
+            }
+            "__json_drop" => {
+                let f = self.m.import("json_drop", vec![VT::I32], None);
+                IExpr::Call(f, vec![wrap(take())])
+            }
             "__store_set" => {
                 let f = self.m.import("store_set", vec![VT::I32, VT::I32], None);
                 let to = self.helper_str_to_mem();

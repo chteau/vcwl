@@ -522,6 +522,18 @@ fn server_save_text(key: String, value: String) {
     __store_set(__str_len(key), key + value)
 }
 
+// ----- JavaScript (`extern fn`) -----
+
+fn extern_call_handle(name: String, args: String) -> Int {
+    // Name and arguments travel in one buffer, like `server_save_text`; a negative result is
+    // the length of the error message, minus one.
+    let h = __js_call(__str_len(name), name + args)
+    if h < 0 {
+        __panic("JavaScript function `" + name + "` threw: " + __str_from_io(-1 - h))
+    }
+    h
+}
+
 fn server_remove(key: String) {
     __store_delete(key)
 }

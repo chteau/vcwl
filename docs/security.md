@@ -55,7 +55,10 @@ enforce.
 
 - A meta-tag CSP cannot set `frame-ancestors`, reporting or sandboxing; configure HTTP headers on
   the server when possible.
-- `storage` capabilities are parsed but there is no storage API yet.
+- `extern fn` implementations (the app's `js` module and `@web`) run with the page's full
+  privileges: they can touch the DOM, storage and the network within the CSP. The `storage`
+  capability is checked by `@web`'s storage functions, not by the browser; an app's own module
+  can bypass it. The CSP's `connect-src` still applies to every request JavaScript makes.
 - Requests are not cancelled when a component is removed (the response is discarded).
 - No request headers, credentials control or CSRF tokens yet; requests use the browser defaults
   (`same-origin` credentials).

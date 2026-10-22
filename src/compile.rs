@@ -16,6 +16,8 @@ pub struct Output {
     pub app: Option<crate::app::AppOutput>,
     /// The server module (`server fn`s exported as `__fn_<name>`), if the program has any.
     pub server: Option<Vec<u8>>,
+    /// The program imports `@web` (its JavaScript must be shipped).
+    pub web: bool,
 }
 
 pub struct Failure {
@@ -47,7 +49,11 @@ pub fn load(
             }
             continue;
         }
-        let overlay = OVERLAY.with(|o| o.borrow().get(&canon).cloned());
+        let overlay = if path == Path::new(WEB_PATH) {
+            Some(WEB_VCWL.to_string())
+        } else {
+            OVERLAY.with(|o| o.borrow().get(&canon).cloned())
+        };
         let text = match overlay.map_or_else(|| std::fs::read_to_string(&path), Ok) {
             Ok(t) => t,
             Err(e) => {
@@ -91,6 +97,10 @@ pub fn load(
     Ok((files, imports))
 }
 
+/// The built-in `@web` package: its source, and the path standing for it.
+pub const WEB_VCWL: &str = include_str!("../runtime/web.vcwl");
+pub const WEB_PATH: &str = "<std>/web.vcwl";
+
 thread_local! {
     /// Unsaved editor contents by canonical path, read instead of the files (language server).
     pub static OVERLAY: std::cell::RefCell<std::collections::HashMap<PathBuf, String>> = Default::default();
@@ -129,6 +139,7 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
             diags: std::mem::take(&mut ck.diags),
         });
     }
+    let web = files.iter().any(|f| f.path == WEB_PATH);
     let fns: Vec<_> = ck.fns.iter().map(|f| f.clone().unwrap()).collect();
     let mut lw = lower::Lower::new(&ck.adts, &fns);
     let mut exports = Vec::new();
@@ -170,6 +181,7 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
         exports,
         app: app_out,
         server,
+        web,
     })
 }
 

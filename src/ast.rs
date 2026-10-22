@@ -51,6 +51,8 @@ pub struct FnDecl {
     pub exported: bool,
     /// `server fn`: runs on the server (`vcwl serve`); the client calls it with `fetch`.
     pub server: bool,
+    /// `extern fn`: implemented in JavaScript (no body).
+    pub ext: bool,
     pub generics: Vec<Ident>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,

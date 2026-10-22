@@ -1824,8 +1824,9 @@ impl Checker<'_> {
             ));
         }
         const METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
+        // Server functions, and JavaScript functions (`extern fn`) that may return a Promise.
         let server_fn = match self.scopes[self.file].get(&f.method.name) {
-            Some(Sym::Fn(id)) if self.sigs[*id].server => Some(*id),
+            Some(Sym::Fn(id)) if self.sigs[*id].server || self.sigs[*id].ext => Some(*id),
             _ => None,
         };
         let (method, url, body, ty) = if let Some(id) = server_fn {
@@ -1855,7 +1856,11 @@ impl Checker<'_> {
                 args.push(v);
             }
             let url = TExpr {
-                kind: TK::Str(format!("__vcwl/fn/{}", sig.name)),
+                kind: TK::Str(if sig.ext {
+                    format!("js:{}", sig.name)
+                } else {
+                    format!("__vcwl/fn/{}", sig.name)
+                }),
                 ty: Type::Str,
                 span: f.method.span,
             };

@@ -10,6 +10,7 @@ pub const BOOT_JS: &str = include_str!("../runtime/boot.js");
 pub const DEV_JS: &str = include_str!("../runtime/dev.js");
 /// The WebGL renderer of 3D scenes, loaded by the host when a page paints one.
 pub const SCENE3D_JS: &str = include_str!("../runtime/scene3d.js");
+pub const WEB_JS: &str = include_str!("../runtime/web.js");
 const PRERENDER_JS: &str = include_str!("../runtime/prerender.mjs");
 /// The renderer, built from `render/` by `build.rs`.
 pub const RENDER_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/render.wasm"));
@@ -105,6 +106,17 @@ pub fn manifest_for(dir: &Path) -> Option<(PathBuf, String)> {
 /// (default `src/lib.vcwl`).
 pub fn resolve_package(dir: &Path, spec: &str) -> Result<PathBuf, String> {
     let (name, rest) = spec.split_once('/').unwrap_or((spec, ""));
+    // `@web` is built in, unless the project has its own package of that name.
+    let declares = |n: &str| {
+        manifest_for(dir).is_some_and(|(_, t)| {
+            manifest_table(&t, "dependencies")
+                .iter()
+                .any(|(k, _)| k == n)
+        })
+    };
+    if name == "web" && rest.is_empty() && !declares("web") {
+        return Ok(PathBuf::from(crate::compile::WEB_PATH));
+    }
     let Some((root, text)) = manifest_for(dir) else {
         return Err(format!(
             "`@{name}`: no vcwl.toml declares dependencies here"
@@ -571,7 +583,13 @@ fn custom_section(wasm: &mut Vec<u8>, name: &str, data: &[u8]) {
 }
 
 /// `app.wasm` with the app's styles and configuration attached.
-pub fn app_wasm(wasm: &[u8], app: &crate::app::AppOutput, dev: bool, routing: Routing) -> Vec<u8> {
+pub fn app_wasm(
+    wasm: &[u8],
+    app: &crate::app::AppOutput,
+    dev: bool,
+    routing: Routing,
+    js: &[String],
+) -> Vec<u8> {
     let mut out = wasm.to_vec();
     custom_section(&mut out, "vcwl.styles", app.css.as_bytes());
     // Font names and paths are checked to contain no quotes or backslashes.
@@ -587,14 +605,18 @@ pub fn app_wasm(wasm: &[u8], app: &crate::app::AppOutput, dev: bool, routing: Ro
         })
         .collect();
     let config = format!(
-        "{{\"caps\":{},\"dev\":{dev},\"routing\":\"{}\",\"fonts\":[{}]}}",
+        "{{\"caps\":{},\"dev\":{dev},\"routing\":\"{}\",\"fonts\":[{}],\"js\":[{}]}}",
         app.caps.to_json(),
         if routing == Routing::Path {
             "path"
         } else {
             "hash"
         },
-        fonts.join(",")
+        fonts.join(","),
+        js.iter()
+            .map(|f| format!("\"{f}\""))
+            .collect::<Vec<_>>()
+            .join(",")
     );
     custom_section(&mut out, "vcwl.config", config.as_bytes());
     out
@@ -638,14 +660,45 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
         }
     };
     let pages = pages(routing, &app.routes, &meta)?;
+    // JavaScript modules whose exports implement `extern fn`s: `@web`'s, then the app's own.
+    let mut js = Vec::new();
+    if o.web {
+        js.push("web.js".to_string());
+    }
+    let own_js = match (&project, setting("js")) {
+        (Some(p), Some(rel)) => {
+            let path = p.root.join(&rel);
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if !(name.ends_with(".js") || name.ends_with(".mjs"))
+                || ["vcwl.js", "boot.js", "dev.js", "scene3d.js", "web.js"].contains(&name.as_str())
+            {
+                return Err(format!(
+                    "vcwl.toml: js = \"{rel}\" must name a .js or .mjs module (not a runtime file name)"
+                ));
+            }
+            let code =
+                std::fs::read(&path).map_err(|e| format!("vcwl.toml: js = \"{rel}\": {e}"))?;
+            js.push(name.clone());
+            Some((name, code))
+        }
+        _ => None,
+    };
     let mut files: Vec<(&str, Vec<u8>)> = vec![
-        ("app.wasm", app_wasm(&o.wasm, app, dev, routing)),
+        ("app.wasm", app_wasm(&o.wasm, app, dev, routing, &js)),
         ("render.wasm", RENDER_WASM.to_vec()),
         ("vcwl.js", VCWL_JS.as_bytes().to_vec()),
         ("boot.js", BOOT_JS.as_bytes().to_vec()),
         // GitHub Pages: serve files as-is (no Jekyll processing).
         (".nojekyll", Vec::new()),
     ];
+    if o.web {
+        files.push(("web.js", WEB_JS.as_bytes().to_vec()));
+    } else {
+        let _ = std::fs::remove_file(out.join("web.js"));
+    }
     if app.scenes {
         files.push(("scene3d.js", SCENE3D_JS.as_bytes().to_vec()));
     } else {
@@ -665,6 +718,11 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
         if !name.starts_with('.') {
             sizes.push((name.to_string(), data.len()));
         }
+    }
+    if let Some((name, code)) = &own_js {
+        std::fs::write(out.join(name), code)
+            .map_err(|e| format!("{}: {e}", out.join(name).display()))?;
+        sizes.push((name.clone(), code.len()));
     }
     // Static assets (images, fonts, data) are copied as they are: packages' first, so the
     // app's own files win.
