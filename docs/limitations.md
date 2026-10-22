@@ -24,6 +24,13 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
   slashes (each becomes a directory of `dist/`), and `404.html` needs `url` in vcwl.toml when the
   site is served from a sub-path.
 
+## Styles
+
+- Identical style blocks are shared, and the stylesheet keeps them in the order they first
+  appear in the program. A `style if` therefore does not always override a property that the
+  element's plain `style` block also sets, when the same `style if` block appeared earlier
+  elsewhere. Set such properties only in the conditional blocks, or on a parent.
+
 ## Rendering (canvas, see [ADR 10](adr/0010-canvas-renderer.md))
 
 - Assistive technology reads an invisible DOM mirror of the semantic elements

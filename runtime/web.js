@@ -185,6 +185,7 @@ export default {
   confirm: (m) => confirm(m),
   prompt: (m, d) => prompt(m, d),
   read_clipboard: () => navigator.clipboard.readText(),
+  write_clipboard: async (text) => (await navigator.clipboard.writeText(text), null),
   share: async (title, text, url) => {
     if (!navigator.share) throw new Error("sharing is not supported by this browser");
     await navigator.share({ title, text, url: url || undefined });

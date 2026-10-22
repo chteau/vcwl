@@ -7,6 +7,7 @@ app "VCWL — revolutionizing web development (no)" {
 
 import "@web"
 import "./theme.vcwl"
+import "./docs.vcwl"
 
 struct Quote {
     who: String,
@@ -127,17 +128,61 @@ component App {
             }
         }
         Nav()
-        column(gap: 72px) {
+        column {
             style Wrap
-            Hero()
-            StatusBar()
-            Core()
-            Problems()
-            VibeCheck()
-            Quotes()
-            Pricing()
-            Honest()
+            main(id: "view") {
+                routes {
+                    "/" => Home()
+                    "/docs" => Docs(slug: "install")
+                    "/docs/install" => Docs(slug: "install")
+                    "/docs/quickstart" => Docs(slug: "quickstart")
+                    "/docs/tour" => Docs(slug: "tour")
+                    "/docs/components" => Docs(slug: "components")
+                    "/docs/styles" => Docs(slug: "styles")
+                    "/docs/data" => Docs(slug: "data")
+                    "/docs/3d" => Docs(slug: "3d")
+                    "/docs/packages" => Docs(slug: "packages")
+                    "/docs/interop" => Docs(slug: "interop")
+                    "/docs/tools" => Docs(slug: "tools")
+                    "/docs/deploy" => Docs(slug: "deploy")
+                    _ => NotFound()
+                }
+            }
             Foot()
+        }
+    }
+}
+
+component Home {
+    column(gap: 72px) {
+        Hero()
+        StatusBar()
+        Core()
+        Problems()
+        VibeCheck()
+        Quotes()
+        Pricing()
+        Honest()
+    }
+}
+
+component NotFound {
+    column(gap: 16px) {
+        style {
+            padding: 80px 0
+        }
+        span("404") {
+            style Pill
+            style Mono
+        }
+        heading("This page was vibe coded out of existence.", level: 1) {
+            style Shout
+        }
+        link("Go home, you're drunk", to: "/") {
+            style Primary
+            style {
+                align-self: start
+            }
         }
     }
 }
@@ -156,11 +201,24 @@ component Nav {
                 }
             }
             row(gap: 8px, align: center) {
-                span("●") {
-                    style Lime
+                image(src: "logo.svg", alt: "") {
+                    style {
+                        width: 26px
+                        height: 26px
+                        transition: transform 600ms spring
+                        when hover {
+                            transform: rotate(-12deg) scale(1.15)
+                        }
+                    }
                 }
-                strong("vcwl")
-                span("v0.16.0-vibes") {
+                link("vcwl", to: "/") {
+                    style {
+                        color: #ffffff
+                        weight: 700
+                        decoration: none
+                    }
+                }
+                span("v0.1.0 (vibes edition)") {
                     style Muted
                     style {
                         when viewport < 500px {
@@ -169,15 +227,20 @@ component Nav {
                     }
                 }
             }
-            row(gap: 18px) {
-                link("core", href: "#core") {
+            row(gap: 18px, align: center) {
+                link("docs", to: "/docs/install", current: route.starts_with("/docs")) {
                     style NavLink
                 }
-                link("pricing", href: "#pricing") {
+                link("github ↗", href: "https://github.com/chteau/vcwl") {
                     style NavLink
                 }
-                link("is-this-real?", href: "#real") {
+                link("download", href: "https://github.com/chteau/vcwl/releases/latest") {
                     style NavLink
+                    style {
+                        when viewport < 500px {
+                            display: none
+                        }
+                    }
                 }
             }
         }
@@ -186,6 +249,7 @@ component Nav {
 
 style NavLink {
     color: #8a8a8a
+    decoration: none
     transition: color 200ms ease-out
     when hover {
         color: #b6ff6c
@@ -232,7 +296,7 @@ component Hero {
                             }
                         }
                     }
-                    link("Is any of this real?", href: "#real") {
+                    link("Read the docs", to: "/docs/install") {
                         style Ghost
                     }
                 }

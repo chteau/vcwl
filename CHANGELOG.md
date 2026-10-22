@@ -2,7 +2,9 @@
 
 All notable changes. The project has no release yet; entries are grouped by milestone.
 
-## Unreleased
+## 0.1.0 — 2026-10-22
+
+The first release.
 
 ### Milestone 16 — packages, editors, styles beyond CSS, JavaScript interop
 
@@ -23,6 +25,11 @@ All notable changes. The project has no release yet; entries are grouped by mile
 - `site/`: the project's GitHub Pages site, written in VCWL (satire, with a section of real
   facts), and a Pages workflow that builds it; styled with the debugger's palette, a typing
   terminal and a highlighted code sample.
+- The site has documentation pages (install, tour, components, styles, data, 3D, packages,
+  interop, tools, deploy), a mascot (Vibbles) and Open Graph images; it uses real URLs.
+- `vcwl --version`; `write_clipboard` in `@web`.
+- Fixed: with path routing, prerendered pages resolved relative `src` and `href` values against
+  the route's directory instead of the site root.
 - Fixed: changing a text node's content did not lay out (or repaint) its parent again when the
   text node itself had no cached layout.
 

@@ -1,0 +1,113 @@
+// The documentation pages' content (docs.vcwl shows them).
+
+export struct Block {
+    n: Int,
+    kind: String,
+    lang: String,
+    text: String,
+}
+
+export struct DocPage {
+    slug: String,
+    group: String,
+    title: String,
+    blurb: String,
+    blocks: [Block],
+}
+
+export fn doc_pages() -> [DocPage] {
+    [
+        DocPage { slug: "install", group: "Start", title: "Install", blurb: "Get the compiler onto your machine. Point of no return.", blocks: [
+                Block { n: 0, kind: "h", lang: "", text: "Download a release" },
+                Block { n: 1, kind: "p", lang: "", text: "Prebuilt binaries for Linux (x86_64) and macOS (Apple silicon) are attached to each GitHub release. Unpack, put `vcwl` on your PATH, done." },
+                Block { n: 2, kind: "code", lang: "sh", text: "# Linux x86_64 (macOS: replace with aarch64-apple-darwin)\ncurl -LO https://github.com/chteau/vcwl/releases/latest/download/vcwl-x86_64-unknown-linux-gnu.tar.gz\ntar xzf vcwl-x86_64-unknown-linux-gnu.tar.gz\nsudo mv vcwl /usr/local/bin/\nvcwl --version" },
+                Block { n: 3, kind: "h", lang: "", text: "Or build it from source" },
+                Block { n: 4, kind: "p", lang: "", text: "You need Rust (edition 2024) with the `wasm32-unknown-unknown` target, because the renderer is itself compiled to WebAssembly and embedded in the CLI." },
+                Block { n: 5, kind: "code", lang: "sh", text: "rustup target add wasm32-unknown-unknown\ncargo install --git https://github.com/chteau/vcwl vcwl" },
+                Block { n: 6, kind: "h", lang: "", text: "Requirements" },
+                Block { n: 7, kind: "li", lang: "", text: "Node.js 20+ for `vcwl run`, `vcwl test` and build-time prerendering." },
+                Block { n: 8, kind: "li", lang: "", text: "A browser with WebAssembly GC: Chrome or Edge 119+, Firefox 120+, Safari 18.2+." },
+                Block { n: 9, kind: "li", lang: "", text: "`git`, if you want packages from a registry." },
+                Block { n: 10, kind: "note", lang: "", text: "Installing VCWL does not make you a 10x engineer. We checked." },
+            ] },
+        DocPage { slug: "quickstart", group: "Start", title: "Quick start", blurb: "From zero to a canvas-rendered counter in four commands.", blocks: [
+                Block { n: 0, kind: "code", lang: "sh", text: "vcwl new hello\ncd hello\nvcwl dev      # http://127.0.0.1:4400, rebuilds and reloads on save\nvcwl build    # a static site in dist/" },
+                Block { n: 1, kind: "p", lang: "", text: "`vcwl new` writes a `vcwl.toml` and `src/main.vcwl`. The entry file declares the `app` and a root component called `App`:" },
+                Block { n: 2, kind: "code", lang: "vcwl", text: "app \"Hello\"\n\ncomponent App \{\n    state count: Int = 0\n\n    column(gap: 12px, align: center) \{\n        heading(\"Clicks: \{count\}\", level: 1)\n        button(\"+1\") \{\n            on click \{\n                count += 1\n            \}\n        \}\n    \}\n\}" },
+                Block { n: 3, kind: "p", lang: "", text: "`dist/` is plain static files: `index.html`, `app.wasm`, `render.wasm` and a small JavaScript host. Any static host works, including GitHub Pages." },
+                Block { n: 4, kind: "note", lang: "", text: "Dev builds show a VCWL badge in the corner. Click it (or press Alt+Shift+D) for an element tree, computed styles, a picker and frame timings." },
+            ] },
+        DocPage { slug: "tour", group: "Language", title: "Language tour", blurb: "A statically typed language that compiles to WasmGC. It is stricter than you are.", blocks: [
+                Block { n: 0, kind: "h", lang: "", text: "Values and types" },
+                Block { n: 1, kind: "code", lang: "vcwl", text: "let name = \"vibes\"               // immutable, type inferred\nvar total: Int = 0               // mutable local\nlet ratio: Float = 0.5\nlet tags: [String] = [\"a\", \"b\"]  // arrays are immutable values\nlet maybe: Int? = None           // optionals" },
+                Block { n: 2, kind: "h", lang: "", text: "Structs, enums and matching" },
+                Block { n: 3, kind: "code", lang: "vcwl", text: "struct Todo \{\n    id: Int,\n    title: String,\n    done: Bool,\n\}\n\nenum Shape \{\n    Circle(Float),\n    Rect(Float, Float),\n\}\n\nfn area(s: Shape) -> Float \{\n    match s \{\n        Circle(r) => 3.14159 * r * r\n        Rect(w, h) => w * h\n    \}\n\}" },
+                Block { n: 4, kind: "p", lang: "", text: "Matches must be exhaustive; the compiler names the case you forgot. Generics are monomorphized, `x?` propagates `Err` and `None`, and string interpolation is `\"\{x\}\"`." },
+                Block { n: 5, kind: "h", lang: "", text: "The pipe operator" },
+                Block { n: 6, kind: "code", lang: "vcwl", text: "let score = input\n    |> trim_all\n    |> parse_or(0)\n    |> clamp(0, 100)" },
+                Block { n: 7, kind: "p", lang: "", text: "`x |> f(a)` is `f(x, a)`. That's it. That's the feature. We will be accepting our Turing Award by mail." },
+                Block { n: 8, kind: "h", lang: "", text: "Modules and tests" },
+                Block { n: 9, kind: "code", lang: "vcwl", text: "import \"./model.vcwl\"\nimport \"@kit\"            // a package\n\nfn test_area() \{\n    assert(area(Rect(2.0, 3.0)) == 6.0, \"math is broken\")\n\}" },
+                Block { n: 10, kind: "p", lang: "", text: "`vcwl test` runs every `test_*` function in `tests/`. `vcwl run file.vcwl` runs a program's `main` in Node.js." },
+            ] },
+        DocPage { slug: "components", group: "Language", title: "Components and state", blurb: "Props in, events out, state in the middle. Like React, minus the 400 MB.", blocks: [
+                Block { n: 0, kind: "code", lang: "vcwl", text: "component TodoItem(todo: Todo, compact: Bool = false) \{\n    event toggle(Int)\n    state editing: Bool = false\n    let label = todo.title.trim()\n\n    item \{\n        checkbox(label: label, checked: todo.done) \{\n            on change(v) \{\n                emit toggle(todo.id)\n            \}\n        \}\n    \}\n\}" },
+                Block { n: 1, kind: "li", lang: "", text: "Properties are read-only; `state` changes only in event handlers, and dependent views update in one batch afterwards." },
+                Block { n: 2, kind: "li", lang: "", text: "`if`, `match` and keyed `for` work inside views: `for t in todos key t.id \{ TodoItem(todo: t) \}`." },
+                Block { n: 3, kind: "li", lang: "", text: "Child content goes through `slot`, named slots and slots that pass values to the content." },
+                Block { n: 4, kind: "li", lang: "", text: "Routing: `routes \{ \"/\" => Home() \"/about\" => About() _ => NotFound() \}`, with the URL hash or real paths." },
+                Block { n: 5, kind: "h", lang: "", text: "Elements" },
+                Block { n: 6, kind: "p", lang: "", text: "Layout: `column`, `row`, `grid`, `stack`, `box`, `scroll`. Semantics: `section`, `nav`, `main`, `article`, `list`, `heading`... Controls: `button`, `link`, `input`, `textarea`, `checkbox`, `select`, `form`. Every form control needs a `label`, and every `image` an `alt`: accessibility is a compile error, not a Jira ticket." },
+            ] },
+        DocPage { slug: "styles", group: "Language", title: "Styles", blurb: "Typed CSS-ish styles, checked at compile time, plus things CSS doesn't have.", blocks: [
+                Block { n: 0, kind: "code", lang: "vcwl", text: "style Card \{\n    padding: 20px\n    radius: 14px\n    corner: squircle\n    background: #1a1a1a\n    transition: transform 600ms spring\n    when hover \{\n        transform: translateY(-4px)\n    \}\n    when viewport < 600px \{\n        padding: 12px\n    \}\n\}\n\nbutton(\"Save\") \{\n    style Card\n    style if busy \{\n        opacity: 0.5\n    \}\n    style bind width: progress %\n\}" },
+                Block { n: 1, kind: "p", lang: "", text: "A typo in a property or value is a compile error with the list of what is accepted. `when` covers `hover`, `focus`, `active`, `dark`, `light`, `reduced-motion`, viewport and container sizes, and `appear` for scroll reveals." },
+                Block { n: 2, kind: "h", lang: "", text: "Beyond CSS" },
+                Block { n: 3, kind: "li", lang: "", text: "`corner: squircle | cut | scoop | round`: the shape of rounded corners, and everything (borders, shadows, clipping) follows it." },
+                Block { n: 4, kind: "li", lang: "", text: "`grain: 0.4`: film grain, because your landing page needed to feel more analog." },
+                Block { n: 5, kind: "li", lang: "", text: "`sketch: 2px #222`: hand-drawn, wobbly borders that stay still between frames." },
+                Block { n: 6, kind: "li", lang: "", text: "`spring` and `bounce` easings: `transition: transform 500ms spring`." },
+                Block { n: 7, kind: "note", lang: "", text: "This whole site is painted on a canvas by a renderer written in Rust. Yes, that includes the text you are reading. An accessibility mirror keeps it selectable and readable by screen readers." },
+            ] },
+        DocPage { slug: "data", group: "Language", title: "Fetch and server functions", blurb: "Typed HTTP and functions that run on the server, both checked by the compiler.", blocks: [
+                Block { n: 0, kind: "code", lang: "vcwl", text: "on click \{\n    fetch get(\"/api/items\") as [Item] \{\n        Ok(items) => \{\n            list = items\n        \}\n        Err(Status(404, _)) => \{\n            error = \"not found\"\n        \}\n        Err(e) => \{\n            error = e.message()\n        \}\n    \}\n\}" },
+                Block { n: 1, kind: "p", lang: "", text: "Responses are decoded and validated against the type you ask for. Network access must be declared in the app's capabilities, and the host and the Content-Security-Policy both enforce it:" },
+                Block { n: 2, kind: "code", lang: "vcwl", text: "app \"My app\" \{\n    capabilities \{\n        network: allow(\"self\", \"api.example.com\")\n        storage: local\n    \}\n\}" },
+                Block { n: 3, kind: "h", lang: "", text: "Server functions" },
+                Block { n: 4, kind: "code", lang: "vcwl", text: "server fn sign(name: String, text: String) -> [Entry] \{\n    let all = load<[Entry]>(\"entries\").unwrap_or([])\n        .push(Entry \{ name: name, text: text \})\n    save(\"entries\", all)\n    all\n\}\n\n// in a handler:\nfetch sign(who, message) \{\n    Ok(entries) => \{\n        guestbook = entries\n    \}\n    Err(e) => \{\n        error = e.message()\n    \}\n\}" },
+                Block { n: 5, kind: "p", lang: "", text: "`vcwl serve` runs them in a WebAssembly runtime with a small JSON key-value store. There is no auth: anyone can call them with any arguments of the right types. Plan accordingly." },
+            ] },
+        DocPage { slug: "3d", group: "Language", title: "3D scenes", blurb: "A WebGL engine nobody asked for, with shadows nobody needed.", blocks: [
+                Block { n: 0, kind: "code", lang: "vcwl", text: "scene(label: \"A clickable box\", camera: vec3(0.0, 1.5, 5.0), orbit: true, shadows: true) \{\n    light(kind: \"ambient\", intensity: 0.3)\n    light(position: vec3(3.0, 5.0, 4.0))\n    mesh(shape: \"box\", label: \"Box\", color: \"#7cc4ff\") \{\n        on click \{\n            hits += 1\n        \}\n    \}\n    group(spin: vec3(0.0, 90.0, 0.0)) \{\n        mesh(shape: \"torus\", color: \"#b6ff6c\")\n        mesh(model: \"models/duck.glb\", label: \"A duck\", position: vec3(2.0, 0.0, 0.0))\n    \}\n\}" },
+                Block { n: 1, kind: "li", lang: "", text: "Primitives, and OBJ and glTF models with PBR materials, textures and animations." },
+                Block { n: 2, kind: "li", lang: "", text: "Directional and point-light shadows, translucency with depth peeling, an orbit camera." },
+                Block { n: 3, kind: "li", lang: "", text: "Meshes are clickable and keyboard-reachable; spinning stops when the user prefers reduced motion." },
+            ] },
+        DocPage { slug: "packages", group: "Ecosystem", title: "Packages", blurb: "A package manager whose registry is a git branch. Wally did it first; we did it worse.", blocks: [
+                Block { n: 0, kind: "code", lang: "toml", text: "# vcwl.toml\nregistry = \"https://github.com/chteau/vcwl\"\n\n[dependencies]\nis-odd = \"^1.0\"\nkit = \"../kit\"     # a path dependency" },
+                Block { n: 1, kind: "code", lang: "sh", text: "vcwl search            # what's out there (five packages, one of them is-odd)\nvcwl add is-odd        # adds is-odd = \"^1.0.0\" and installs it\nvcwl install           # resolves, writes vcwl.lock, fills vcwl_packages/\nvcwl publish           # from a package's directory: commits to the registry branch\nvcwl audit             # re-runs the security review on what's installed" },
+                Block { n: 2, kind: "h", lang: "", text: "Security review" },
+                Block { n: 3, kind: "p", lang: "", text: "Before a registry package is installed, VCWL reviews it. Reading environment variables, touching store keys outside the package's own prefix, shipping active files in `public/`, symbolic links and paths that escape the package block the install until you trust that exact version:" },
+                Block { n: 4, kind: "code", lang: "toml", text: "[trust]\nsketchy-pkg = \"1.2.3\"" },
+                Block { n: 5, kind: "note", lang: "", text: "The review reads code; it does not prove anything. A package you trust can still do whatever its code does." },
+            ] },
+        DocPage { slug: "interop", group: "Ecosystem", title: "JavaScript interop", blurb: "Every web language eventually becomes a JavaScript wrapper. We got there in Milestone 16.", blocks: [
+                Block { n: 0, kind: "code", lang: "vcwl", text: "extern fn shout(text: String) -> String     // implemented in JavaScript\nextern fn wait_for(ms: Int) -> Bool          // returns a Promise\n\non click \{\n    loud = shout(\"hi\")\n    fetch wait_for(500) \{\n        Ok(b) => \{\n            done = b\n        \}\n        Err(e) => \{\n            error = e.message()\n        \}\n    \}\n\}" },
+                Block { n: 1, kind: "code", lang: "js", text: "// src/interop.js, named in vcwl.toml: js = \"src/interop.js\"\nexport default \{\n  shout: (text) => text.toUpperCase() + \"!\",\n  wait_for: (ms) => new Promise((r) => setTimeout(() => r(true), ms)),\n\};" },
+                Block { n: 2, kind: "h", lang: "", text: "@web: the browser's APIs, already wrapped" },
+                Block { n: 3, kind: "p", lang: "", text: "`import \"@web\"` gives about 75 functions: URL and history, popups and `postMessage` (OAuth, PKCE), storage and cookies (checked against the `storage` capability), Intl dates and numbers, Web Crypto, the clipboard, notifications, geolocation, share, fullscreen..." },
+                Block { n: 4, kind: "code", lang: "vcwl", text: "import \"@web\"\n\non click \{\n    let verifier = random_token(32)\n    fetch sha256_base64url(verifier) \{\n        Ok(challenge) => \{\n            redirect(with_params(\"https://auth.example.com/authorize\", [\n                Param \{ name: \"code_challenge\", value: challenge \},\n                Param \{ name: \"code_challenge_method\", value: \"S256\" \},\n            ]))\n        \}\n        Err(e) => \{\n            error = e.message()\n        \}\n    \}\n\}" },
+            ] },
+        DocPage { slug: "tools", group: "Ecosystem", title: "Tools and editors", blurb: "A CLI, a linter, a language server and two editor extensions. For a joke.", blocks: [
+                Block { n: 0, kind: "code", lang: "sh", text: "vcwl new <dir>        # starter app\nvcwl dev              # dev server with reload and in-page errors\nvcwl build [--dev]    # static site in dist/\nvcwl serve            # release build + server functions\nvcwl check            # type-check only\nvcwl test             # run test_* functions\nvcwl fmt [--check]    # format\nvcwl lint             # unused things, placeholder text, deep views\nvcwl lsp              # language server on stdin/stdout" },
+                Block { n: 1, kind: "li", lang: "", text: "VS Code: `editors/vscode`, no dependencies. Package it with `npx @vscode/vsce package`." },
+                Block { n: 2, kind: "li", lang: "", text: "Zed: `editors/zed`, with a tree-sitter grammar. \"zed: install dev extension\" and pick the folder." },
+                Block { n: 3, kind: "li", lang: "", text: "The in-page debugger: element tree, computed styles, a picker and frame timings, in dev builds only." },
+            ] },
+        DocPage { slug: "deploy", group: "Ecosystem", title: "Deploy", blurb: "Static files. Any host. Even the one you're on right now.", blocks: [
+                Block { n: 0, kind: "code", lang: "toml", text: "# vcwl.toml\nname = \"my-site\"\nentry = \"src/main.vcwl\"\nprerender = true                         # static HTML for every route\nrouting = \"path\"                         # real URLs instead of #/\nurl = \"https://you.github.io/my-site/\"   # canonical links, sitemap, og:image\ndescription = \"It will revolutionize nothing.\"\nimage = \"og.png\"" },
+                Block { n: 1, kind: "p", lang: "", text: "With GitHub Actions, build with the CLI and upload `dist/` with `actions/upload-pages-artifact`. This very site does exactly that; the workflow is `.github/workflows/pages.yml` in the repository." },
+                Block { n: 2, kind: "p", lang: "", text: "Apps with server functions need `vcwl serve` behind a TLS-terminating proxy; their static part still works anywhere." },
+            ] },
+    ]
+}

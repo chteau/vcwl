@@ -1,12 +1,30 @@
-# VCWL — Vibe Coded Web Language
+<p align="center">
+  <img src="site/public/logo.svg" width="148" alt="Vibbles, the VCWL mascot: a lime blob wearing sunglasses">
+</p>
 
-A statically typed language for web applications. The compiler, written in Rust, compiles VCWL
-to WebAssembly (with the GC proposal, Wasm 3.0). Application logic, views, state and styles are
-written in VCWL. Apps do not use the browser DOM: a renderer written in Rust and compiled to
-WebAssembly keeps its own element tree, applies the styles, lays out, paints into a single
-`<canvas>` and handles input. JavaScript is limited to a host that connects the two modules to
-browser APIs (canvas drawing, text measurement, `fetch`, events) and keeps an invisible DOM
-mirror of the semantic elements for screen readers, native text input and crawlers.
+<h1 align="center">VCWL</h1>
+
+<p align="center">
+  <b>The Vibe Coded Web Language.</b><br>
+  It is going to revolutionize web development. <i>(It is not. It compiles, though, which is worse.)</i>
+</p>
+
+<p align="center">
+  <a href="https://chteau.github.io/vcwl/">Website</a> ·
+  <a href="https://chteau.github.io/vcwl/docs/install/">Docs</a> ·
+  <a href="https://github.com/chteau/vcwl/releases/latest">Download</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+---
+
+VCWL is a statically typed language for web apps. The compiler, written in Rust, turns it into
+WebAssembly (with the GC proposal). Your logic, views, state and styles are all VCWL. Then, for
+reasons nobody can fully explain, the app doesn't use the browser DOM: a renderer, also written
+in Rust and compiled to WebAssembly, lays out and paints everything onto a single `<canvas>`,
+while an invisible DOM mirror keeps it accessible, selectable and crawlable.
+
+It started as a joke and kept going. The joke is now load-bearing.
 
 ```vcwl
 app "Counter"
@@ -17,6 +35,14 @@ component App {
     column(gap: 12px, align: center) {
         heading("Clicks: {count}", level: 1)
         button("+1") {
+            style {
+                radius: 12px
+                corner: squircle
+                transition: transform 400ms spring
+                when hover {
+                    transform: scale(1.08)
+                }
+            }
             on click {
                 count += 1
             }
@@ -25,95 +51,85 @@ component App {
 }
 ```
 
-This is an experimental project; see [known limitations](docs/limitations.md) before relying on it.
-`examples/tokenforge` is a full website (a remake of https://chteau.github.io/tokenforge) built
-with it.
+The [website](https://chteau.github.io/vcwl/) is itself written in VCWL, docs included.
 
-## Status
+## Install
 
-Working end to end, tested in Node.js and headless Chrome:
-
-- language: structs, enums with payloads, generics (monomorphized), pattern matching with
-  exhaustiveness checking, immutable values with `var` locals, string interpolation, modules;
-- components with props, state, derived values, typed events, conditional and keyed list
-  rendering, routing (URL hash or real paths) and forms with native HTML elements;
-- typed styles with responsive (`when viewport < 600px`) and state (`when hover`) variants;
-- a renderer of its own ([ADR 10](docs/adr/0010-canvas-renderer.md)): CSS cascade and
-  inheritance, block/inline/flex/grid layout, text wrapping, painting to canvas, focus and keyboard
-  navigation, text fields with selection and clipboard, checkboxes, select pop-ups, scrolling;
-- `fetch` with JSON validated at run time against the expected type, and network access limited
-  by declared capabilities (enforced by the host and the Content-Security-Policy);
-- server functions (`server fn`) called with typed `fetch` from the client and run by
-  `vcwl serve` in a WebAssembly runtime, with a persistent key-value store;
-- packages (`[dependencies]` in vcwl.toml, `import "@kit"`) for sharing components, styles,
-  server functions and assets: the basis for frameworks ([docs](docs/packages.md));
-- components with child content (`slot`), web fonts (`font "X" from "fonts/x.woff2"`), and
-  build-time prerendering of every route to static HTML for first paint and crawlers;
-- 3D scenes (`scene { mesh(...) light(...) group { ... } }`) drawn with WebGL: primitives and
-  OBJ/glTF models, textures, translucency, shadows, clickable and keyboard-reachable meshes, an
-  orbit camera and state-bound properties;
-- tooling: `vcwl new | dev | build | check | test | fmt | run | compile | clean`.
-
-## Quick start
-
-Requirements: Rust (edition 2024) with the `wasm32-unknown-unknown` target
-(`rustup target add wasm32-unknown-unknown`), Node.js for `vcwl run`/`vcwl test`, a browser with
-WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari 18.2+).
+Grab a binary from the [latest release](https://github.com/chteau/vcwl/releases/latest)
+(Linux x86_64, macOS Apple silicon), or build it:
 
 ```sh
-cargo build --release
-./target/release/vcwl new hello
-cd hello
-../target/release/vcwl dev        # http://127.0.0.1:4400, rebuilds on save
-../target/release/vcwl build      # static site in dist/
+rustup target add wasm32-unknown-unknown
+cargo install --git https://github.com/chteau/vcwl vcwl
 ```
 
-`dist/` can be served by any static host; see [deploying to GitHub Pages](docs/deploy.md).
+Node.js 20+ is needed for `vcwl run`, `vcwl test` and prerendering. Apps run in browsers with
+WebAssembly GC: Chrome/Edge 119+, Firefox 120+, Safari 18.2+.
+
+```sh
+vcwl new hello && cd hello
+vcwl dev      # http://127.0.0.1:4400, rebuilds and reloads on save
+vcwl build    # a static site in dist/
+```
+
+## What's in the box
+
+- **A real language.** Structs, enums with payloads, generics, exhaustive pattern matching,
+  optionals and `?`, string interpolation, modules, tests, and the pipe operator `x |> f(a)`.
+- **Components.** Props, state, derived values, typed events, slots, keyed lists, routing (hash
+  or real paths), forms with native controls. Accessibility mistakes are compile errors.
+- **Typed styles.** Checked at compile time, with `when hover`, `when viewport < 600px`,
+  `when appear` scroll reveals, and things CSS doesn't have: `corner: squircle | cut | scoop`,
+  film `grain`, hand-drawn `sketch` borders, `spring` and `bounce` easing.
+- **Data.** `fetch` decoded against the type you expect, network access limited by declared
+  capabilities (and the CSP), and `server fn`s run by `vcwl serve` in a WebAssembly runtime.
+- **3D.** `scene { mesh light group }` with WebGL: primitives, OBJ and glTF models with PBR
+  materials and animations, shadows, translucency, clickable meshes. Nobody asked.
+- **JavaScript interop.** `extern fn`, and `@web`, about 75 wrapped Web APIs (URL and history,
+  OAuth popups, storage, Intl, Web Crypto, clipboard, geolocation...).
+- **Packages.** A registry that is a git branch (like Wally), lock files, and a security
+  review before anything gets installed.
+- **Tools.** `vcwl fmt`, `vcwl lint`, `vcwl lsp`, VS Code and Zed extensions, an in-page
+  debugger in dev builds, prerendering, sitemaps and Open Graph tags.
+
+What it is not: fast on purpose, battle-tested, or a good idea for your employer's checkout.
+See [known limitations](docs/limitations.md). Benchmarks, with their methods and caveats, are
+in [docs/benchmarks.md](docs/benchmarks.md). WebAssembly sandboxes the module; it does not make
+an application secure.
 
 ## Commands
 
 | command | does |
 | --- | --- |
 | `vcwl new <dir>` | create a starter app |
-| `vcwl dev [--port N]` | dev build, local server, rebuild and reload on change, errors shown in the page |
-| `vcwl build [--dev]` | compile the project to `dist/` (and `dist-server/` for server functions) |
+| `vcwl dev [--port N]` | dev build, local server, reload on change, errors in the page |
+| `vcwl build [--dev]` | compile to `dist/` (and `dist-server/` for server functions) |
 | `vcwl serve [--port N]` | release build served with its server functions |
-| `vcwl check [file]` | parse and type-check only |
-| `vcwl test [paths]` | run `test_*` functions (default: `tests/**/*.vcwl`) |
-| `vcwl fmt [--check] [paths]` | normalize indentation and whitespace |
-| `vcwl run <file>` | compile a program and run its `main` in Node.js |
-| `vcwl compile <file> [-o f]` | compile one file to `.wasm` |
-| `vcwl clean` | remove the output directory |
-
-### Dev tools
-
-Dev builds (`vcwl dev`, `vcwl build --dev`) show a **VCWL** badge in the bottom-left corner with
-the average frame cost. Click it (or press Alt+Shift+D) for a panel with the renderer's element
-tree, the box, attributes and computed style of the selected element, a **Pick** mode that
-selects the element under the pointer (the app does not receive those clicks), and frame
-timings. Production builds do not include it.
+| `vcwl check` · `vcwl test` · `vcwl fmt` · `vcwl lint` | type-check, test, format, lint |
+| `vcwl install` · `add` · `remove` · `publish` · `search` · `audit` | packages |
+| `vcwl lsp` | language server on stdin/stdout |
+| `vcwl run <file>` · `vcwl compile <file>` | run a program's `main` in Node.js, or compile one file |
 
 ## Documentation
 
+- [The website's docs](https://chteau.github.io/vcwl/docs/install/), for a guided tour
 - [Language reference](docs/language.md)
-- [Packages and frameworks](docs/packages.md)
+- [Packages](docs/packages.md) · [Editors](docs/editors.md) · [Deploying](docs/deploy.md)
 - [Architecture](docs/architecture.md) and [decision records](docs/adr/)
-- [Security model](docs/security.md)
-- [Benchmarks](docs/benchmarks.md)
-- [Known limitations](docs/limitations.md)
-- [Changelog](CHANGELOG.md)
+- [Security model](docs/security.md) · [Benchmarks](docs/benchmarks.md) · [Limitations](docs/limitations.md)
 
 ## Repository layout
 
 ```
-src/            compiler (lexer, parser, checker, lowering, codegen) and CLI
+src/            compiler (lexer, parser, checker, lowering, codegen), CLI, LSP, package manager
 src/prelude.vcwl standard library, written in VCWL
 render/         the renderer (Rust → render.wasm): element tree, styles, layout, paint, input
-runtime/        browser/Node host (vcwl.js), boot and dev-reload scripts
-examples/todo/  routed todo app with components, forms and tests
-examples/tokenforge/  remake of the tokenforge website (fetch, charts, docs pages)
-site/           the project's (satirical) GitHub Pages site, in VCWL; .github/workflows/pages.yml
-tests/          compiler tests (Rust), CLI tests, browser tests (puppeteer)
+runtime/        browser/Node host (vcwl.js), 3D, @web, boot and dev scripts
+editors/        tree-sitter grammar, VS Code and Zed extensions
+examples/       a todo app, a component kit, a remake of the tokenforge website
+packages/       the registry's sample packages (is-even, is-odd, left-pad, ...)
+site/           the website, in VCWL
+tests/          compiler, CLI, LSP and package tests (Rust), browser tests (puppeteer)
 bench/          keyed-list benchmark against hand-written DOM code
 docs/           reference, architecture, ADRs
 ```
@@ -125,3 +141,7 @@ cargo test --workspace                    # compiler, renderer, CLI and formatte
 (cd tests/browser && npm ci && npm test)  # headless Chrome tests (CHROME=/path/to/chrome)
 node bench/run.mjs                        # benchmark (after the two steps above)
 ```
+
+## License
+
+[MIT](LICENSE). Vibbles the blob is also MIT. Be nice to Vibbles.

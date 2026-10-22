@@ -5,7 +5,7 @@ import { build, open, tree, click, waitFor, repo } from "./harness.mjs";
 
 let app;
 before(async () => {
-  app = await open(build(path.join(repo, "site")), { viewport: { width: 1200, height: 5200 } });
+  app = await open(build(path.join(repo, "site")), { base: "/vcwl/", viewport: { width: 1200, height: 5200 } });
 });
 after(async () => app?.close());
 

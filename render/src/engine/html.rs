@@ -67,6 +67,16 @@ fn is_name(s: &str, extra: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || extra.contains(c))
 }
 
+/// A URL without a scheme, host or absolute path: `logo.svg`, `img/a.png`, `./x`.
+fn is_relative(v: &str) -> bool {
+    !v.is_empty()
+        && !v.starts_with(['/', '?'])
+        && !v
+            .split(['/', '?', '#'])
+            .next()
+            .is_some_and(|first| first.contains(':'))
+}
+
 /// The URL of route `path` (`/docs/intro`) for path routing, from a page whose way to the site
 /// root is `root` (`./`, `../../` or an absolute base such as `/repo/`): one directory per route.
 pub fn route_url(root: &str, path: &str) -> String {
@@ -129,6 +139,8 @@ impl Engine {
             };
             let link = match (k.as_str(), root, v.strip_prefix('#')) {
                 ("href", Some(root), Some(path)) if path.starts_with('/') => route_url(root, path),
+                // Relative to the site root, like the host resolves them, not to the route's page.
+                ("href" | "src", Some(root), None) if is_relative(v) => format!("{root}{v}"),
                 _ => v.to_string(),
             };
             out.push_str(&format!(" {k}=\""));
@@ -222,6 +234,12 @@ mod tests {
         let mut b = Buf::default();
         b.create(1, "a").attr(1, "href", "#/docs").insert(0, 1, 0);
         b.create(2, "a").attr(2, "href", "#top").insert(0, 2, 0);
+        b.create(3, "img")
+            .attr(3, "src", "logo.svg")
+            .insert(0, 3, 0);
+        b.create(4, "a")
+            .attr(4, "href", "https://x.y/a")
+            .insert(0, 4, 0);
         let mut e = Engine::new("", 800.0, 600.0);
         e.apply(&b.0).unwrap();
         let (html, _) = e.html(Some("/repo/"));
@@ -229,6 +247,9 @@ mod tests {
             html.contains("href=\"/repo/docs/\"") && html.contains("href=\"#top\""),
             "{html}"
         );
+        assert!(html.contains("src=\"/repo/logo.svg\""), "{html}");
+        assert!(html.contains("href=\"https://x.y/a\""), "{html}");
+        assert!(e.html(None).0.contains("src=\"logo.svg\""));
         assert_eq!(safe_url("docs/a:b"), "docs/a:b");
         assert_eq!(safe_url("data:text/html,x"), "about:invalid#vcwl-blocked");
     }

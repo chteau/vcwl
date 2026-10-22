@@ -48,6 +48,10 @@ fn main() -> ExitCode {
         "lint" => vcwl::lint::run(rest),
         "lsp" => vcwl::lsp::run(rest),
         "install" | "add" | "remove" | "publish" | "search" | "audit" => vcwl::pkg::run(cmd, rest),
+        "--version" | "-V" | "version" => {
+            println!("vcwl {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             Ok(())

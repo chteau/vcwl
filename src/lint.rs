@@ -43,8 +43,10 @@ fn depth(views: &[View]) -> usize {
         .unwrap_or(0)
 }
 
-/// Placeholder text left in string literals.
-const PLACEHOLDERS: &[&str] = &["lorem ipsum", "todo:", "fixme", "asdf"];
+/// Placeholder text left in string literals: matched ignoring case, except the markers, which
+/// are matched as written (`TodoItem(todo: t)` in a code sample is not a TODO).
+const PLACEHOLDERS: &[&str] = &["lorem ipsum", "asdf"];
+const MARKERS: &[&str] = &["TODO:", "FIXME"];
 
 /// Lints of the file `text` (nothing when it does not parse: the compiler reports that).
 pub fn lint(path: &str, text: &str) -> Vec<Lint> {
@@ -114,13 +116,15 @@ pub fn lint(path: &str, text: &str) -> Vec<Lint> {
                 .iter()
                 .filter_map(|p| {
                     if let StrPiece::Lit(s) = p {
-                        Some(s.to_lowercase())
+                        Some(s.as_str())
                     } else {
                         None
                     }
                 })
                 .collect();
-            if let Some(p) = PLACEHOLDERS.iter().find(|p| lit.contains(**p)) {
+            let lower = lit.to_lowercase();
+            let found = PLACEHOLDERS.iter().find(|p| lower.contains(**p));
+            if let Some(p) = found.or_else(|| MARKERS.iter().find(|p| lit.contains(**p))) {
                 out.push(Lint {
                     lo: t.span.lo as usize,
                     hi: t.span.hi as usize,
