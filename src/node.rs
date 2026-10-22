@@ -76,14 +76,27 @@ process.exitCode = failed ? 1 : 0;
 }
 
 fn run(wasm: &[u8], script: &str) -> std::io::Result<RunResult> {
-    let mut child = Command::new("node")
-        .args(["--input-type=module", "-e", script])
+    // The script embeds the runtime, too long for a command line on Windows (32K): it goes in
+    // a file.
+    static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let file = std::env::temp_dir().join(format!(
+        "vcwl-run-{}-{}.mjs",
+        std::process::id(),
+        RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::write(&file, script)?;
+    let out = Command::new("node")
+        .arg(&file)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
-    child.stdin.take().unwrap().write_all(wasm)?;
-    let out = child.wait_with_output()?;
+        .spawn()
+        .and_then(|mut child| {
+            child.stdin.take().unwrap().write_all(wasm)?;
+            child.wait_with_output()
+        });
+    let _ = std::fs::remove_file(&file);
+    let out = out?;
     Ok(RunResult {
         ok: out.status.success(),
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),

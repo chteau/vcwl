@@ -50,3 +50,12 @@ fn reports_lex_errors_with_location() {
     let e = format("bad.vcwl", "fn f() {\n    let s = 1 $ 2\n}\n").unwrap_err();
     assert!(e.contains("bad.vcwl:2:"), "{e}");
 }
+
+#[test]
+fn keeps_crlf_line_endings() {
+    let src = "component App {\r\ntext(\"hi\")\r\n}\r\n";
+    assert_eq!(
+        format("a.vcwl", src).unwrap(),
+        "component App {\r\n    text(\"hi\")\r\n}\r\n"
+    );
+}

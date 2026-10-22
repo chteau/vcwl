@@ -56,7 +56,7 @@ The [website](https://vcwl.chteau.bzh/) is itself written in VCWL, docs included
 ## Install
 
 Grab a binary from the [latest release](https://github.com/chteau/vcwl/releases/latest)
-(Linux x86_64, macOS Apple silicon), or build it:
+(Linux x86_64, macOS Apple silicon and Intel, Windows x64), or build it:
 
 ```sh
 rustup target add wasm32-unknown-unknown

@@ -1,4 +1,5 @@
-# On a `v*` tag: builds the CLI for Linux and macOS and attaches the archives to the release.
+# On a `v*` tag: builds the CLI for Linux, macOS and Windows and attaches the archives to the
+# release.
 name: release
 on:
   push:
@@ -14,21 +15,37 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
-      - run: cargo build --release
+          targets: wasm32-unknown-unknown,${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
       - name: Package
         run: |
           mkdir -p out
-          cp target/release/vcwl README.md LICENSE out/
-          tar czf vcwl-${{ matrix.target }}.tar.gz -C out .
+          cp README.md LICENSE out/
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/${{ matrix.target }}/release/vcwl.exe out/
+            archive=vcwl-${{ matrix.target }}.zip
+            (cd out && 7z a -tzip ../$archive . >/dev/null)
+          else
+            cp target/${{ matrix.target }}/release/vcwl out/
+            archive=vcwl-${{ matrix.target }}.tar.gz
+            tar czf $archive -C out .
+          fi
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
       - name: Upload
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes ""
-          gh release upload "$GITHUB_REF_NAME" vcwl-${{ matrix.target }}.tar.gz --clobber
+          gh release upload "$GITHUB_REF_NAME" "$ARCHIVE" --clobber

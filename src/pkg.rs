@@ -193,7 +193,10 @@ impl Registry {
             url
         } else {
             let p = root.join(&url);
-            p.canonicalize().unwrap_or(p).to_string_lossy().into_owned()
+            crate::project::canonical(&p)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .into_owned()
         };
         // FNV-1a of the URL names its cache.
         let hash = url.bytes().fold(0xcbf29ce484222325u64, |h, b| {

@@ -34,9 +34,7 @@ impl Project {
 
     /// The project governing `start` (in it or an ancestor).
     pub fn find_only(start: &Path) -> Result<Project, String> {
-        let start = start
-            .canonicalize()
-            .map_err(|e| format!("{}: {e}", start.display()))?;
+        let start = canonical(start).map_err(|e| format!("{}: {e}", start.display()))?;
         let mut dir = Some(start.as_path());
         while let Some(d) = dir {
             let manifest = d.join("vcwl.toml");
@@ -162,7 +160,7 @@ pub fn packages(root: &Path) -> Vec<PathBuf> {
         };
         for (name, path) in manifest_table(&text, "dependencies") {
             let pkg = crate::pkg::dep_dir(&dir, &name, &path);
-            let pkg = pkg.canonicalize().unwrap_or(pkg);
+            let pkg = canonical(&pkg).unwrap_or(pkg);
             if !out.contains(&pkg) {
                 out.push(pkg.clone());
                 queue.push(pkg);
@@ -1091,4 +1089,14 @@ pub fn vcwl_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// `path` made absolute with symbolic links resolved, without the `\\?\` prefix Windows puts
+/// on such paths (it would show in every diagnostic).
+pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    let p = path.canonicalize()?;
+    Ok(match p.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => p,
+    })
 }

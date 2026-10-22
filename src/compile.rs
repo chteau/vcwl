@@ -42,7 +42,7 @@ pub fn load(
 
     let mut queue = vec![(entry.to_path_buf(), None::<(usize, Span)>)];
     while let Some((path, from)) = queue.pop() {
-        let canon = path.canonicalize().unwrap_or(path.clone());
+        let canon = crate::project::canonical(&path).unwrap_or(path.clone());
         if let Some(i) = paths.iter().position(|p| *p == canon) {
             if let Some((f, _)) = from {
                 imports[f].push(i);

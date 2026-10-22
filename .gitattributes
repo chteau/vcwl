@@ -1,0 +1,5 @@
+# LF everywhere, Windows checkouts included (the formatter keeps whatever a file uses).
+* text=auto eol=lf
+*.png binary
+*.ttf binary
+*.wasm binary

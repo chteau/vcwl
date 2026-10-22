@@ -73,8 +73,16 @@ const CONTINUES: &[&str] = &[
     "||", "=>", "->", "|>",
 ];
 
-/// Formats `src`; `path` is only used in diagnostics.
+/// Formats `src`, keeping its line endings (a file with CRLF stays CRLF); `path` is only used
+/// in diagnostics.
 pub fn format(path: &str, src: &str) -> Result<String, String> {
+    if src.contains("\r\n") {
+        return Ok(format_lf(path, &src.replace("\r\n", "\n"))?.replace('\n', "\r\n"));
+    }
+    format_lf(path, src)
+}
+
+fn format_lf(path: &str, src: &str) -> Result<String, String> {
     let toks = lex(src, 0).map_err(|d| {
         let mut sm = SourceMap::default();
         sm.add(path, src.to_string());
