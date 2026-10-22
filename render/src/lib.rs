@@ -269,6 +269,16 @@ mod wasm {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn inspect(id: u32) -> usize {
+        output(with(|e| e.inspect(id)).into_bytes())
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn node_at(x: f32, y: f32) -> i32 {
+        with(|e| e.node_at(x, y)) as i32
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn dump() -> usize {
         output(with(|e| e.dump()).into_bytes())
     }

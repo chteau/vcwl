@@ -77,6 +77,14 @@ cd hello
 | `vcwl compile <file> [-o f]` | compile one file to `.wasm` |
 | `vcwl clean` | remove the output directory |
 
+### Dev tools
+
+Dev builds (`vcwl dev`, `vcwl build --dev`) show a **VCWL** badge in the bottom-left corner with
+the average frame cost. Click it (or press Alt+Shift+D) for a panel with the renderer's element
+tree, the box, attributes and computed style of the selected element, a **Pick** mode that
+selects the element under the pointer (the app does not receive those clicks), and frame
+timings. Production builds do not include it.
+
 ## Documentation
 
 - [Language reference](docs/language.md)

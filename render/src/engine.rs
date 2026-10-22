@@ -1629,6 +1629,86 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// The element under a viewport point, as the pointer would find it, or -1 (dev tools).
+    pub fn node_at(&self, x: f32, y: f32) -> i64 {
+        self.hit(x, y).map_or(-1, |id| id as i64)
+    }
+
+    /// Box model and computed style of an element as JSON, or `null` (dev tools).
+    pub fn inspect(&self, id: Id) -> String {
+        use crate::style::{Background, Len};
+        let Some(n) = self.tree.get(id).filter(|n| n.kind == Kind::Element) else {
+            return "null".into();
+        };
+        let len = |l: &Len| match l {
+            Len::Auto => "auto".to_string(),
+            Len::Px(v) => format!("{v}px"),
+            Len::Pct(v) => format!("{v}%"),
+            Len::Fr(v) => format!("{v}fr"),
+            other => format!("{other:?}").to_lowercase(),
+        };
+        let color = |c: u32| format!("#{c:08x}");
+        // `InlineBlock` → `inline-block`.
+        let kebab = |d: &dyn std::fmt::Debug| {
+            let mut out = String::new();
+            for (i, c) in format!("{d:?}").chars().enumerate() {
+                if c.is_uppercase() && i > 0 {
+                    out.push('-');
+                }
+                out.push(c.to_ascii_lowercase());
+            }
+            out
+        };
+        let sides = |v: &[String; 4]| v.join(" ");
+        let s = &n.style;
+        let props: Vec<(&str, String)> = vec![
+            ("display", kebab(&s.display)),
+            ("direction", if s.row { "row" } else { "column" }.into()),
+            ("position", kebab(&s.position)),
+            ("width", len(&s.width)),
+            ("height", len(&s.height)),
+            ("margin", sides(&s.margin.each_ref().map(len))),
+            ("padding", sides(&s.padding.each_ref().map(len))),
+            ("gap", format!("{}px {}px", s.row_gap, s.col_gap)),
+            ("grow", s.grow.to_string()),
+            ("color", color(s.color)),
+            (
+                "background",
+                match &s.background {
+                    Background::None => "none".into(),
+                    Background::Color(c) => color(*c),
+                    Background::Linear(a, stops) => format!("linear {a}deg, {} stops", stops.len()),
+                },
+            ),
+            ("font", s.font.to_string()),
+            ("line-height", format!("{}px", s.line_height)),
+            ("radius", format!("{:?}", s.radius)),
+            ("opacity", s.opacity.to_string()),
+            (
+                "overflow",
+                format!("{} {}", kebab(&s.overflow_x), kebab(&s.overflow_y)),
+            ),
+            ("z-index", s.z.to_string()),
+        ];
+        let r = self.abs(id);
+        let mut out = format!(
+            "{{\"id\":{id},\"tag\":\"{}\",\"box\":[{},{},{},{}],\"padding\":{:?},\"border\":{:?},\"style\":{{",
+            n.tag, r.x, r.y, r.w, r.h, n.lay.padding, n.lay.border
+        );
+        for (i, (k, v)) in props.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            json_str(&mut out, k);
+            out.push(':');
+            json_str(&mut out, v);
+        }
+        out.push_str("}}");
+        out
+    }
+}
+
 fn json_str(s: &mut String, v: &str) {
     s.push('"');
     for c in v.chars() {
@@ -1999,6 +2079,28 @@ mod tests {
             &[out::EMIT.to_le_bytes(), 1i32.to_le_bytes()].concat()[..]
         );
         assert!(e.poll().is_empty());
+    }
+
+    #[test]
+    fn inspects_box_and_style() {
+        let mut b = Buf::default();
+        b.create(1, "div").class(1, "c").insert(0, 1, 0);
+        let mut e = Engine::new(
+            ".c{width:50%;height:20px;padding:4px;color:#ff0000}",
+            800.0,
+            600.0,
+        );
+        e.apply(&b.0).unwrap();
+        e.frame(&mut Mono, 0.0);
+        let j = e.inspect(1);
+        assert!(j.contains("\"box\":[0,0,400,20]"), "{j}");
+        assert!(
+            j.contains("\"width\":\"50%\"") && j.contains("\"color\":\"#ff0000ff\""),
+            "{j}"
+        );
+        assert_eq!(e.node_at(10.0, 10.0), 1);
+        assert_eq!(e.node_at(700.0, 10.0), 0, "the root");
+        assert_eq!(e.inspect(99), "null");
     }
 
     #[test]

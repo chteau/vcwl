@@ -964,6 +964,11 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     const n = r.dump();
     return JSON.parse(decoder.decode(new Uint8Array(r.memory.buffer, r.out_ptr(), n)));
   };
+  host.inspect = (id) => {
+    const n = r.inspect(id);
+    return JSON.parse(decoder.decode(new Uint8Array(r.memory.buffer, r.out_ptr(), n)));
+  };
+  host.nodeAt = (x, y) => r.node_at(x, y);
   host.liveNodes = () => r.live_nodes();
   host.liveListeners = () => r.live_listeners();
   host.commands = () => r.counter(0);

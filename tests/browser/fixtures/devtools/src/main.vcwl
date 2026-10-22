@@ -1,0 +1,21 @@
+// Browser-test fixture: the dev tools of a dev build.
+app "Devtools"
+
+component App {
+    state n: Int = 0
+
+    column(gap: 12px) {
+        style {
+            padding: 20px
+        }
+        heading("Inspect me", level: 1)
+        button("Count {n}") {
+            on click {
+                n += 1
+            }
+            style {
+                padding: 8px 16px
+            }
+        }
+    }
+}

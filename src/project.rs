@@ -197,7 +197,12 @@ fn pages(routing: Routing, routes: &[String], meta: &Meta) -> Result<Vec<Page>, 
         .as_ref()
         .map(|u| format!("{}/", u.trim_end_matches('/')));
     let mut list = vec!["/".to_string()];
-    list.extend(routes.iter().filter(|r| !r.trim_matches('/').is_empty()).cloned());
+    list.extend(
+        routes
+            .iter()
+            .filter(|r| !r.trim_matches('/').is_empty())
+            .cloned(),
+    );
     let mut out = Vec::new();
     for route in list {
         let rel = route_dir(&route)?;
