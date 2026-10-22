@@ -1,0 +1,8 @@
+{
+  "name": "tree-sitter-vcwl",
+  "version": "0.1.0",
+  "description": "VCWL grammar for tree-sitter (highlighting)",
+  "main": "bindings/node",
+  "license": "MIT",
+  "tree-sitter": [{ "scope": "source.vcwl", "file-types": ["vcwl"], "highlights": "queries/highlights.scm" }]
+}

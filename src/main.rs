@@ -13,6 +13,8 @@ commands:
   serve [--port N]       release build served with its server functions (`server fn`)
   test [paths]           run `test_*` functions (default: tests/**/*.vcwl)
   fmt [--check] [files]  format source files
+  lint [files]           warnings about unused names, placeholder text and deep views
+  lsp                    language server for editors (stdin/stdout)
   clean                  remove build artifacts
   run <file>             compile a program and run its `main` with Node.js
   compile <file> [-o f]  compile a single file to a .wasm module
@@ -43,6 +45,8 @@ fn main() -> ExitCode {
         "serve" => vcwl::server::run(rest),
         "test" => vcwl::testrunner::run(rest),
         "fmt" => vcwl::fmt::run(rest),
+        "lint" => vcwl::lint::run(rest),
+        "lsp" => vcwl::lsp::run(rest),
         "install" | "add" | "remove" | "publish" | "search" | "audit" => vcwl::pkg::run(cmd, rest),
         "help" | "--help" | "-h" => {
             println!("{USAGE}");

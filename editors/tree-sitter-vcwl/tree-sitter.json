@@ -1,0 +1,4 @@
+{
+  "grammars": [{ "name": "vcwl", "camelcase": "Vcwl", "scope": "source.vcwl", "path": ".", "file-types": ["vcwl"], "highlights": "queries/highlights.scm" }],
+  "metadata": { "version": "0.1.0", "license": "MIT", "description": "VCWL grammar for tree-sitter" }
+}

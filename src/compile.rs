@@ -47,7 +47,8 @@ pub fn load(
             }
             continue;
         }
-        let text = match std::fs::read_to_string(&path) {
+        let overlay = OVERLAY.with(|o| o.borrow().get(&canon).cloned());
+        let text = match overlay.map_or_else(|| std::fs::read_to_string(&path), Ok) {
             Ok(t) => t,
             Err(e) => {
                 let msg = format!("cannot read `{}`: {e}", path.display());
@@ -88,6 +89,11 @@ pub fn load(
         imports.push(Vec::new());
     }
     Ok((files, imports))
+}
+
+thread_local! {
+    /// Unsaved editor contents by canonical path, read instead of the files (language server).
+    pub static OVERLAY: std::cell::RefCell<std::collections::HashMap<PathBuf, String>> = Default::default();
 }
 
 pub struct Options {

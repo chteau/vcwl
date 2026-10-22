@@ -1,0 +1,42 @@
+{
+  "name": "VCWL",
+  "scopeName": "source.vcwl",
+  "patterns": [{ "include": "#code" }],
+  "repository": {
+    "code": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "match": "\\b(fn)\\s+([a-z_][A-Za-z0-9_]*)", "captures": { "1": { "name": "keyword.declaration.vcwl" }, "2": { "name": "entity.name.function.vcwl" } } },
+        { "match": "\\b(component|struct|enum|style)\\s+([A-Z][A-Za-z0-9_]*)", "captures": { "1": { "name": "keyword.declaration.vcwl" }, "2": { "name": "entity.name.type.vcwl" } } },
+        { "match": "\\b(state|event|let|var)\\s+([a-z_][A-Za-z0-9_]*)", "captures": { "1": { "name": "keyword.declaration.vcwl" }, "2": { "name": "variable.other.vcwl" } } },
+        { "match": "\\b(if|else|match|for|in|while|return|break|continue|emit|on|when|bind|fetch|routes|key)\\b", "name": "keyword.control.vcwl" },
+        { "match": "\\b(import|export|app|slot|server|font|from|weight|capabilities|component|struct|enum|style|state|event|let|var|fn)\\b", "name": "keyword.other.vcwl" },
+        { "match": "\\b(true|false)\\b", "name": "constant.language.boolean.vcwl" },
+        { "match": "#[0-9a-fA-F]{3,8}\\b", "name": "constant.other.color.vcwl" },
+        { "match": "\\b\\d+(\\.\\d+)?(px|rem|em|%|ms|s|vw|vh|deg|fr)", "name": "constant.numeric.dimension.vcwl" },
+        { "match": "\\b\\d+(\\.\\d+)?\\b", "name": "constant.numeric.vcwl" },
+        { "match": "\\b[A-Z][A-Za-z0-9_]*\\b", "name": "entity.name.type.vcwl" },
+        { "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=\\()", "captures": { "1": { "name": "entity.name.function.call.vcwl" } } },
+        { "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=\\{)", "captures": { "1": { "name": "entity.name.tag.vcwl" } } },
+        { "match": "\\b([a-z][a-z0-9-]*)\\s*(?=:)", "captures": { "1": { "name": "support.type.property-name.vcwl" } } },
+        { "match": "->|=>|==|!=|<=|>=|&&|\\|\\||\\+=|-=|\\*=|/=|\\.\\.=?|[-+*/%=<>!?|&@]", "name": "keyword.operator.vcwl" }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "match": "//.*$", "name": "comment.line.double-slash.vcwl" },
+        { "begin": "/\\*", "end": "\\*/", "name": "comment.block.vcwl" }
+      ]
+    },
+    "strings": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.vcwl",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.vcwl" },
+        { "begin": "\\{", "end": "\\}", "name": "meta.interpolation.vcwl", "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.vcwl" } }, "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.vcwl" } }, "contentName": "source.vcwl", "patterns": [{ "include": "#code" }] }
+      ]
+    }
+  }
+}

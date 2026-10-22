@@ -1,0 +1,17 @@
+id = "vcwl"
+name = "VCWL"
+description = "VCWL (Vibe Coded Web Language): highlighting, plus errors, lints and formatting from `vcwl lsp`."
+version = "0.1.0"
+schema_version = 1
+authors = ["VCWL contributors"]
+repository = "https://github.com/OWNER/vcwl"
+
+[grammars.vcwl]
+# Until the repository is public, point this at a local clone: "file:///path/to/vcwl".
+repository = "https://github.com/OWNER/vcwl"
+rev = "GRAMMAR_COMMIT"
+path = "editors/tree-sitter-vcwl"
+
+[language_servers.vcwl]
+name = "vcwl lsp"
+languages = ["VCWL"]

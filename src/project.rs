@@ -894,7 +894,10 @@ pub fn vcwl_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     entries.sort();
     for p in entries {
         let hidden = p.file_name().is_some_and(|n| {
-            n.to_string_lossy().starts_with('.') || n == "node_modules" || n == "target"
+            n.to_string_lossy().starts_with('.')
+                || n == "node_modules"
+                || n == "target"
+                || n == "vcwl_packages"
         });
         if p.is_dir() {
             if !hidden {
