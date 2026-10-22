@@ -62,11 +62,16 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## 3D
 
-- Models: triangles only; of glTF materials only the base color and base color texture (no
-  metallic/roughness, normal, emissive or occlusion maps); no skins, morph targets or animations; one shadow-casting
-  light, from a fixed 1024×1024 map; no shadows from point lights.
-- Translucent meshes are sorted by their centers, so intersecting or nested translucent meshes
-  can blend in the wrong order.
+- Models: triangles only; no skins or morph targets (node translation, rotation and scale
+  animations play); every material map reads the first texture coordinates and ignores texture
+  transforms and samplers; no image-based lighting, so metals look dark away from their
+  highlights; shading works on sRGB colors, not linear ones; normal maps need the
+  `OES_standard_derivatives` extension (they are ignored without it).
+- One shadow-casting light, from a fixed 1024×1024 map (directional) or six 512×512 faces
+  (point).
+- Translucent meshes are blended four surfaces deep per pixel; surfaces behind those are not
+  drawn. Peeling costs eight extra passes over the translucent meshes and one over the opaque
+  ones per layer when a scene has any (not measured).
 - Requires WebGL; without it the scene shows its placeholder. Assistive technology sees the
   scene's `label` and its clickable meshes' labels, nothing else of its content.
 

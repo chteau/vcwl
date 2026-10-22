@@ -75,6 +75,24 @@ component App {
             mesh(shape: "plane", size: vec3(6.0, 1.0, 6.0), position: vec3(0.0, -0.8, 0.0), color: "#8a8f9a", shininess: 0.0)
             mesh(model: "models/materials.glb", size: vec3(2.0, 2.0, 2.0), rotation: vec3(0.0, 20.0, 0.0))
         }
+        scene(label: "glTF materials", camera: vec3(0.0, 0.0, 3.5), background: "#000000") {
+            style {
+                height: 240px
+            }
+            light(kind: "ambient", intensity: 0.4)
+            light(position: vec3(1.0, 1.0, 0.3), intensity: 0.8)
+            mesh(model: "models/emissive.glb", position: vec3(-4.0, 0.0, 0.0))
+            mesh(model: "models/metal.glb", position: vec3(-2.0, 0.0, 0.0))
+            mesh(model: "models/occluded.glb", position: vec3(0.0, 0.0, 0.0))
+            mesh(model: "models/plastic.glb", position: vec3(2.0, 0.0, 0.0))
+            mesh(model: "models/bumpy.glb", position: vec3(4.0, 0.0, 0.0))
+        }
+        scene(label: "An animated model", camera: vec3(0.0, 0.0, 6.0), background: "#000000") {
+            style {
+                height: 120px
+            }
+            mesh(model: "models/moving.glb")
+        }
         scene(label: "Two crossing panes of glass", camera: vec3(0.0, 0.0, 4.0), background: "#000000") {
             style {
                 height: 180px

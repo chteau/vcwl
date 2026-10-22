@@ -311,6 +311,7 @@ fn spec(name: &str) -> Option<Spec> {
                 ("wireframe", ArgTy::Bool, AttrKind::Attr("wireframe")),
                 ("opacity", ArgTy::Float, AttrKind::Attr("opacity")),
                 ("texture", ArgTy::Str, AttrKind::Attr("texture")),
+                ("animation", ArgTy::Str, AttrKind::Attr("animation")),
             ],
             events: CLICK,
             required: &[],

@@ -35,6 +35,11 @@ uniform vec4 shadowPoint;
 // Depth peeling of translucent meshes: 1 writes the depth of the nearest surface behind the
 // previous layer's (in \`peelDepth\`), 2 draws the color of the surface at the layer's depth.
 uniform int peel;
+// glTF metallic-roughness materials (otherwise Blinn-Phong with \`shininess\`).
+uniform bool pbr, mrMapped, normalMapped, emissiveMapped, occlusionMapped;
+uniform vec2 metalRough, normalOcclusion;
+uniform vec3 emissive;
+uniform sampler2D mrMap, normalMap, emissiveTex, occlusionMap;
 uniform sampler2D peelDepth;
 uniform vec2 viewport;
 varying vec3 vNormal, vWorld;
@@ -61,6 +66,30 @@ float lit(float bias) {
       sum += p.z - bias > unpack(texture2D(shadowMap, p.xy + vec2(x, y) / 1024.0)) ? 0.0 : 1.0;
   return sum / 9.0;
 }
+// Cook-Torrance (GGX, Smith-Schlick, Schlick Fresnel) plus Lambert, times π so a white
+// dielectric matches the Blinn-Phong path's brightness.
+vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 base, float metal, float rough) {
+  vec3 h = normalize(l + v);
+  float a = max(rough * rough, 0.002), a2 = a * a;
+  float nh = max(dot(n, h), 0.0), nv = max(dot(n, v), 1e-3), nl = max(dot(n, l), 1e-3);
+  float q = nh * nh * (a2 - 1.0) + 1.0, k = (rough + 1.0) * (rough + 1.0) / 8.0;
+  float D = a2 / (3.14159 * q * q), G = nv / (nv * (1.0 - k) + k) * nl / (nl * (1.0 - k) + k);
+  vec3 f0 = mix(vec3(0.04), base, metal), F = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+  return (1.0 - F) * (1.0 - metal) * base + D * G * F / (4.0 * nv * nl) * 3.14159;
+}
+#ifdef NORMAL_MAPS
+// Normal from a tangent-space map, with the tangent frame from screen-space derivatives.
+vec3 mapped(vec3 n) {
+  vec3 dp1 = dFdx(vWorld), dp2 = dFdy(vWorld);
+  vec2 duv1 = dFdx(vUv), duv2 = dFdy(vUv);
+  vec3 p2 = cross(dp2, n), p1 = cross(n, dp1);
+  vec3 t = p2 * duv1.x + p1 * duv2.x, b = p2 * duv1.y + p1 * duv2.y;
+  float s = inversesqrt(max(max(dot(t, t), dot(b, b)), 1e-12));
+  // glTF images start at the top, so +V runs down the image while the map's +Y points up.
+  vec3 m = (texture2D(normalMap, vUv).xyz * 2.0 - 1.0) * vec3(normalOcclusion.x, -normalOcclusion.x, 1.0);
+  return normalize(mat3(t * s, b * s, n) * m);
+}
+#endif
 void main() {
   if (pick) { gl_FragColor = vec4(pickColor, 1.0); return; }
   if (peel > 0) {
@@ -78,15 +107,26 @@ void main() {
   // Two-sided: light the side facing the camera, whatever the triangle winding.
   vec3 n = normalize(vNormal);
   if (dot(n, v) < 0.0) n = -n;
-  vec3 c = ambient * base;
+#ifdef NORMAL_MAPS
+  if (normalMapped) n = mapped(n);
+#endif
+  float metal = metalRough.x, rough = metalRough.y;
+  if (mrMapped) {
+    vec4 t = texture2D(mrMap, vUv);
+    rough *= t.g;
+    metal *= t.b;
+  }
+  float ao = occlusionMapped ? 1.0 + normalOcclusion.y * (texture2D(occlusionMap, vUv).r - 1.0) : 1.0;
+  vec3 c = ambient * base * ao;
   for (int i = 0; i < 8; i++) {
     if (i >= lightCount) break;
     vec3 l = lightPos[i].w > 0.5 ? normalize(lightPos[i].xyz - vWorld) : normalize(lightPos[i].xyz);
     float d = max(dot(n, l), 0.0);
     float s = d > 0.0 && shininess > 0.0 ? pow(max(dot(n, normalize(l + v)), 0.0), shininess) * 0.5 : 0.0;
     float k = i == shadowLight ? lit(0.002 + 0.004 * (1.0 - d)) : 1.0;
-    c += lightColor[i] * (base * d + vec3(s)) * k;
+    c += lightColor[i] * (pbr ? brdf(n, v, l, base, metal, rough) * d : base * d + vec3(s)) * k;
   }
+  if (pbr) c += emissive * (emissiveMapped ? texture2D(emissiveTex, vUv).rgb : vec3(1.0));
   c += highlight * 0.35;
   gl_FragColor = vec4(c * opacity, opacity);
 }`;
@@ -121,6 +161,13 @@ precision mediump float;
 uniform sampler2D image;
 uniform vec2 viewport;
 void main() { gl_FragColor = texture2D(image, gl_FragCoord.xy / viewport); }`;
+// glTF material maps: part field, uniform telling whether it is bound, sampler (units 4 to 7).
+const MAPS = [
+  ["mr", "mrMapped", "mrMap"],
+  ["normal", "normalMapped", "normalMap"],
+  ["emissiveMap", "emissiveMapped", "emissiveTex"],
+  ["occlusion", "occlusionMapped", "occlusionMap"],
+];
 // Translucent surfaces blended per pixel; those behind are dropped.
 const PEEL_LAYERS = 4;
 const SHADOW_SIZE = 1024;
@@ -379,9 +426,12 @@ const base64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer;
 
 /**
  * glTF 2.0 (`.gltf` with its buffers, or binary `.glb`): the triangles of every mesh in the
- * default scene, with node transforms applied, as one part per material. A part carries the
- * material's base color (sRGB, with alpha) and base color image: `{ uri }` (absolute) or
- * `{ bytes, mime }` for one stored in a buffer.
+ * default scene as one part per material, with node transforms applied. A part carries the
+ * material's base color (sRGB, with alpha), base color image and, in `mat`, its other
+ * metallic-roughness properties; images are `{ uri }` (absolute) or `{ bytes, mime, key }`
+ * for one stored in a buffer. With animations, parts are per node and material, left in their
+ * node's space, and the returned list gets `pose(t, name)`: each part's matrix at `t` seconds
+ * of the named animation (the first one if `name` is undefined, the rest pose if none matches).
  */
 export async function parseGltf(data, url, load) {
   let json, bin = null;
@@ -413,30 +463,57 @@ export async function parseGltf(data, url, load) {
       for (let c = 0; c < n; c++) out[k * n + c] = src[get](start + k * stride + c * T.BYTES_PER_ELEMENT, true) * scale;
     return out;
   };
+  const image = (info) => {
+    const img = json.images?.[json.textures?.[info?.index]?.source];
+    if (img?.uri !== undefined) return { uri: new URL(img.uri, url).href };
+    if (img?.bufferView === undefined) return null;
+    const v = json.bufferViews[img.bufferView];
+    return { bytes: new Uint8Array(buffers[v.buffer], v.byteOffset ?? 0, v.byteLength), mime: img.mimeType, key: `${url}#texture${info.index}` };
+  };
+  // Colors in glTF are linear; this renderer works in sRGB.
+  const srgb = (c) => c ** (1 / 2.2);
+  const clips = (json.animations ?? []).map((a) => {
+    const channels = a.channels
+      .filter((c) => c.target.node !== undefined && ["translation", "rotation", "scale"].includes(c.target.path))
+      .map((c) => {
+        const s = a.samplers[c.sampler];
+        return { node: c.target.node, path: c.target.path, times: accessor(s.input), values: accessor(s.output), mode: s.interpolation ?? "LINEAR" };
+      });
+    return { name: a.name, channels, length: Math.max(0, ...channels.map((c) => c.times.at(-1))) };
+  });
+  const animated = clips.some((c) => c.channels.length);
   const parts = new Map();
-  const part = (mi) => {
-    let g = parts.get(mi);
+  const part = (mi, ni) => {
+    const key = animated ? `${ni} ${mi}` : mi;
+    let g = parts.get(key);
     if (g) return g;
-    const pbr = json.materials?.[mi]?.pbrMetallicRoughness ?? {};
-    // Colors in glTF are linear; this renderer works in sRGB.
+    const mat = json.materials?.[mi];
+    const pbr = mat?.pbrMetallicRoughness ?? {};
     const f = pbr.baseColorFactor;
-    g = { pos: [], nrm: [], uv: [], idx: [], normals: true, color: f ? [...f.slice(0, 3).map((c) => c ** (1 / 2.2)), f[3]] : null, image: null };
-    const img = json.images?.[json.textures?.[pbr.baseColorTexture?.index]?.source];
-    if (img?.uri !== undefined) g.image = { uri: new URL(img.uri, url).href };
-    else if (img?.bufferView !== undefined) {
-      const v = json.bufferViews[img.bufferView];
-      g.image = { bytes: new Uint8Array(buffers[v.buffer], v.byteOffset ?? 0, v.byteLength), mime: img.mimeType, key: `${url}#image${pbr.baseColorTexture.index}` };
-    }
-    parts.set(mi, g);
+    g = { pos: [], nrm: [], uv: [], idx: [], normals: true, node: ni, color: f ? [...f.slice(0, 3).map(srgb), f[3]] : null, image: image(pbr.baseColorTexture) };
+    if (mat)
+      g.mat = {
+        metal: pbr.metallicFactor ?? 1,
+        rough: pbr.roughnessFactor ?? 1,
+        emissive: (mat.emissiveFactor ?? [0, 0, 0]).map(srgb),
+        mr: image(pbr.metallicRoughnessTexture),
+        normal: image(mat.normalTexture),
+        normalScale: mat.normalTexture?.scale ?? 1,
+        emissiveMap: image(mat.emissiveTexture),
+        occlusion: image(mat.occlusionTexture),
+        occlusionStrength: mat.occlusionTexture?.strength ?? 1,
+      };
+    parts.set(key, g);
     return g;
   };
+  const rest = (node) => node.matrix ? new Float32Array(node.matrix) : quatMatrix(node.rotation ?? [0, 0, 0, 1], node.translation ?? [0, 0, 0], node.scale ?? [1, 1, 1]);
   const visit = (ni, parent) => {
     const node = json.nodes[ni];
-    const local = node.matrix ? new Float32Array(node.matrix) : quatMatrix(node.rotation ?? [0, 0, 0, 1], node.translation ?? [0, 0, 0], node.scale ?? [1, 1, 1]);
-    const m = mul(parent, local), nm = normalMatrix(m);
+    // Animated parts stay in their node's space; the pose places them.
+    const m = animated ? ident() : mul(parent, rest(node)), nm = normalMatrix(m);
     for (const prim of node.mesh !== undefined ? json.meshes[node.mesh].primitives : []) {
       if ((prim.mode ?? 4) !== 4 || prim.attributes.POSITION === undefined) continue;
-      const g = part(prim.material ?? -1);
+      const g = part(prim.material ?? -1, ni);
       const base = g.pos.length / 3, p = accessor(prim.attributes.POSITION), count = p.length / 3;
       for (let k = 0; k < p.length; k += 3)
         for (let r = 0; r < 3; r++) g.pos.push(m[r] * p[k] + m[4 + r] * p[k + 1] + m[8 + r] * p[k + 2] + m[12 + r]);
@@ -452,11 +529,76 @@ export async function parseGltf(data, url, load) {
     for (const c of node.children ?? []) visit(c, m);
   };
   const scene = json.scenes?.[json.scene ?? 0];
-  const children = new Set((json.nodes ?? []).flatMap((n) => n.children ?? []));
-  for (const ni of scene ? scene.nodes : json.nodes.map((_, i) => i).filter((i) => !children.has(i))) visit(ni, ident());
+  const parent = [];
+  (json.nodes ?? []).forEach((n, i) => (n.children ?? []).forEach((c) => (parent[c] = i)));
+  const roots = scene ? scene.nodes : json.nodes.map((_, i) => i).filter((i) => parent[i] === undefined);
+  for (const ni of roots) visit(ni, ident());
   if (!parts.size) throw new Error("no triangles");
-  return fit([...parts.values()].map((g) => (g.normals ? g : flatNormals(g))));
+  const list = [...parts.values()].map((g) => (g.normals ? g : flatNormals(g)));
+  if (!animated) return fit(list);
+
+  // World matrix of every node, with the TRS values `trs(node)`.
+  const worlds = (trs) => {
+    const out = [];
+    const get = (i) => (out[i] ??= mul(parent[i] === undefined ? ident() : get(parent[i]), trs(i)));
+    return (i) => get(i);
+  };
+  // Fit the rest pose to a unit cube, as for static models.
+  const restWorld = worlds((i) => rest(json.nodes[i]));
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const g of list) {
+    const m = restWorld(g.node);
+    for (let i = 0; i < g.pos.length; i += 3)
+      for (let k = 0; k < 3; k++) {
+        const v = m[k] * g.pos[i] + m[4 + k] * g.pos[i + 1] + m[8 + k] * g.pos[i + 2] + m[12 + k];
+        lo[k] = Math.min(lo[k], v);
+        hi[k] = Math.max(hi[k], v);
+      }
+  }
+  const s = 1 / (Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1);
+  const fitM = new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, ...lo.map((l, k) => (-(l + hi[k]) / 2) * s), 1]);
+  return Object.assign(list, {
+    pose(t, name) {
+      const clip = name === undefined ? clips[0] : clips.find((c) => c.name === name);
+      const time = clip?.length > 0 ? t % clip.length : 0;
+      const values = new Map();
+      for (const c of clip?.channels ?? []) values.set(`${c.node} ${c.path}`, sample(c, time));
+      const world = worlds((i) => {
+        const n = json.nodes[i], v = (p, d) => values.get(`${i} ${p}`) ?? n[p] ?? d;
+        return n.matrix ? new Float32Array(n.matrix) : quatMatrix(v("rotation", [0, 0, 0, 1]), v("translation", [0, 0, 0]), v("scale", [1, 1, 1]));
+      });
+      return list.map((g) => mul(fitM, world(g.node)));
+    },
+  });
 }
+
+/** Value of an animation channel at time `t` (STEP, LINEAR with slerp, or CUBICSPLINE). */
+function sample({ times, values, mode, path }, t) {
+  const n = path === "rotation" ? 4 : 3, cubic = mode === "CUBICSPLINE";
+  const at = (k, part = 1) => values.slice(((cubic ? 3 * k + part : k) * n), ((cubic ? 3 * k + part : k) + 1) * n);
+  let k = 0;
+  while (k + 1 < times.length && times[k + 1] <= t) k++;
+  if (k + 1 >= times.length || t <= times[0] || mode === "STEP") return at(k);
+  const dt = times[k + 1] - times[k], u = (t - times[k]) / dt;
+  const a = at(k), b = at(k + 1);
+  if (cubic) {
+    const m0 = at(k, 2), m1 = at(k + 1, 0), u2 = u * u, u3 = u2 * u;
+    const v = a.map((p, i) => (2 * u3 - 3 * u2 + 1) * p + (u3 - 2 * u2 + u) * dt * m0[i] + (-2 * u3 + 3 * u2) * b[i] + (u3 - u2) * dt * m1[i]);
+    return n === 4 ? norm4(v) : v;
+  }
+  if (n === 3) return a.map((p, i) => p + (b[i] - p) * u);
+  // Spherical interpolation along the shorter arc.
+  let d = a.reduce((s, p, i) => s + p * b[i], 0);
+  const q = d < 0 ? b.map((x) => -x) : b;
+  d = Math.abs(d);
+  if (d > 0.9995) return norm4(a.map((p, i) => p + (q[i] - p) * u));
+  const th = Math.acos(d), sa = Math.sin((1 - u) * th) / Math.sin(th), sb = Math.sin(u * th) / Math.sin(th);
+  return a.map((p, i) => p * sa + q[i] * sb);
+}
+const norm4 = (v) => {
+  const l = Math.hypot(...v) || 1;
+  return v.map((x) => x / l);
+};
 
 // ----- attributes -----
 
@@ -512,7 +654,9 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     u.uv = gl.getAttribLocation(p, "uv");
     return u;
   };
-  const main = program(VS, FS, ["model", "viewProj", "lightViewProj", "normalMat", "color", "ambient", "eye", "pickColor", "highlight", "shininess", "opacity", "pick", "textured", "lightCount", "shadowLight", "lightPos", "lightColor", "tex", "shadowMap", "shadowCube", "shadowPoint", "peel", "peelDepth", "viewport"]);
+  // Normal maps need screen-space derivatives for their tangent frame.
+  const derivatives = gl.getExtension("OES_standard_derivatives");
+  const main = program(VS, (derivatives ? "#extension GL_OES_standard_derivatives : enable\n#define NORMAL_MAPS\n" : "") + FS, ["model", "viewProj", "lightViewProj", "normalMat", "color", "ambient", "eye", "pickColor", "highlight", "shininess", "opacity", "pick", "textured", "lightCount", "shadowLight", "lightPos", "lightColor", "tex", "shadowMap", "shadowCube", "shadowPoint", "peel", "peelDepth", "viewport", "pbr", "metalRough", "emissive", "normalOcclusion", ...MAPS.flatMap(([, flag, sampler]) => [flag, sampler])]);
   const depth = program(SHADOW_VS, SHADOW_FS, ["model", "lightViewProj", "point"]);
   const quad = program(QUAD_VS, QUAD_FS, ["image", "viewport"]);
   // One triangle covering the viewport.
@@ -563,7 +707,7 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
           .then(async (data) => {
             const obj = /\.obj(\?|#|$)/i.test(key);
             const parts = obj ? parseObj(new TextDecoder().decode(data)) : await parseGltf(data, key, fetchBytes);
-            meshes.set(key, { flip: obj, parts: parts.map((d) => ({ ...upload(finish(d)), color: d.color ?? null, image: d.image ?? null })) });
+            meshes.set(key, { flip: obj, pose: parts.pose ?? null, parts: parts.map((d) => ({ ...upload(finish(d)), color: d.color ?? null, image: d.image ?? null, mat: d.mat ?? null })) });
           })
           .catch((e) => {
             meshes.set(key, false);
@@ -673,12 +817,12 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
   };
 
   /** Draws every opaque enough mesh with the depth program (its uniforms already set). */
-  function depthMeshes(scene, world) {
+  function depthMeshes(scene, placed) {
     scene.items.forEach((it, i) => {
       const m = it.kind === 1 && num(it.attrs.opacity, 1) > 0.5 && geometry(it);
       if (!m) return;
-      gl.uniformMatrix4fv(depth.model, false, world[i]);
-      for (const g of m.parts) {
+      for (const [pi, g] of m.parts.entries()) {
+        gl.uniformMatrix4fv(depth.model, false, placed[i][pi]);
         bind(depth, g);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, g.idx);
         gl.drawElements(gl.TRIANGLES, g.count, g.type, 0);
@@ -710,7 +854,7 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
    * view of a box around the scene, and its view-projection matrix is returned; a point light
    * gets a cube map of distances, and `[x, y, z, scale]` is returned in `point`.
    */
-  function shadowPass(scene, world, center, light) {
+  function shadowPass(scene, world, placed, center, light) {
     if (light.point) {
       const far = reach(scene, world, light.at) * 1.5;
       const point = [...light.at, far];
@@ -733,7 +877,7 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, cubeTarget.tex, 0);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         gl.uniformMatrix4fv(depth.lightViewProj, false, mul(proj, lookAt(light.at, light.at.map((c, k) => c + dir[k]), up)));
-        depthMeshes(scene, world);
+        depthMeshes(scene, placed);
       });
       return { vp: ident(), point };
     }
@@ -746,12 +890,20 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     gl.clearColor(1, 1, 1, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.uniformMatrix4fv(depth.lightViewProj, false, vp);
-    depthMeshes(scene, world);
+    depthMeshes(scene, placed);
     return { vp, point: [0, 0, 0, 0] };
   }
 
   function render(scene, view, w, h, t, out, picking, focus) {
     const { world, eye, target: center, fov } = layout(scene, view, t);
+    // World matrix of each part of each loaded mesh: animated models pose theirs.
+    const placed = scene.items.map((it, i) => {
+      const model = it.kind === 1 && geometry(it);
+      if (!model) return null;
+      // "none" matches no animation: the rest pose.
+      const poses = model.pose?.(t, it.attrs.animation === "none" ? null : it.attrs.animation);
+      return model.parts.map((_, pi) => (poses ? mul(world[i], poses[pi]) : world[i]));
+    });
     // Lights: without any, a soft ambient light and one from above.
     let ambient = [0, 0, 0], shadowLight = -1, caster = null;
     const pos = [], col = [];
@@ -772,7 +924,7 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
       }
     }
     const shadows = !picking && scene.attrs.shadows === "true" && caster;
-    const shadow = shadows ? shadowPass(scene, world, center, caster) : { vp: ident(), point: [0, 0, 0, 0] };
+    const shadow = shadows ? shadowPass(scene, world, placed, center, caster) : { vp: ident(), point: [0, 0, 0, 0] };
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, out);
     gl.viewport(0, 0, w, h);
@@ -794,6 +946,7 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
       gl.uniform3fv(u.lightColor, col);
     }
     gl.uniform1i(u.tex, 0);
+    MAPS.forEach(([, , sampler], k) => gl.uniform1i(u[sampler], 4 + k));
     gl.uniform1i(u.shadowMap, 1);
     gl.uniform1i(u.shadowCube, 2);
     gl.activeTexture(gl.TEXTURE1);
@@ -807,17 +960,17 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     scene.items.forEach((it, i) => {
       const model = it.kind === 1 && geometry(it);
       if (!model) return;
-      for (const g of model.parts) {
+      for (const [pi, g] of model.parts.entries()) {
         const opacity = picking ? 1 : Math.max(0, Math.min(1, num(it.attrs.opacity, 1) * (g.color?.[3] ?? 1)));
-        if (opacity > 0) draws.push({ it, i, g, flip: model.flip, opacity });
+        if (opacity > 0) draws.push({ it, i, g, m: placed[i][pi], flip: model.flip, opacity });
       }
     });
     const solid = draws.filter((d) => d.opacity >= 1);
     const glass = draws.filter((d) => d.opacity < 1);
-    const drawMesh = ({ it, i, g, flip, opacity }) => {
+    const drawMesh = ({ it, i, g, m, flip, opacity }) => {
       bind(u, g);
-      gl.uniformMatrix4fv(u.model, false, world[i]);
-      gl.uniformMatrix3fv(u.normalMat, false, normalMatrix(world[i]));
+      gl.uniformMatrix4fv(u.model, false, m);
+      gl.uniformMatrix3fv(u.normalMat, false, normalMatrix(m));
       // The mesh's texture replaces the material's; the mesh's color multiplies it.
       const image = it.attrs.texture ?? g.image;
       const tex = image ? texture(image.uri ?? image, flip) : null;
@@ -827,6 +980,21 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
       const c = color(it.attrs.color, plain).map((v, k) => v * (g.color?.[k] ?? 1));
       gl.uniform3f(u.color, c[0], c[1], c[2]);
       gl.uniform1f(u.shininess, num(it.attrs.shininess, 32));
+      // glTF materials: metallic-roughness shading and their maps, on units 4 to 7.
+      const mat = g.mat;
+      gl.uniform1i(u.pbr, mat ? 1 : 0);
+      if (mat) {
+        gl.uniform2f(u.metalRough, mat.metal, mat.rough);
+        gl.uniform3fv(u.emissive, mat.emissive);
+        gl.uniform2f(u.normalOcclusion, mat.normalScale, mat.occlusionStrength);
+      }
+      MAPS.forEach(([field, flag], k) => {
+        const t = mat?.[field] && (field !== "normal" || derivatives) ? texture(mat[field].uri ?? mat[field], false) : null;
+        gl.uniform1i(u[flag], t ? 1 : 0);
+        gl.activeTexture(gl.TEXTURE4 + k);
+        gl.bindTexture(gl.TEXTURE_2D, t || null);
+      });
+      gl.activeTexture(gl.TEXTURE0);
       gl.uniform1f(u.opacity, opacity);
       gl.uniform3fv(u.highlight, it.id === focus && !picking ? [0.3, 0.55, 1] : [0, 0, 0]);
       // Pick colors are item numbers + 1; 0 (the background) for meshes without a handler,
@@ -913,7 +1081,10 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
   return {
     /** Whether a scene moves by itself (spinning items). */
     animated(scene) {
-      return !reduced?.matches && scene.items.some((it) => it.attrs.spin && vec3(it.attrs.spin, [0, 0, 0]).some((v) => v !== 0));
+      return (
+        !reduced?.matches &&
+        scene.items.some((it) => (it.attrs.spin && vec3(it.attrs.spin, [0, 0, 0]).some((v) => v !== 0)) || (it.kind === 1 && it.attrs.animation !== "none" && geometry(it)?.pose))
+      );
     },
     /** Draws `scene` at `w`×`h` device pixels; returns the canvas holding the image. */
     draw(scene, view, w, h, t, focus = -1) {

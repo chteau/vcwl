@@ -4,6 +4,18 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 15 — the rest of the 3D
+
+- Point lights cast shadows (a cube map of distances), like directional lights.
+- Overlapping translucent meshes blend in depth order at each pixel (depth peeling, four layers),
+  whatever their shapes; before, they were sorted by their centers.
+- glTF materials are shaded as metallic-roughness materials (Cook-Torrance), with their
+  metallic-roughness, normal, emissive and occlusion maps.
+- glTF node animations (translation, rotation, scale; step, linear and cubic spline) loop; a
+  mesh's `animation` names the one to play.
+- Accessibility mirror layout: inline text spans were tried and made no measurable difference;
+  see `docs/benchmarks.md`.
+
 ### Milestone 14 — finer slot updates
 
 - Slot content updates only the parts that read a changed value: the user passes its dirty mask
