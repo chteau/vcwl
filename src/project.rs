@@ -966,7 +966,7 @@ pub fn clean(p: &Project) -> Result<bool, String> {
         return Ok(false);
     }
     // Only remove the configured output directory, and only if it is inside the project.
-    let out = p.out.canonicalize().map_err(|e| e.to_string())?;
+    let out = canonical(&p.out).map_err(|e| e.to_string())?;
     if !out.starts_with(&p.root) || out == p.root || out.join("vcwl.toml").exists() {
         return Err(format!(
             "refusing to delete {}: not a build directory inside the project",

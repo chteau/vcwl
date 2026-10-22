@@ -265,7 +265,7 @@ impl Server {
     /// Compiles what `path` belongs to and publishes diagnostics for every file involved.
     fn diagnose(&mut self, path: &Path) {
         let mut found: HashMap<PathBuf, Vec<String>> = HashMap::new();
-        let canon = path.canonicalize().unwrap_or(path.to_path_buf());
+        let canon = crate::project::canonical(path).unwrap_or(path.to_path_buf());
         let entry = crate::project::manifest_for(path.parent().unwrap_or(Path::new(".")))
             .map(|(root, m)| {
                 root.join(
@@ -285,7 +285,7 @@ impl Server {
         let reaches = |sm: &crate::diag::SourceMap| {
             sm.files
                 .iter()
-                .any(|f| Path::new(&f.path).canonicalize().is_ok_and(|p| p == canon))
+                .any(|f| crate::project::canonical(Path::new(&f.path)).is_ok_and(|p| p == canon))
         };
         if !result.as_ref().is_some_and(|(_, sm)| reaches(sm)) {
             result = Some(compile(path));
@@ -302,7 +302,7 @@ impl Server {
                     if let Some(h) = &d.help {
                         msg.push_str(&format!("\nhelp: {h}"));
                     }
-                    let p = Path::new(&f.path).canonicalize().unwrap_or(PathBuf::from(&f.path));
+                    let p = crate::project::canonical(Path::new(&f.path)).unwrap_or(PathBuf::from(&f.path));
                     found.entry(p).or_default().push(format!(
                         "{{\"range\":{},\"severity\":1,\"source\":\"vcwl\",\"message\":{}}}",
                         range(&f.text, lo, hi),
@@ -345,7 +345,7 @@ impl Server {
 
     fn open(&mut self, uri: &str, text: String) {
         let path = path_of(uri);
-        let canon = path.canonicalize().unwrap_or(path.clone());
+        let canon = crate::project::canonical(&path).unwrap_or(path.clone());
         OVERLAY.with(|o| o.borrow_mut().insert(canon.clone(), text.clone()));
         self.docs.insert(canon, text);
         self.diagnose(&path);
@@ -380,13 +380,13 @@ impl Server {
             "textDocument/didSave" => self.diagnose(&path_of(&uri)),
             "textDocument/didClose" => {
                 let p = path_of(&uri);
-                let canon = p.canonicalize().unwrap_or(p);
+                let canon = crate::project::canonical(&p).unwrap_or(p);
                 OVERLAY.with(|o| o.borrow_mut().remove(&canon));
                 self.docs.remove(&canon);
             }
             "textDocument/formatting" => {
                 let p = path_of(&uri);
-                let canon = p.canonicalize().unwrap_or(p);
+                let canon = crate::project::canonical(&p).unwrap_or(p);
                 let text = self
                     .docs
                     .get(&canon)
