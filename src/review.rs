@@ -226,7 +226,7 @@ pub fn review(name: &str, dir: &Path) -> Vec<Finding> {
         add(
             Level::Notice,
             format!(
-                "declares JavaScript functions, which run with the page's full privileges if your app's JavaScript provides them: {}",
+                "declares JavaScript functions (they run with the page's full privileges): {}",
                 list(&mut externs)
             ),
         );
