@@ -1543,41 +1543,89 @@ impl Checker<'_> {
             ));
         }
         const METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
-        let Some(m) = METHODS.iter().position(|m| *m == f.method.name) else {
-            let d = Diag::ty(
-                f.method.span,
-                format!("unknown HTTP method `{}`", f.method.name),
-            );
-            return Err(match suggest(&f.method.name, METHODS.iter().copied()) {
-                Some(s) => d.help(format!("did you mean `{s}`?")),
-                None => d.help("use get, post, put, patch or delete"),
-            });
+        let server_fn = match self.scopes[self.file].get(&f.method.name) {
+            Some(Sym::Fn(id)) if self.sigs[*id].server => Some(*id),
+            _ => None,
         };
-        let method = ["GET", "POST", "PUT", "PATCH", "DELETE"][m];
-        let url = self.check_expr(&f.url, Some(&Type::Str))?;
-        self.coerce(&url.ty, &Type::Str, f.url.span)?;
-        let body = match &f.body {
-            Some(b) if matches!(method, "GET" | "DELETE") => {
+        let (method, url, body, ty) = if let Some(id) = server_fn {
+            // `fetch save_todo(t) { ... }`: a POST of the JSON arguments to the server.
+            if let Some(t) = &f.ty {
                 return Err(Diag::ty(
-                    b.span,
-                    format!("`{}` requests cannot have a body", f.method.name),
+                    t.span,
+                    "a server function's result type is known: remove `as ...`",
                 ));
             }
-            Some(b) => {
-                let v = self.check_expr(b, None)?;
-                let ty = self.zonk(&v.ty);
-                let enc = self.json_encoder(&ty, b.span)?;
-                Some(TExpr {
-                    kind: TK::Call(enc, vec![], vec![v]),
-                    ty: Type::Str,
-                    span: b.span,
-                })
+            let sig = self.sigs[id].clone();
+            if f.args.len() != sig.params.len() {
+                return Err(Diag::ty(
+                    f.span,
+                    format!(
+                        "`{}` takes {} argument(s) but {} were given",
+                        sig.name,
+                        sig.params.len(),
+                        f.args.len()
+                    ),
+                ));
             }
-            None => None,
+            let mut args = Vec::new();
+            for (a, p) in f.args.iter().zip(&sig.params) {
+                let v = self.check_expr(a, Some(p))?;
+                self.coerce(&v.ty, p, a.span)?;
+                args.push(v);
+            }
+            let url = TExpr {
+                kind: TK::Str(format!("__vcwl/fn/{}", sig.name)),
+                ty: Type::Str,
+                span: f.method.span,
+            };
+            let body = self.server_args(args, f.span)?;
+            ("POST", url, Some(body), sig.ret)
+        } else {
+            let Some(m) = METHODS.iter().position(|m| *m == f.method.name) else {
+                let d = Diag::ty(
+                    f.method.span,
+                    format!("unknown HTTP method or server function `{}`", f.method.name),
+                );
+                return Err(match suggest(&f.method.name, METHODS.iter().copied()) {
+                    Some(s) => d.help(format!("did you mean `{s}`?")),
+                    None => d.help("use get, post, put, patch or delete, or a `server fn`"),
+                });
+            };
+            let method = ["GET", "POST", "PUT", "PATCH", "DELETE"][m];
+            let (Some(url_expr), true) = (f.args.first(), f.args.len() <= 2) else {
+                return Err(Diag::ty(f.span, "`fetch` takes a URL and an optional body"));
+            };
+            let url = self.check_expr(url_expr, Some(&Type::Str))?;
+            self.coerce(&url.ty, &Type::Str, url_expr.span)?;
+            let body = match f.args.get(1) {
+                Some(b) if matches!(method, "GET" | "DELETE") => {
+                    return Err(Diag::ty(
+                        b.span,
+                        format!("`{}` requests cannot have a body", f.method.name),
+                    ));
+                }
+                Some(b) => {
+                    let v = self.check_expr(b, None)?;
+                    let ty = self.zonk(&v.ty);
+                    let enc = self.json_encoder(&ty, b.span)?;
+                    Some(TExpr {
+                        kind: TK::Call(enc, vec![], vec![v]),
+                        ty: Type::Str,
+                        span: b.span,
+                    })
+                }
+                None => None,
+            };
+            let Some(t) = &f.ty else {
+                return Err(Diag::ty(f.span, "`fetch` needs the expected response type")
+                    .help("name it: `fetch get(url) as [User] { ... }`"));
+            };
+            (method, url, body, self.resolve_type(t)?)
         };
-        let ty = self.resolve_type(&f.ty)?;
-        let result_fn = self.fetch_result_fn(&ty, f.ty.span)?;
-        self.fetch_span.get_or_insert(f.span);
+        let result_fn = self.fetch_result_fn(&ty, f.span)?;
+        if server_fn.is_none() {
+            self.fetch_span.get_or_insert(f.span);
+        }
 
         self.fetch_hidden = self.local_scopes.split_off(self.handler_base);
         self.local_scopes.push(Vec::new());

@@ -10,6 +10,7 @@ commands:
   dev [--port N]         build in development mode, serve and rebuild on changes
   check [file]           parse and type-check without producing artifacts
   build [--dev]          compile the project to static files in dist/
+  serve [--port N]       release build served with its server functions (`server fn`)
   test [paths]           run `test_*` functions (default: tests/**/*.vcwl)
   fmt [--check] [files]  format source files
   clean                  remove build artifacts
@@ -31,6 +32,7 @@ fn main() -> ExitCode {
         "run" => cmd_run(rest),
         "compile" => cmd_compile(rest),
         "dev" => vcwl::devserver::run(rest),
+        "serve" => vcwl::server::run(rest),
         "test" => vcwl::testrunner::run(rest),
         "fmt" => vcwl::fmt::run(rest),
         "help" | "--help" | "-h" => {

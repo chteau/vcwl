@@ -1,0 +1,10 @@
+// error: server functions cannot be generic
+app "T"
+
+server fn echo<T>(v: T) -> T {
+    v
+}
+
+component App {
+    text("x")
+}

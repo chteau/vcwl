@@ -10,3 +10,4 @@ members = ["render"]
 vcwl-render = { path = "render" }
 wasm-encoder = "0.262.0"
 wasmparser = "0.262.0"
+wasmtime = { version = "50.0.0", default-features = false, features = ["runtime", "cranelift", "gc", "gc-drc", "std", "anyhow"] }

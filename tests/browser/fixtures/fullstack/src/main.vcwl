@@ -1,0 +1,87 @@
+// Browser-test fixture: server functions with a persistent store.
+app "Guestbook"
+
+struct Entry {
+    name: String,
+    text: String,
+}
+
+server fn entries() -> [Entry] {
+    load<[Entry]>("entries").unwrap_or([])
+}
+
+server fn sign(name: String, text: String) -> [Entry] {
+    let secret = env("GUESTBOOK_SECRET").unwrap_or("no secret")
+    print("signing as " + name + " (" + secret + ")")
+    assert(text.len() > 0, "empty message")
+    let all = (load<[Entry]>("entries").unwrap_or([])).push(Entry { name: name, text: text })
+    save("entries", all)
+    all
+}
+
+server fn clear() {
+    remove("entries")
+}
+
+component App {
+    state list: [Entry] = []
+    state name: String = "Ada"
+    state text: String = ""
+    state status: String = "loading"
+
+    on mount {
+        fetch entries() {
+            Ok(es) => {
+                list = es
+                status = "ready"
+            }
+            Err(e) => {
+                status = e.message()
+            }
+        }
+    }
+
+    column(gap: 8px) {
+        heading("Guestbook", level: 1)
+        paragraph(status)
+        input(label: "Message", value: text) {
+            on input(v) {
+                text = v
+            }
+        }
+        button("Sign") {
+            on click {
+                fetch sign(name, text) {
+                    Ok(es) => {
+                        list = es
+                        text = ""
+                        status = "signed"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        button("Clear") {
+            on click {
+                fetch clear() {
+                    Ok(_) => {
+                        list = []
+                        status = "cleared"
+                    }
+                    Err(e) => {
+                        status = e.message()
+                    }
+                }
+            }
+        }
+        list {
+            for e in list key e.text {
+                item {
+                    text("{e.name}: {e.text}")
+                }
+            }
+        }
+    }
+}

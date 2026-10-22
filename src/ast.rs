@@ -49,6 +49,8 @@ pub struct Import {
 pub struct FnDecl {
     pub name: Ident,
     pub exported: bool,
+    /// `server fn`: runs on the server (`vcwl serve`); the client calls it with `fetch`.
+    pub server: bool,
     pub generics: Vec<Ident>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
@@ -149,11 +151,11 @@ pub enum Stmt {
 }
 
 #[derive(Clone, Debug)]
+/// `fetch get(url[, body]) as T { arms }`, or `fetch server_fn(args) { arms }`.
 pub struct Fetch {
     pub method: Ident,
-    pub url: Expr,
-    pub body: Option<Expr>,
-    pub ty: TypeExpr,
+    pub args: Vec<Expr>,
+    pub ty: Option<TypeExpr>,
     pub arms: Vec<Arm>,
     pub span: Span,
 }

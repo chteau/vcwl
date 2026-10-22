@@ -238,7 +238,12 @@ impl<'a> Parser<'a> {
             return self.app().map(Item::App);
         }
         let exported = self.eat_kw("export");
-        if self.is_kw("fn") {
+        if self.is_kw("server") && matches!(self.peek_at(1), Tok::Ident(s) if s == "fn") {
+            self.bump();
+            let mut f = self.func(exported)?;
+            f.server = true;
+            Ok(Item::Fn(f))
+        } else if self.is_kw("fn") {
             self.func(exported).map(Item::Fn)
         } else if self.eat_kw("struct") {
             let name = self.ident()?;
@@ -378,6 +383,7 @@ impl<'a> Parser<'a> {
         Ok(FnDecl {
             name,
             exported,
+            server: false,
             generics,
             params,
             ret,
@@ -602,23 +608,24 @@ impl<'a> Parser<'a> {
         let start = self.expect_kw("fetch")?;
         let method = self.ident()?;
         self.expect("(")?;
-        let url = self.expr()?;
-        let body = if self.eat(",") {
-            Some(self.expr()?)
+        let mut args = Vec::new();
+        while !self.is(")") {
+            args.push(self.expr()?);
+            if !self.eat(",") {
+                break;
+            }
+        }
+        self.expect(")")?;
+        let ty = if self.eat_kw("as") {
+            Some(self.type_expr()?)
         } else {
             None
         };
-        self.expect(")")?;
-        self.expect_kw("as").map_err(|d| {
-            d.help("name the expected response type: `fetch get(url) as [User] { ... }`")
-        })?;
-        let ty = self.type_expr()?;
         self.expect("{")?;
         let arms = self.arms()?;
         Ok(Stmt::Fetch(Box::new(Fetch {
             method,
-            url,
-            body,
+            args,
             ty,
             arms,
             span: start.to(self.prev_span()),

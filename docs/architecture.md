@@ -119,6 +119,20 @@ In the browser the canvas stays hidden until its first frame; before that frame 
 `take_over(scrollY)`, so the renderer scrolls to the same place and shows `when appear` elements
 in view without their intro transition. Then the static markup is removed.
 
+### Server functions
+
+`server fn` bodies are type-checked like other functions, but views and handlers cannot call
+them; `fetch f(args)` in a handler becomes a `POST __vcwl/fn/f` whose body is the JSON array of
+the arguments, decoded with `f`'s result type (`check_fetch`). After checking, the compiler
+generates one entry per server function (`json.rs` `server_entry`): it decodes the arguments
+from JSON handle 0, calls the function and passes the JSON of the result to the host's
+`respond` (or `reject` on a mismatch). A second lowering pass exports only these entries, so
+`server.wasm` holds the server functions and what they call, and `app.wasm` none of it.
+`src/server.rs` runs `server.wasm` with wasmtime (GC proposal enabled): a fresh instance per
+call from a pre-linked `InstancePre`, an epoch deadline, a memory limit, and host functions
+mirroring the browser host's JSON and text I/O plus `env`, `store_get/set/delete`. See
+[ADR 14](adr/0014-server-functions.md).
+
 ### Transitions
 
 `render/src/anim.rs`: when a restyle changes `opacity`, `transform`, `color` or a background color

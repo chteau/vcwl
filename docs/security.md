@@ -34,7 +34,20 @@ enforce.
   URLs are sanitized as at run time, tags are restricted to lowercase names, and bound style values
   are written only if they parse as finite numbers with a known unit.
 
+- **Server functions run in a WebAssembly runtime (wasmtime)**, one fresh instance per call with
+  256 MB of memory and 5 s of time at most, one call at a time. They reach the outside world only
+  through the host functions the server defines (environment variables, the store, the log).
+  Their arguments are validated against the declared types before the function runs. Calls must
+  be `POST` with `content-type: application/json` (which other sites cannot send without a CORS
+  preflight, never granted) and are refused when an `Origin` header names another host. The
+  client module contains no server code. This isolates server code from the server process; it
+  does not make the functions themselves correct, and they have no authentication built in: any
+  visitor of the site can call them with any arguments of the right types.
+
 ## Not enforced or not yet implemented
+
+- Server functions: no authentication, sessions, rate limiting or request size quota beyond
+  1 MB; the store is a single JSON file meant for small data.
 
 - A meta-tag CSP cannot set `frame-ancestors`, reporting or sandboxing; configure HTTP headers on
   the server when possible.

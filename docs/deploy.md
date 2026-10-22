@@ -5,6 +5,18 @@
 as is. All paths are relative and routing uses the URL hash by default, so the site works
 from any sub-path such as `https://user.github.io/repo/`.
 
+## Full stack (`vcwl serve`)
+
+Apps with server functions (`server fn`) need a server: `vcwl serve [--port N] [--host ADDR]`
+makes a release build and serves `dist/` together with the functions in
+`dist-server/server.wasm` (default `127.0.0.1:8080`). `vcwl dev` runs them too, reloaded after
+each rebuild. `save`/`load` keep their data in `data/store.json` (`store = "..."` in
+vcwl.toml), written atomically after each call that changes it.
+
+The site's static files still work on any static host; only the function calls need `vcwl serve`.
+Behind a reverse proxy, forward everything (or at least `/__vcwl/fn/`) to it; it speaks plain
+HTTP/1.1 and should not be exposed without TLS in front.
+
 ## Real URLs (`routing = "path"`)
 
 ```toml

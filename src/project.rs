@@ -52,7 +52,7 @@ impl Project {
 }
 
 /// Reads `key = "value"` from the manifest (the only form the manifest uses).
-fn manifest_value(text: &str, key: &str) -> Option<String> {
+pub fn manifest_value(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|l| {
         let (k, v) = l.split_once('=')?;
         (k.trim() == key).then(|| v.trim().trim_matches('"').to_string())
@@ -499,6 +499,14 @@ pub fn app_wasm(wasm: &[u8], app: &crate::app::AppOutput, dev: bool, routing: Ro
     out
 }
 
+/// Where the server module of `out` goes: beside it, never inside the public directory.
+pub fn server_dir(out: &Path) -> PathBuf {
+    let name = out
+        .file_name()
+        .map_or("dist".into(), |n| n.to_string_lossy());
+    out.with_file_name(format!("{name}-server"))
+}
+
 /// Compiles the project and writes static artifacts to `out`. Returns the artifact sizes.
 pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>, String> {
     let (o, _) = compile_entry(entry, dev)?;
@@ -606,6 +614,21 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
             .map_err(|e| format!("{}: {e}", file.display()))?;
         if page.route.as_deref().is_none_or(|r| r == "/") {
             sizes.insert(0, ("index.html".to_string(), html.len()));
+        }
+    }
+    let server = server_dir(out);
+    match &o.server {
+        Some(wasm) => {
+            std::fs::create_dir_all(&server)
+                .and_then(|_| std::fs::write(server.join("server.wasm"), wasm))
+                .map_err(|e| format!("{}: {e}", server.display()))?;
+            sizes.push((
+                "../".to_string() + &server.file_name().unwrap().to_string_lossy() + "/server.wasm",
+                wasm.len(),
+            ));
+        }
+        None => {
+            let _ = std::fs::remove_file(server.join("server.wasm"));
         }
     }
     if pages.iter().any(|p| p.canonical.is_some()) {

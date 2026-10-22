@@ -333,3 +333,48 @@ on click {
   component values but not the handler's local variables. If the component was removed in the
   meantime, the response is discarded.
 - `fetch` requires a `network` capability; the host refuses other origins.
+
+### Server functions
+
+```vcwl
+struct Entry {
+    name: String,
+    text: String,
+}
+
+server fn sign(name: String, text: String) -> [Entry] {
+    assert(text.len() > 0, "empty message")
+    let all = load<[Entry]>("entries").unwrap_or([]).push(Entry { name: name, text: text })
+    save("entries", all)
+    all
+}
+
+component App {
+    state list: [Entry] = []
+
+    button("Sign") {
+        on click {
+            fetch sign("Ada", "hello") {
+                Ok(entries) => {
+                    list = entries
+                }
+                Err(e) => {}
+            }
+        }
+    }
+}
+```
+
+- A `server fn` runs on the server ([`vcwl serve`](deploy.md#full-stack-vcwl-serve)). The
+  client calls it from an event handler with `fetch name(args) { arms }`: the arguments are sent
+  as JSON, the result arrives as `Result<T, HttpError>` like any `fetch`. Calling it directly
+  outside server code is a compile error.
+- Parameters and results use the same JSON types as `fetch`; the server checks the arguments at
+  run time (a mismatch is HTTP 400), so a client cannot pass values of the wrong shape.
+- Only server functions can use `env(name) -> String?` (environment variables), and the
+  persistent store: `save(key, value)`, `load<T>(key) -> T?` (`None` when missing or of another
+  shape) and `remove(key)`.
+- Server functions can call ordinary functions and each other. Their code, and what they call,
+  is compiled into `dist-server/server.wasm` only; `app.wasm` contains just the call's URL.
+- A panic, trap or call running longer than 5 s is HTTP 500 for the client; the details go to
+  the server's log.

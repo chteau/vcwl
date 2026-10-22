@@ -1,0 +1,10 @@
+// error: `secret` runs on the server
+app "T"
+
+server fn secret() -> String {
+    "x"
+}
+
+component App {
+    text(secret())
+}

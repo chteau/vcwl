@@ -504,3 +504,24 @@ fn json_float_text(f: Float) -> String {
 fn json_quote(s: String) -> String {
     __json_quote(s)
 }
+
+// ----- server functions (`env`, `load`, `save` and `remove` call these) -----
+
+fn server_env(name: String) -> String? {
+    let n = __env(name)
+    if n < 0 { None } else { Some(__str_from_io(n)) }
+}
+
+fn server_load_text(key: String) -> String? {
+    let n = __store_get(key)
+    if n < 0 { None } else { Some(__str_from_io(n)) }
+}
+
+fn server_save_text(key: String, value: String) {
+    // Both strings travel in one buffer: the key's length, then key and value.
+    __store_set(__str_len(key), key + value)
+}
+
+fn server_remove(key: String) {
+    __store_delete(key)
+}

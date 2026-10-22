@@ -14,6 +14,7 @@ pub enum Sym {
     Style(usize),
 }
 
+#[derive(Clone)]
 pub struct FnSig {
     pub name: String,
     pub generics: Vec<String>,
@@ -21,6 +22,8 @@ pub struct FnSig {
     pub ret: Type,
     pub file: usize,
     pub item: usize,
+    /// `server fn`.
+    pub server: bool,
 }
 
 /// Where a body is being checked; controls which effects are allowed.
@@ -56,6 +59,8 @@ pub struct Checker<'a> {
     pub handler_base: usize,
     /// Handler scopes hidden while checking `fetch` arms (for diagnostics).
     pub fetch_hidden: Vec<Vec<(String, LocalId, bool)>>,
+    /// Checking the body of a server function.
+    pub server: bool,
     /// First `fetch` in the program (it requires the network capability).
     pub fetch_span: Option<Span>,
 }
@@ -91,6 +96,11 @@ const INTRINSICS: &[(&str, &[&str], &str)] = &[
     ("__json_str", &["Int"], "String"),
     ("__json_num_text", &["Float"], "String"),
     ("__json_quote", &["String"], "String"),
+    ("__json_parse", &["String"], "Int"),
+    ("__env", &["String"], "Int"),
+    ("__store_get", &["String"], "Int"),
+    ("__store_set", &["Int", "String"], "()"),
+    ("__store_delete", &["String"], "()"),
 ];
 
 impl<'a> Checker<'a> {
@@ -116,6 +126,7 @@ impl<'a> Checker<'a> {
             handler_base: 0,
             fetch_span: None,
             fetch_hidden: Vec::new(),
+            server: false,
         }
     }
 
@@ -153,6 +164,7 @@ impl<'a> Checker<'a> {
                             ret: Type::Unit,
                             file: fi,
                             item: ii,
+                            server: f.server,
                         });
                         self.fns.push(None);
                         (Sym::Fn(self.sigs.len() - 1), &f.name, f.exported)
@@ -287,10 +299,15 @@ impl<'a> Checker<'a> {
                 Err(d) => self.diags.push(d),
             }
         }
+        self.server = false;
     }
 
     fn check_fn(&mut self, id: usize, f: &ast::FnDecl) -> Result<TFn> {
         self.file = self.sigs[id].file;
+        self.server = f.server;
+        if f.server && !f.generics.is_empty() {
+            return Err(Diag::ty(f.name.span, "server functions cannot be generic"));
+        }
         self.begin_body(names(&f.generics), self.sigs[id].ret.clone(), Ctx::Fn);
         let mut params = Vec::new();
         for (p, ty) in f.params.iter().zip(self.sigs[id].params.clone()) {
@@ -1640,6 +1657,10 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
+        let user_fn = matches!(self.scopes[self.file].get(name), Some(Sym::Fn(id)) if self.sigs[*id].file != 0);
+        if !user_fn && matches!(name, "env" | "load" | "save" | "remove") {
+            return self.check_server_builtin(callee, type_args, args, span);
+        }
         match self.scopes[self.file].get(name).copied() {
             Some(Sym::Fn(id)) => self.call_fn(
                 id,
@@ -1677,6 +1698,69 @@ impl<'a> Checker<'a> {
                     d = d.help(format!("did you mean `{s}`?"));
                 }
                 Err(d)
+            }
+        }
+    }
+
+    /// `env(name)`, `load<T>(key)`, `save(key, value)` and `remove(key)`: environment variables
+    /// and the persistent store, available in server functions only.
+    fn check_server_builtin(
+        &mut self,
+        callee: &ast::Ident,
+        type_args: &[ast::TypeExpr],
+        args: &[ast::Arg],
+        span: Span,
+    ) -> Result<TExpr> {
+        let name = callee.name.as_str();
+        if !self.server {
+            return Err(Diag::ty(
+                callee.span,
+                format!("`{name}` is only available in server functions (`server fn`)"),
+            ));
+        }
+        let arity = if name == "save" { 2 } else { 1 };
+        if args.len() != arity {
+            return Err(Diag::ty(
+                span,
+                format!("`{name}` takes {arity} argument(s)"),
+            ));
+        }
+        let key = self.check_expr(&args[0].value, Some(&Type::Str))?;
+        self.coerce(&key.ty, &Type::Str, args[0].value.span)?;
+        let call = |f: usize, args: Vec<TExpr>, ty: Type| TExpr {
+            kind: TK::Call(f, vec![], args),
+            ty,
+            span,
+        };
+        let pf = |this: &Self, n: &str| this.prelude_fn(n).expect("server prelude");
+        match name {
+            "env" => Ok(call(
+                pf(self, "server_env"),
+                vec![key],
+                self.option(Type::Str),
+            )),
+            "remove" => Ok(call(pf(self, "server_remove"), vec![key], Type::Unit)),
+            "save" => {
+                let v = self.check_expr(&args[1].value, None)?;
+                let ty = self.zonk(&v.ty);
+                let enc = self.json_encoder(&ty, args[1].value.span)?;
+                let text = call(enc, vec![v], Type::Str);
+                Ok(call(
+                    pf(self, "server_save_text"),
+                    vec![key, text],
+                    Type::Unit,
+                ))
+            }
+            _ => {
+                let [t] = type_args else {
+                    return Err(Diag::ty(
+                        span,
+                        "`load` needs the stored type: `load<[Todo]>(\"todos\")`",
+                    ));
+                };
+                let t = self.resolve_type(t)?;
+                let f = self.store_load_fn(&t, span)?;
+                Ok(call(f, vec![key], self.option(t)))
             }
         }
     }
@@ -1734,6 +1818,19 @@ impl<'a> Checker<'a> {
     ) -> Result<TExpr> {
         if let Some(n) = named.iter().find_map(|a| a.name.as_ref()) {
             return Err(Diag::ty(n.span, "function arguments are positional"));
+        }
+        let name = &self.sigs[id].name;
+        let server_only = self.sigs[id].server
+            || self.sigs[id].file == 0 && name.starts_with("server_") && self.file != 0;
+        if server_only && !self.server {
+            let d = Diag::ty(span, format!("`{name}` runs on the server"));
+            return Err(if self.sigs[id].server {
+                d.help(format!(
+                    "call it from an event handler with `fetch {name}(...) {{ Ok(v) => ... Err(e) => ... }}`"
+                ))
+            } else {
+                d
+            });
         }
         let sig_generics = self.sigs[id].generics.clone();
         let targs: Vec<Type> = if type_args.is_empty() {

@@ -1,0 +1,10 @@
+// error: `save` is only available in server functions
+app "T"
+
+fn helper() {
+    save("k", 1)
+}
+
+component App {
+    text("x")
+}

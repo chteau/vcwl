@@ -1,0 +1,14 @@
+// error: cannot decode JSON for type
+app "T"
+
+enum Shape {
+    Circle(Float),
+}
+
+server fn area(s: Shape) -> Float {
+    0.0
+}
+
+component App {
+    text("x")
+}

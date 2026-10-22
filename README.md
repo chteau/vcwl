@@ -43,6 +43,8 @@ Working end to end, tested in Node.js and headless Chrome:
   navigation, text fields with selection and clipboard, checkboxes, select pop-ups, scrolling;
 - `fetch` with JSON validated at run time against the expected type, and network access limited
   by declared capabilities (enforced by the host and the Content-Security-Policy);
+- server functions (`server fn`) called with typed `fetch` from the client and run by
+  `vcwl serve` in a WebAssembly runtime, with a persistent key-value store;
 - components with child content (`slot`), web fonts (`font "X" from "fonts/x.woff2"`), and
   build-time prerendering of every route to static HTML for first paint and crawlers;
 - tooling: `vcwl new | dev | build | check | test | fmt | run | compile | clean`.
@@ -69,7 +71,8 @@ cd hello
 | --- | --- |
 | `vcwl new <dir>` | create a starter app |
 | `vcwl dev [--port N]` | dev build, local server, rebuild and reload on change, errors shown in the page |
-| `vcwl build [--dev]` | compile the project to `dist/` |
+| `vcwl build [--dev]` | compile the project to `dist/` (and `dist-server/` for server functions) |
+| `vcwl serve [--port N]` | release build served with its server functions |
 | `vcwl check [file]` | parse and type-check only |
 | `vcwl test [paths]` | run `test_*` functions (default: `tests/**/*.vcwl`) |
 | `vcwl fmt [--check] [paths]` | normalize indentation and whitespace |

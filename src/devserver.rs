@@ -5,7 +5,8 @@
 //! diagnostics of the last failed build (if any). `dev.js` polls it to reload the page
 //! or show the errors.
 use crate::project::{self, DEV_JS, Project, VCWL_JS};
-use std::io::{BufRead, BufReader, Write};
+use crate::server::{self, Response, function_call, read_request};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,6 +19,8 @@ struct Status {
 }
 
 type Shared = Arc<Mutex<Status>>;
+/// The server functions of the last successful build.
+type Functions = Arc<Mutex<Option<Arc<server::Functions>>>>;
 
 pub fn run(args: &[String]) -> Result<(), String> {
     let port = match args.iter().position(|a| a == "--port") {
@@ -32,14 +35,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("cannot listen on port {port}: {e}"))?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
     let status: Shared = Arc::default();
-    rebuild(&p, &status);
+    let fns: Functions = Arc::default();
+    rebuild(&p, &status, &fns);
     println!(
         "serving {} at http://{addr}/ (Ctrl-C to stop)",
         p.out.display()
     );
     let _ = std::io::stdout().flush();
 
-    let (root, out, watched) = (p.root.clone(), p.out.clone(), status.clone());
+    let (root, out, watched, reloaded) =
+        (p.root.clone(), p.out.clone(), status.clone(), fns.clone());
     std::thread::spawn(move || {
         let mut last = fingerprint(&root, &out);
         loop {
@@ -49,7 +54,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 last = now;
                 // Re-read the manifest: `entry` or `out` may have changed.
                 match Project::find(&root) {
-                    Ok(p) => rebuild(&p, &watched),
+                    Ok(p) => rebuild(&p, &watched, &reloaded),
                     Err(e) => watched.lock().unwrap().error = e,
                 }
             }
@@ -57,17 +62,19 @@ pub fn run(args: &[String]) -> Result<(), String> {
     });
 
     for conn in listener.incoming().flatten() {
-        let (out, status) = (p.out.clone(), status.clone());
+        let (out, status, fns) = (p.out.clone(), status.clone(), fns.clone());
         std::thread::spawn(move || {
-            let _ = serve(conn, &out, &status);
+            let _ = serve(conn, &out, &status, &fns);
         });
     }
     Ok(())
 }
 
-fn rebuild(p: &Project, status: &Shared) {
+fn rebuild(p: &Project, status: &Shared, fns: &Functions) {
     let start = std::time::Instant::now();
-    let result = project::build(&p.entry, &p.out, true);
+    let result = project::build(&p.entry, &p.out, true)
+        .and_then(|_| server::load_functions(p))
+        .map(|f| *fns.lock().unwrap() = f.map(Arc::new));
     let mut s = status.lock().unwrap();
     match result {
         Ok(_) => {
@@ -113,72 +120,51 @@ fn fingerprint(root: &Path, skip: &Path) -> Vec<(PathBuf, SystemTime)> {
     v
 }
 
-fn serve(conn: TcpStream, out: &Path, status: &Shared) -> std::io::Result<()> {
-    conn.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let mut reader = BufReader::new(&conn);
-    let mut request = String::new();
-    reader.read_line(&mut request)?;
-    // Drain the headers; requests have no body we care about.
-    let mut line = String::new();
-    while reader.read_line(&mut line)? > 2 {
-        line.clear();
-    }
-    let mut parts = request.split_whitespace();
-    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
-    let path = target.split(['?', '#']).next().unwrap_or("/");
-    let mut location = String::new();
-    let (code, ctype, body): (&str, &str, Vec<u8>) = if method != "GET" && method != "HEAD" {
-        (
-            "405 Method Not Allowed",
-            "text/plain",
-            b"method not allowed".to_vec(),
-        )
-    } else if path == "/__vcwl/status" {
+fn serve(conn: TcpStream, out: &Path, status: &Shared, fns: &Functions) -> std::io::Result<()> {
+    let req = read_request(&conn)?;
+    let res = if req.path == "/__vcwl/status" {
         let s = status.lock().unwrap();
-        (
+        Response::new(
             "200 OK",
             "text/plain; charset=utf-8",
-            format!("{}\n{}", s.version, s.error).into_bytes(),
+            format!("{}\n{}", s.version, s.error),
         )
+    } else if let Some(res) = function_call(&req, fns.lock().unwrap().as_deref()) {
+        res
+    } else if req.method != "GET" && req.method != "HEAD" {
+        Response::new("405 Method Not Allowed", "text/plain", "method not allowed")
     } else {
-        match resolve(out, path) {
-            None => ("400 Bad Request", "text/plain", b"bad path".to_vec()),
-            // Like static hosts: `/about` → `/about/`, unknown paths get 404.html (path routing).
-            Some(file) if file.is_dir() => {
-                location = format!("location: {path}/\r\n");
-                ("301 Moved Permanently", "text/plain", Vec::new())
-            }
-            Some(file) => match std::fs::read(&file) {
-                Ok(data) => ("200 OK", content_type(&file), data),
-                Err(_) if out.join("404.html").is_file() && path != "/" => (
-                    "404 Not Found",
-                    "text/html; charset=utf-8",
-                    std::fs::read(out.join("404.html"))?,
-                ),
-                // Before the first successful build, still serve a page that reports the errors.
-                Err(_) => match path {
-                    "/" | "/index.html" => (
-                        "200 OK",
-                        "text/html; charset=utf-8",
-                        FALLBACK_HTML.as_bytes().to_vec(),
-                    ),
-                    "/dev.js" => ("200 OK", "text/javascript", DEV_JS.as_bytes().to_vec()),
-                    "/vcwl.js" => ("200 OK", "text/javascript", VCWL_JS.as_bytes().to_vec()),
-                    _ => ("404 Not Found", "text/plain", b"not found".to_vec()),
-                },
-            },
-        }
+        static_file(out, &req.path)
     };
-    let mut w = &conn;
-    write!(
-        w,
-        "HTTP/1.1 {code}\r\n{location}content-type: {ctype}\r\ncontent-length: {}\r\ncache-control: no-store\r\nconnection: close\r\n\r\n",
-        body.len()
-    )?;
-    if method != "HEAD" {
-        w.write_all(&body)?;
+    res.write(&conn, req.method == "HEAD")
+}
+
+/// A file of the output directory, as a static host serves it: `/about` redirects to
+/// `/about/`, which serves `about/index.html`, and unknown paths get `404.html` if it exists.
+pub fn static_file(out: &Path, path: &str) -> Response {
+    match resolve(out, path) {
+        None => Response::new("400 Bad Request", "text/plain", "bad path"),
+        Some(file) if file.is_dir() => {
+            let mut r = Response::new("301 Moved Permanently", "text/plain", "");
+            r.headers.push(format!("location: {path}/"));
+            r
+        }
+        Some(file) => match std::fs::read(&file) {
+            Ok(data) => Response::new("200 OK", content_type(&file), data),
+            Err(_) => match (path, std::fs::read(out.join("404.html"))) {
+                (p, Ok(page)) if p != "/" => {
+                    Response::new("404 Not Found", "text/html; charset=utf-8", page)
+                }
+                // Before the first successful build, still serve a page that reports the errors.
+                ("/" | "/index.html", _) => {
+                    Response::new("200 OK", "text/html; charset=utf-8", FALLBACK_HTML)
+                }
+                ("/dev.js", _) => Response::new("200 OK", "text/javascript", DEV_JS),
+                ("/vcwl.js", _) => Response::new("200 OK", "text/javascript", VCWL_JS),
+                _ => Response::new("404 Not Found", "text/plain", "not found"),
+            },
+        },
     }
-    w.flush()
 }
 
 const FALLBACK_HTML: &str = "<!doctype html>\n<html lang=\"en\"><meta charset=\"utf-8\"><title>VCWL dev</title>\n\

@@ -165,6 +165,11 @@ pub fn check_app(ck: &mut Checker) -> Option<AppInfo> {
         return None;
     }
     let caps = match capabilities(app) {
+        // Server functions are called on the app's own origin.
+        Ok(mut c) if ck.sigs.iter().any(|s| s.server) && !c.network.iter().any(|h| h == "self") => {
+            c.network.push("self".into());
+            c
+        }
         Ok(c) => c,
         Err(d) => {
             ck.diags.push(d);

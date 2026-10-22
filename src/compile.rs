@@ -14,6 +14,8 @@ pub struct Output {
     /// Exported function names (for tests and the `run` command).
     pub exports: Vec<String>,
     pub app: Option<crate::app::AppOutput>,
+    /// The server module (`server fn`s exported as `__fn_<name>`), if the program has any.
+    pub server: Option<Vec<u8>>,
 }
 
 pub struct Failure {
@@ -97,6 +99,19 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
     }
     ck.check_fns();
     let app = crate::app::check_app(&mut ck);
+    let mut entries = Vec::new();
+    for f in 0..ck.sigs.len() {
+        if !ck.sigs[f].server {
+            continue;
+        }
+        let ast::Item::Fn(decl) = &ck.files[ck.sigs[f].file].items[ck.sigs[f].item] else {
+            unreachable!()
+        };
+        match ck.server_entry(f, decl.name.span) {
+            Ok(id) => entries.push((id, ck.sigs[f].name.clone())),
+            Err(d) => ck.diags.push(d),
+        }
+    }
     if !ck.diags.is_empty() {
         return Err(Failure {
             diags: std::mem::take(&mut ck.diags),
@@ -123,12 +138,32 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
         None => None,
     };
     lw.drain();
-    let mut module = lw.m;
-    opt::optimize(&mut module);
-    let wasm = codegen::emit(&module);
+    let wasm = finish(lw.m)?;
     if let Ok(path) = std::env::var("VCWL_DUMP_WASM") {
         let _ = std::fs::write(path, &wasm);
     }
+    // Server functions only reach the client as URLs: their code is in this module alone.
+    let server = if entries.is_empty() {
+        None
+    } else {
+        let mut sw = lower::Lower::new(&ck.adts, &fns);
+        for (id, name) in &entries {
+            sw.export_fn(*id, &format!("__fn_{name}"));
+        }
+        sw.drain();
+        Some(finish(sw.m)?)
+    };
+    Ok(Output {
+        wasm,
+        exports,
+        app: app_out,
+        server,
+    })
+}
+
+fn finish(mut module: crate::ir::Module) -> Result<Vec<u8>, Failure> {
+    opt::optimize(&mut module);
+    let wasm = codegen::emit(&module);
     if let Err(e) = codegen::validate(&wasm) {
         return Err(Failure {
             diags: vec![Diag::compile(
@@ -137,9 +172,5 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
             )],
         });
     }
-    Ok(Output {
-        wasm,
-        exports,
-        app: app_out,
-    })
+    Ok(wasm)
 }

@@ -52,6 +52,15 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
   estimate, so anything the app computes from measured text is approximate in the static page.
 - Web fonts are loaded from the app's own origin only (`font-src 'self'`).
 
+## Server functions
+
+- One call runs at a time; there is no async I/O on the server (no outgoing `fetch`, database or
+  file access besides the key-value store).
+- The store is one JSON file rewritten after each change: fine for small data, not for large or
+  write-heavy workloads.
+- Prerendering does not call server functions (they render their loading state).
+- `vcwl serve` speaks HTTP/1.1 without TLS or keep-alive.
+
 ## Platform
 
 - Requires WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari 18.2+); there is no fallback.

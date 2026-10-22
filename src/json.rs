@@ -21,6 +21,10 @@ pub enum Role {
     Decode,
     Encode,
     FetchResult,
+    /// `load<T>(key)` in server functions.
+    Load,
+    /// The exported entry point of a server function (`server fn`).
+    Entry,
 }
 
 struct Gen {
@@ -147,6 +151,7 @@ impl Checker<'_> {
             ret,
             file: 0,
             item: usize::MAX,
+            server: false,
         });
         self.fns.push(None);
         let id = self.sigs.len() - 1;
@@ -591,6 +596,200 @@ impl Checker<'_> {
             decoded,
         );
         self.finish_json_fn(id, g, vec![kind, status, len], body);
+        Ok(id)
+    }
+
+    /// The JSON array text `[a, b, ...]` of a server function's arguments.
+    pub fn server_args(&mut self, args: Vec<TExpr>, span: Span) -> Result<TExpr> {
+        let g = Gen {
+            locals: Vec::new(),
+            span,
+        };
+        let mut parts = vec![g.str("[")];
+        for (i, a) in args.into_iter().enumerate() {
+            let ty = self.zonk(&a.ty);
+            let enc = self.json_encoder(&ty, a.span)?;
+            if i > 0 {
+                parts.push(g.str(","));
+            }
+            parts.push(g.call(enc, vec![a], Type::Str));
+        }
+        parts.push(g.str("]"));
+        Ok(self.concat(&g, parts))
+    }
+
+    /// `(key: String) -> t?`: the stored value of `key` decoded as `t`, or `None` when it is
+    /// missing or does not match the type (server functions).
+    pub fn store_load_fn(&mut self, t: &Type, span: Span) -> Result<usize> {
+        let dec = self.json_decoder(t, span)?;
+        if let Some(&id) = self.json_fns.get(&(Role::Load, t.clone())) {
+            return Ok(id);
+        }
+        let opt = self.option(t.clone());
+        let id = self.new_json_fn(
+            (Role::Load, t.clone()),
+            format!("load<{}>", self.show(t)),
+            vec![Type::Str],
+            opt.clone(),
+        );
+        let mut g = Gen {
+            locals: Vec::new(),
+            span,
+        };
+        let key = g.local("key", Type::Str);
+        let (text, h, v, e) = (
+            g.local("text", Type::Str),
+            g.local("h", Type::Int),
+            g.local("v", t.clone()),
+            g.local("e", Type::Str),
+        );
+        let option = self.prelude_adt("Option");
+        let none = g.e(TK::Variant(option, vec![t.clone()], 1, vec![]), opt.clone());
+        let some = g.e(
+            TK::Variant(option, vec![t.clone()], 0, vec![g.get(v)]),
+            opt.clone(),
+        );
+        let result = self.prelude_adt("Result");
+        let rty = self.result_ty(t.clone(), Type::Str);
+        let decoded = g.e(
+            TK::Match(
+                Box::new(g.call(dec, vec![g.get(h)], rty)),
+                vec![
+                    (
+                        TPat::Variant(result, vec![t.clone(), Type::Str], 0, vec![TPat::Bind(v)]),
+                        some,
+                    ),
+                    (
+                        TPat::Variant(result, vec![t.clone(), Type::Str], 1, vec![TPat::Bind(e)]),
+                        none.clone(),
+                    ),
+                ],
+            ),
+            opt.clone(),
+        );
+        let parse = g.intr("__json_parse", vec![], vec![g.get(text)], Type::Int);
+        let found = g.block(
+            vec![
+                TStmt::Let(h, parse),
+                g.guard(g.bin(BinOp::Lt, g.get(h), g.int(0)), none.clone()),
+            ],
+            decoded,
+        );
+        let stored = g.call(
+            self.pf("server_load_text"),
+            vec![g.get(key)],
+            self.option(Type::Str),
+        );
+        let body = g.e(
+            TK::Match(
+                Box::new(stored),
+                vec![
+                    (
+                        TPat::Variant(option, vec![Type::Str], 0, vec![TPat::Bind(text)]),
+                        found,
+                    ),
+                    (TPat::Variant(option, vec![Type::Str], 1, vec![]), none),
+                ],
+            ),
+            opt,
+        );
+        self.finish_json_fn(id, g, vec![key], body);
+        Ok(id)
+    }
+
+    /// `() -> ()`, exported as `__fn_<name>`: decodes the arguments of server function `f` from
+    /// the JSON array behind handle 0, calls it and responds with the JSON of its result, or
+    /// rejects the request when the arguments do not match.
+    pub fn server_entry(&mut self, f: usize, span: Span) -> Result<usize> {
+        let (params, ret, name) = {
+            let s = &self.sigs[f];
+            (s.params.clone(), s.ret.clone(), s.name.clone())
+        };
+        let enc = self.json_encoder(&ret, span)?;
+        let decs = params
+            .iter()
+            .map(|p| self.json_decoder(p, span))
+            .collect::<Result<Vec<_>>>()?;
+        let id = self.new_json_fn(
+            (Role::Entry, Type::Int),
+            format!("__fn_{name}"),
+            vec![],
+            Type::Unit,
+        );
+        // Entries are keyed by function, not type.
+        self.json_fns.remove(&(Role::Entry, Type::Int));
+        let mut g = Gen {
+            locals: Vec::new(),
+            span,
+        };
+        let args: Vec<LocalId> = params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| g.local(&format!("a{i}"), p.clone()))
+            .collect();
+        let reject = |g: &Gen, msg: TExpr| g.intr("__reject", vec![], vec![msg], Type::Unit);
+        let call = g.call(f, args.iter().map(|&a| g.get(a)).collect(), ret.clone());
+        let mut body = g.intr(
+            "__respond",
+            vec![],
+            vec![g.call(enc, vec![call], Type::Str)],
+            Type::Unit,
+        );
+        let result = self.prelude_adt("Result");
+        for (i, p) in params.iter().enumerate().rev() {
+            let e = g.local("e", Type::Str);
+            let handle = g.intr(
+                "__json_index",
+                vec![],
+                vec![g.int(0), g.int(i as i64)],
+                Type::Int,
+            );
+            let decoded = g.call(decs[i], vec![handle], self.result_ty(p.clone(), Type::Str));
+            let msg = self.concat(&g, vec![g.str(&format!("argument {}", i + 1)), g.get(e)]);
+            body = g.e(
+                TK::Match(
+                    Box::new(decoded),
+                    vec![
+                        (
+                            TPat::Variant(
+                                result,
+                                vec![p.clone(), Type::Str],
+                                0,
+                                vec![TPat::Bind(args[i])],
+                            ),
+                            body,
+                        ),
+                        (
+                            TPat::Variant(
+                                result,
+                                vec![p.clone(), Type::Str],
+                                1,
+                                vec![TPat::Bind(e)],
+                            ),
+                            reject(&g, msg),
+                        ),
+                    ],
+                ),
+                Type::Unit,
+            );
+        }
+        let kind = g.intr("__json_kind", vec![], vec![g.int(0)], Type::Int);
+        let len = g.intr("__json_len", vec![], vec![g.int(0)], Type::Int);
+        let bad = g.bin(
+            BinOp::Or,
+            g.bin(BinOp::Ne, kind, g.int(KIND_ARRAY)),
+            g.bin(BinOp::Ne, len, g.int(params.len() as i64)),
+        );
+        let msg = g.str(&format!("expected an array of {} arguments", params.len()));
+        let body = g.e(
+            TK::If(
+                Box::new(bad),
+                Box::new(reject(&g, msg)),
+                Some(Box::new(body)),
+            ),
+            Type::Unit,
+        );
+        self.finish_json_fn(id, g, vec![], body);
         Ok(id)
     }
 }

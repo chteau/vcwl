@@ -1,0 +1,3 @@
+entry = "src/main.vcwl"
+out = "dist"
+store = "data/store.json"

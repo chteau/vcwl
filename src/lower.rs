@@ -816,11 +816,15 @@ impl<'a> Lower<'a> {
                 let f = self.m.import("now", vec![], Some(VT::F64));
                 IExpr::Call(f, vec![])
             }
-            "__print" | "__panic" | "__navigate" | "__copy" => {
+            "__print" | "__panic" | "__navigate" | "__copy" | "__respond" | "__reject"
+            | "__store_delete" => {
                 let host = match name {
                     "__print" => "print",
                     "__panic" => "panic",
                     "__copy" => "copy",
+                    "__respond" => "respond",
+                    "__reject" => "reject",
+                    "__store_delete" => "store_delete",
                     _ => "navigate",
                 };
                 let f = self.m.import(host, vec![VT::I32], None);
@@ -831,6 +835,26 @@ impl<'a> Lower<'a> {
                 } else {
                     call
                 }
+            }
+            // Server host: a string in, a handle or a text length (-1: none) out.
+            "__json_parse" | "__env" | "__store_get" => {
+                let host = match name {
+                    "__json_parse" => "json_parse",
+                    "__env" => "env",
+                    _ => "store_get",
+                };
+                let f = self.m.import(host, vec![VT::I32], Some(VT::I32));
+                let to = self.helper_str_to_mem();
+                un(
+                    UnOp::I64ExtendI32S,
+                    IExpr::Call(f, vec![IExpr::Call(to, vec![take()])]),
+                )
+            }
+            "__store_set" => {
+                let f = self.m.import("store_set", vec![VT::I32, VT::I32], None);
+                let to = self.helper_str_to_mem();
+                let (key_len, text) = (take(), take());
+                IExpr::Call(f, vec![wrap(key_len), IExpr::Call(to, vec![text])])
             }
             "__str_from_io" => {
                 let from = self.helper_str_from_mem();

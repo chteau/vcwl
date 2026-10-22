@@ -1,0 +1,17 @@
+// error: a server function's result type is known
+app "T"
+
+server fn n() -> Int {
+    1
+}
+
+component App {
+    button("x") {
+        on click {
+            fetch n() as Int {
+                Ok(_) => {}
+                Err(_) => {}
+            }
+        }
+    }
+}
