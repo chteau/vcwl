@@ -705,6 +705,52 @@ impl<'a> Parser<'a> {
     fn binary(&mut self, min: u8) -> Result<Expr> {
         let mut lhs = self.unary()?;
         loop {
+            // `x |> f(a)` is `f(x, a)`; the lowest precedence, and it may start a line.
+            if min == 0 && self.is("|>") {
+                self.bump();
+                let rhs = self.binary(1)?;
+                let span = lhs.span.to(rhs.span);
+                let kind = match rhs.kind {
+                    ExprKind::Call {
+                        callee,
+                        type_args,
+                        mut args,
+                    } => {
+                        args.insert(
+                            0,
+                            Arg {
+                                name: None,
+                                value: lhs,
+                            },
+                        );
+                        ExprKind::Call {
+                            callee,
+                            type_args,
+                            args,
+                        }
+                    }
+                    ExprKind::Ident(name) => ExprKind::Call {
+                        callee: Ident {
+                            name,
+                            span: rhs.span,
+                        },
+                        type_args: Vec::new(),
+                        args: vec![Arg {
+                            name: None,
+                            value: lhs,
+                        }],
+                    },
+                    _ => {
+                        return Err(Diag::syntax(
+                            rhs.span,
+                            "the right side of `|>` must be a function name or call",
+                        )
+                        .help("e.g. `xs |> total` or `name |> greet(\"!\")`"));
+                    }
+                };
+                lhs = self.mk(kind, span);
+                continue;
+            }
             if min <= 4 && self.is("..") && !self.token().nl {
                 self.bump();
                 let rhs = self.binary(5)?;

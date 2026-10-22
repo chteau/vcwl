@@ -70,7 +70,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 /// Operators after which an expression continues on the next line.
 const CONTINUES: &[&str] = &[
     "=", "+=", "-=", "*=", "/=", "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&",
-    "||", "=>", "->",
+    "||", "=>", "->", "|>",
 ];
 
 /// Formats `src`; `path` is only used in diagnostics.
@@ -96,7 +96,7 @@ pub fn format(path: &str, src: &str) -> Result<String, String> {
         let line = line_of(t.span.lo as usize);
         let closes = matches!(t.tok, Tok::Punct(")" | "]" | "}"));
         if depth_at[line].is_none() && !matches!(t.tok, Tok::Eof) {
-            let leading_dot = matches!(t.tok, Tok::Punct("."));
+            let leading_dot = matches!(t.tok, Tok::Punct("." | "|>"));
             depth_at[line] = Some((
                 depth,
                 closes,

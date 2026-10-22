@@ -1,0 +1,4 @@
+// error: syntax error: the right side of `|>` must be a function name or call
+fn main() -> Int {
+    1 |> 2
+}

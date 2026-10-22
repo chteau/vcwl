@@ -1,0 +1,22 @@
+// expect: 26
+fn double(n: Int) -> Int {
+    n * 2
+}
+
+fn add(n: Int, m: Int) -> Int {
+    n + m
+}
+
+fn words(s: String, sep: String) -> [String] {
+    s.split(sep)
+}
+
+fn main() -> Int {
+    let w = "pipes are just function calls" |> words(" ")
+    w.len()
+        |> double
+        |> add(3)
+        |> add(-3)
+        |> double
+        |> add(6)
+}

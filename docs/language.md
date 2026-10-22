@@ -89,9 +89,19 @@ match value { pattern => expr, ... }
 Patterns: literals (`0`, `"x"`, `true`), bindings (`n`), `_`, variants with sub-patterns
 (`Some(Circle(r))`). Matches must be exhaustive; the error names a missing case.
 
-Operators by precedence: `||`, `&&`, comparisons (`== != < <= > >=`), `+ -`, `* / %`, unary
+Operators by precedence: `|>`, `||`, `&&`, comparisons (`== != < <= > >=`), `+ -`, `* / %`, unary
 `- !`, then calls, `.field`, `.method()`, `[index]`. `+` concatenates strings. `==` works on
 numbers, booleans, strings and enums without payloads. Indexing is bounds-checked.
+
+`x |> f(a, b)` is `f(x, a, b)` and `x |> f` is `f(x)`: the pipe passes its left side as the
+first argument of a function. It binds loosest, and a line may start with it:
+
+```vcwl
+let score = input
+    |> trim_all
+    |> parse_or(0)
+    |> clamp(0, 100)
+```
 
 `x?` unwraps `Ok(v)` / `Some(v)`; on `Err(e)` / `None` it returns that from the enclosing function,
 which must return a `Result` with the same error type (or an optional):
