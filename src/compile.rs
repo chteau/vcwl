@@ -68,6 +68,12 @@ pub fn load(
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         for item in &file.items {
             if let ast::Item::Import(im) = item {
+                if let Some(spec) = im.path.strip_prefix('@') {
+                    let file = crate::project::resolve_package(&dir, spec)
+                        .map_err(|e| vec![Diag::compile(im.span, e)])?;
+                    queue.push((file, Some((idx, im.span))));
+                    continue;
+                }
                 if !im.path.ends_with(".vcwl") {
                     return Err(vec![
                         Diag::compile(im.span, "import paths must name a `.vcwl` file")

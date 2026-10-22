@@ -40,6 +40,8 @@ let longer = items.push(4)        // arrays return new arrays
 
 ```vcwl
 import "./geometry.vcwl"          // relative path; brings the file's `export`ed items into scope
+import "@kit"                     // a package's main file (see docs/packages.md)
+import "@kit/src/forms.vcwl"      // another file of a package
 
 export struct Point {
     x: Int,

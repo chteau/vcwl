@@ -51,12 +51,97 @@ impl Project {
     }
 }
 
-/// Reads `key = "value"` from the manifest (the only form the manifest uses).
+/// Reads a top-level `key = "value"` from the manifest (before any `[section]`).
 pub fn manifest_value(text: &str, key: &str) -> Option<String> {
-    text.lines().find_map(|l| {
-        let (k, v) = l.split_once('=')?;
-        (k.trim() == key).then(|| v.trim().trim_matches('"').to_string())
-    })
+    manifest_table(text, "")
+        .into_iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v)
+}
+
+/// The `key = "value"` lines of manifest section `[name]` (`""`: the top level).
+pub fn manifest_table(text: &str, name: &str) -> Vec<(String, String)> {
+    let mut section = String::new();
+    let mut out = Vec::new();
+    for l in text.lines() {
+        let l = l.split(" #").next().unwrap_or("").trim();
+        if let Some(s) = l.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            section = s.trim().to_string();
+        } else if section == name
+            && let Some((k, v)) = l.split_once('=')
+            && !l.starts_with('#')
+        {
+            out.push((k.trim().to_string(), v.trim().trim_matches('"').to_string()));
+        }
+    }
+    out
+}
+
+/// The `vcwl.toml` governing `dir` (in it or an ancestor): its directory and text.
+pub fn manifest_for(dir: &Path) -> Option<(PathBuf, String)> {
+    let mut d = Some(dir);
+    while let Some(cur) = d {
+        if let Ok(text) = std::fs::read_to_string(cur.join("vcwl.toml")) {
+            return Some((cur.to_path_buf(), text));
+        }
+        d = cur.parent();
+    }
+    None
+}
+
+/// Resolves `@name` or `@name/path.vcwl` imported from a file in `dir`: packages are the
+/// `[dependencies]` of the importing file's project (`name = "path/to/package"`), and `@name`
+/// alone is the package's `lib` file (default `src/lib.vcwl`).
+pub fn resolve_package(dir: &Path, spec: &str) -> Result<PathBuf, String> {
+    let (name, rest) = spec.split_once('/').unwrap_or((spec, ""));
+    let Some((root, text)) = manifest_for(dir) else {
+        return Err(format!(
+            "`@{name}`: no vcwl.toml declares dependencies here"
+        ));
+    };
+    let deps = manifest_table(&text, "dependencies");
+    let Some((_, path)) = deps.iter().find(|(k, _)| k == name) else {
+        let known: Vec<String> = deps.iter().map(|(k, _)| format!("@{k}")).collect();
+        return Err(format!(
+            "unknown package `@{name}` (dependencies in {}: {})",
+            root.join("vcwl.toml").display(),
+            if known.is_empty() {
+                "none".into()
+            } else {
+                known.join(", ")
+            }
+        ));
+    };
+    let pkg = root.join(path);
+    if rest.is_empty() {
+        let lib = std::fs::read_to_string(pkg.join("vcwl.toml"))
+            .ok()
+            .and_then(|t| manifest_value(&t, "lib"))
+            .unwrap_or_else(|| "src/lib.vcwl".into());
+        Ok(pkg.join(lib))
+    } else {
+        Ok(pkg.join(rest))
+    }
+}
+
+/// Every package the project depends on, directly or not (their roots, deduplicated).
+pub fn packages(root: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut queue = vec![root.to_path_buf()];
+    while let Some(dir) = queue.pop() {
+        let Ok(text) = std::fs::read_to_string(dir.join("vcwl.toml")) else {
+            continue;
+        };
+        for (_, path) in manifest_table(&text, "dependencies") {
+            let pkg = dir.join(path);
+            let pkg = pkg.canonicalize().unwrap_or(pkg);
+            if !out.contains(&pkg) {
+                out.push(pkg.clone());
+                queue.push(pkg);
+            }
+        }
+    }
+    out
 }
 
 pub fn compile_entry(entry: &Path, dev: bool) -> Result<(Output, SourceMap), String> {
@@ -560,12 +645,15 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
             sizes.push((name.to_string(), data.len()));
         }
     }
-    // Static assets (images, fonts, data) are copied as they are.
+    // Static assets (images, fonts, data) are copied as they are: packages' first, so the
+    // app's own files win.
     if let Some(p) = &project {
-        let public = p.root.join("public");
-        if public.is_dir() {
-            let generated: Vec<&str> = pages.iter().map(|p| p.file.as_str()).collect();
-            copy_dir(&public, out, &public, &generated)?;
+        let generated: Vec<&str> = pages.iter().map(|p| p.file.as_str()).collect();
+        for dir in packages(&p.root).into_iter().rev().chain([p.root.clone()]) {
+            let public = dir.join("public");
+            if public.is_dir() {
+                copy_dir(&public, out, &public, &generated)?;
+            }
         }
     }
     for f in &app.fonts {

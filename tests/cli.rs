@@ -237,3 +237,49 @@ fn path_routing_writes_a_page_per_route_and_rejects_unsafe_routes() {
     assert!(missing.contains("src=\"/boot.js\""), "{missing}");
     assert!(!dir.join("dist/sitemap.xml").exists(), "no url, no sitemap");
 }
+
+#[test]
+fn packages_resolve_from_dependencies() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("package-project");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    let kit = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/kit");
+    std::fs::write(
+        dir.join("vcwl.toml"),
+        format!(
+            "entry = \"src/main.vcwl\"\nout = \"dist\"\n\n[dependencies]\nkit = \"{}\"\n",
+            kit.display()
+        ),
+    )
+    .unwrap();
+    let build = |import: &str| {
+        std::fs::write(
+            dir.join("src/main.vcwl"),
+            format!("app \"T\"\n\nimport \"{import}\"\n\ncomponent App {{\n    Card(title: \"x\") {{\n        text(\"y\")\n    }}\n}}\n"),
+        )
+        .unwrap();
+        Command::new(env!("CARGO_BIN_EXE_vcwl"))
+            .arg("build")
+            .current_dir(&dir)
+            .output()
+            .unwrap()
+    };
+    let o = build("@nope");
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        !o.status.success() && err.contains("unknown package `@nope`") && err.contains("@kit"),
+        "{err}"
+    );
+    let o = build("@kit/src/lib.vcwl");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let o = build("@kit");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(
+        dir.join("dist/kit/README.txt").is_file(),
+        "package assets are copied"
+    );
+    assert!(
+        dir.join("dist-server/server.wasm").is_file(),
+        "the package's server function"
+    );
+}

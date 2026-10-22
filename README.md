@@ -45,6 +45,8 @@ Working end to end, tested in Node.js and headless Chrome:
   by declared capabilities (enforced by the host and the Content-Security-Policy);
 - server functions (`server fn`) called with typed `fetch` from the client and run by
   `vcwl serve` in a WebAssembly runtime, with a persistent key-value store;
+- packages (`[dependencies]` in vcwl.toml, `import "@kit"`) for sharing components, styles,
+  server functions and assets: the basis for frameworks ([docs](docs/packages.md));
 - components with child content (`slot`), web fonts (`font "X" from "fonts/x.woff2"`), and
   build-time prerendering of every route to static HTML for first paint and crawlers;
 - tooling: `vcwl new | dev | build | check | test | fmt | run | compile | clean`.
@@ -91,6 +93,7 @@ timings. Production builds do not include it.
 ## Documentation
 
 - [Language reference](docs/language.md)
+- [Packages and frameworks](docs/packages.md)
 - [Architecture](docs/architecture.md) and [decision records](docs/adr/)
 - [Security model](docs/security.md)
 - [Benchmarks](docs/benchmarks.md)

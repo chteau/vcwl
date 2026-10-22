@@ -1,0 +1,68 @@
+// kit: a tiny UI package. Apps declare it in vcwl.toml:
+//
+//     [dependencies]
+//     kit = "../path/to/kit"
+//
+// and import it with `import "@kit"`.
+
+style KitCard {
+    background: #ffffff
+    border: 1px solid #e5e5e5
+    radius: 10px
+    padding: 16px
+}
+
+style KitButton {
+    background: #d16a47
+    color: #ffffff
+    radius: 8px
+    padding: 8px 16px
+    border: none
+    when hover {
+        background: #b5573a
+    }
+}
+
+/// A page with a title; its content goes in the slot.
+export component Page(title: String) {
+    main {
+        style {
+            padding: 24px
+            max-width: 720px
+        }
+        column(gap: 16px) {
+            heading(title, level: 1)
+            slot
+        }
+    }
+}
+
+/// A titled card around its content.
+export component Card(title: String) {
+    section {
+        style KitCard
+        column(gap: 8px) {
+            heading(title, level: 2)
+            slot
+        }
+    }
+}
+
+/// The package's button: raises `press`.
+export component Action(label: String) {
+    event press
+
+    button(label) {
+        style KitButton
+        on click {
+            emit press
+        }
+    }
+}
+
+/// Counts calls across every visitor of the app (needs `vcwl serve`).
+export server fn kit_visits() -> Int {
+    let n = load<Int>("kit.visits").unwrap_or(0) + 1
+    save("kit.visits", n)
+    n
+}

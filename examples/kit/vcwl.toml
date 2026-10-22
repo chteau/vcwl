@@ -1,0 +1,3 @@
+# A VCWL package: components, styles and a server function that apps import with `@kit`.
+name = "kit"
+lib = "src/lib.vcwl"

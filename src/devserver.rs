@@ -116,6 +116,11 @@ fn fingerprint(root: &Path, skip: &Path) -> Vec<(PathBuf, SystemTime)> {
     }
     let mut v = Vec::new();
     walk(root, skip, &mut v);
+    for pkg in project::packages(root) {
+        if !pkg.starts_with(root) {
+            walk(&pkg, skip, &mut v);
+        }
+    }
     v.sort();
     v
 }

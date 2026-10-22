@@ -17,6 +17,9 @@ All notable changes. The project has no release yet; entries are grouped by mile
   handlers with `fetch f(args) { ... }`, compiled into `dist-server/server.wasm` and run by
   `vcwl serve` / `vcwl dev` with wasmtime; arguments validated against their types; `env`,
   `save`, `load<T>` and `remove` for server code; a 5 s / 256 MB limit per call.
+- Packages ([docs](docs/packages.md)): `[dependencies]` in vcwl.toml, `import "@name"` and
+  `import "@name/file.vcwl"`, packages' `public/` files copied into the build, transitive
+  dependencies, rebuilds on package changes in `vcwl dev`. `examples/kit` and its demo.
 - `vcwl dev` behaves like a static host: `/about` redirects to `/about/`, unknown paths get
   `404.html`.
 

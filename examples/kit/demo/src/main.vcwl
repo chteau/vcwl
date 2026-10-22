@@ -1,0 +1,34 @@
+// An app built from the `kit` package: `vcwl serve` in this directory.
+app "Kit demo"
+
+import "@kit"
+
+component App {
+    state clicks: Int = 0
+    state visits: String = "…"
+
+    on mount {
+        fetch kit_visits() {
+            Ok(n) => {
+                visits = "{n}"
+            }
+            Err(_) => {
+                visits = "unknown (run with `vcwl serve`)"
+            }
+        }
+    }
+
+    Page(title: "Kit demo") {
+        Card(title: "Clicks") {
+            paragraph("Clicked {clicks} times")
+            Action(label: "Click") {
+                on press {
+                    clicks += 1
+                }
+            }
+        }
+        Card(title: "Visits") {
+            paragraph("Visit number {visits}")
+        }
+    }
+}
