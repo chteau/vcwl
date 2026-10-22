@@ -1,0 +1,7 @@
+name = "is-odd"
+version = "1.0.0"
+description = "Tells you if an Int is odd, by asking is-even and disagreeing."
+registry = "../.."
+
+[dependencies]
+is-even = "^1.0"
