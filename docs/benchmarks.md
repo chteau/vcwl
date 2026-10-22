@@ -102,7 +102,7 @@ preloads `vcwl.js`, `render.wasm` and `app.wasm` so they download in parallel.
 | file | todo example | rows benchmark |
 | --- | ---: | ---: |
 | app.wasm (includes styles) | 17,291 / 6,598 | 5,740 / 2,651 |
-| render.wasm (same for every app) | 303,191 / 129,835 | 303,191 / 129,835 |
+| render.wasm (same for every app) | 311,430 / 132,961 | 311,430 / 132,961 |
 | vcwl.js (host) | 39,560 / 12,781 | 39,560 / 12,781 |
 | index.html + boot.js | 622 / 474 | 623 / 477 |
 

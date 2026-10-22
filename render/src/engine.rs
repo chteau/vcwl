@@ -1637,16 +1637,21 @@ impl Engine {
 
     /// Box model and computed style of an element as JSON, or `null` (dev tools).
     pub fn inspect(&self, id: Id) -> String {
+        use crate::css::num;
         use crate::style::{Background, Len};
         let Some(n) = self.tree.get(id).filter(|n| n.kind == Kind::Element) else {
             return "null".into();
         };
         let len = |l: &Len| match l {
             Len::Auto => "auto".to_string(),
-            Len::Px(v) => format!("{v}px"),
-            Len::Pct(v) => format!("{v}%"),
-            Len::Fr(v) => format!("{v}fr"),
-            other => format!("{other:?}").to_lowercase(),
+            Len::Px(v) => format!("{}px", num(*v)),
+            Len::Pct(v) => format!("{}%", num(*v)),
+            Len::Fr(v) => format!("{}fr", num(*v)),
+            // Not `Debug`: it would pull the float formatter into render.wasm (~22 KB).
+            Len::MinContent => "min-content".into(),
+            Len::MaxContent => "max-content".into(),
+            Len::FitContent => "fit-content".into(),
+            Len::None => "none".into(),
         };
         let color = |c: u32| format!("#{c:08x}");
         // `InlineBlock` → `inline-block`.
@@ -1670,21 +1675,23 @@ impl Engine {
             ("height", len(&s.height)),
             ("margin", sides(&s.margin.each_ref().map(len))),
             ("padding", sides(&s.padding.each_ref().map(len))),
-            ("gap", format!("{}px {}px", s.row_gap, s.col_gap)),
-            ("grow", s.grow.to_string()),
+            ("gap", format!("{}px {}px", num(s.row_gap), num(s.col_gap))),
+            ("grow", num(s.grow)),
             ("color", color(s.color)),
             (
                 "background",
                 match &s.background {
                     Background::None => "none".into(),
                     Background::Color(c) => color(*c),
-                    Background::Linear(a, stops) => format!("linear {a}deg, {} stops", stops.len()),
+                    Background::Linear(a, stops) => {
+                        format!("linear {}deg, {} stops", num(*a), stops.len())
+                    }
                 },
             ),
             ("font", s.font.to_string()),
-            ("line-height", format!("{}px", s.line_height)),
-            ("radius", format!("{:?}", s.radius)),
-            ("opacity", s.opacity.to_string()),
+            ("line-height", format!("{}px", num(s.line_height))),
+            ("radius", s.radius.map(num).join(" ")),
+            ("opacity", num(s.opacity)),
             (
                 "overflow",
                 format!("{} {}", kebab(&s.overflow_x), kebab(&s.overflow_y)),
@@ -1692,9 +1699,13 @@ impl Engine {
             ("z-index", s.z.to_string()),
         ];
         let r = self.abs(id);
+        let list = |v: [f32; 4]| v.map(num).join(",");
         let mut out = format!(
-            "{{\"id\":{id},\"tag\":\"{}\",\"box\":[{},{},{},{}],\"padding\":{:?},\"border\":{:?},\"style\":{{",
-            n.tag, r.x, r.y, r.w, r.h, n.lay.padding, n.lay.border
+            "{{\"id\":{id},\"tag\":\"{}\",\"box\":[{}],\"padding\":[{}],\"border\":[{}],\"style\":{{",
+            n.tag,
+            list([r.x, r.y, r.w, r.h]),
+            list(n.lay.padding),
+            list(n.lay.border)
         );
         for (i, (k, v)) in props.iter().enumerate() {
             if i > 0 {

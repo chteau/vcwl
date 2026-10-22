@@ -44,7 +44,7 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
   `relative`. Only `opacity`, `transform`, `color` and `background` (colors) transition; other
   properties change at once, and there are no keyframe animations.
 - Rotated elements are hit-tested by their bounding box.
-- `render.wasm` adds 130 KB (gzip) to every app.
+- `render.wasm` adds 133 KB (gzip) to every app.
 - One `slot` per component; no named slots, and slot content cannot read the child's values.
 - Prerendered HTML is laid out by the browser, not by the renderer: it matches closely but not to
   the pixel (measured drift up to ~15 px at the bottom of long pages of `examples/tokenforge`), so
