@@ -144,7 +144,13 @@ which is imported on first use. That module draws with WebGL into an offscreen c
 host copies into the page canvas, clipped like other content; it keeps a requestAnimationFrame
 loop only while something spins. A click without dragging renders a pick pass (one color per
 clickable mesh) and calls the renderer's `activate_node`; dragging an `orbit` scene changes the
-camera in the host only. See [ADR 15](adr/0015-built-in-3d.md).
+camera in the host only, as do the arrow keys while the scene or one of its meshes has focus.
+Clickable meshes are focusable (Tab order follows the tree) and appear in the accessibility
+mirror as buttons beside the scene's image; `abs()` gives 3D elements their scene's box. Models
+(`.obj`, `.gltf`, `.glb`) and textures load asynchronously in `scene3d.js` and trigger a
+repaint when ready. With `shadows`, a depth pass from the first directional light renders into
+an RGBA-packed shadow map sampled with 3×3 PCF; translucent meshes draw after opaque ones, far
+to near, without depth writes. See [ADR 15](adr/0015-built-in-3d.md).
 
 ### Transitions
 

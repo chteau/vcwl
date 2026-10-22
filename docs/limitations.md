@@ -64,10 +64,12 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## 3D
 
-- Primitive shapes and solid colors only: no model loading, textures, shadows or transparency.
-- Requires WebGL; without it the scene shows its placeholder. The scene's content is exposed to
-  assistive technology only through its `label`.
-- Orbit drags are not keyboard-accessible, and meshes' `click` is reachable only by pointer.
+- Models: triangles only, no materials, skins, morph targets or animations; one shadow-casting
+  light, from a fixed 1024×1024 map; no shadows from point lights.
+- Translucent meshes are sorted by their centers, so intersecting or nested translucent meshes
+  can blend in the wrong order.
+- Requires WebGL; without it the scene shows its placeholder. Assistive technology sees the
+  scene's `label` and its clickable meshes' labels, nothing else of its content.
 
 ## Platform
 

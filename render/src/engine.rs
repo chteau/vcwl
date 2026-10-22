@@ -545,6 +545,12 @@ impl Engine {
     /// Border box of `id` in viewport coordinates (as last laid out).
     pub fn abs(&self, id: Id) -> Rect {
         let n = self.tree.n(id);
+        // 3D elements have no box of their own: they are where their scene is.
+        if is_3d(&n.tag)
+            && let Some(s) = self.closest(id, |n| n.is("scene"))
+        {
+            return self.abs(s);
+        }
         let mut r = n.lay.rect;
         if id == 0 {
             r.y -= n.lay.scroll.1;
@@ -636,6 +642,9 @@ impl Engine {
 
     fn focusable(&self, id: Id) -> bool {
         let n = self.tree.n(id);
+        if n.is("mesh") {
+            return n.listeners.iter().any(|l| l.event == "click") && !self.disabled(id);
+        }
         if n.kind != Kind::Element
             || self.disabled(id)
             || n.style.display == crate::style::Display::None
@@ -645,6 +654,8 @@ impl Engine {
         match n.tag.as_str() {
             "button" | "input" | "textarea" | "select" => true,
             "a" => n.attr("href").is_some(),
+            // Arrow keys turn an orbiting scene's camera.
+            "scene" => n.attr("orbit") == Some("true"),
             _ => false,
         }
     }
@@ -720,7 +731,10 @@ impl Engine {
         let mut v = Vec::new();
         let mut stack = vec![0];
         while let Some(id) = stack.pop() {
-            if self.tree.n(id).style.display == crate::style::Display::None {
+            let n = self.tree.n(id);
+            if n.style.display == crate::style::Display::None
+                && !matches!(n.tag.as_str(), "group" | "mesh")
+            {
                 continue;
             }
             if self.focusable(id) {
@@ -1449,7 +1463,7 @@ impl Engine {
         let n = self.tree.n(f);
         match (n.tag.as_str(), key) {
             ("input", " ") => self.activate(f),
-            ("button", "Enter" | " ") | ("a", "Enter") => {
+            ("button" | "mesh", "Enter" | " ") | ("a", "Enter") => {
                 self.bubble(f, "click");
                 self.activate(f);
             }
@@ -1793,6 +1807,11 @@ impl Writer {
         }
         self
     }
+}
+
+/// Elements inside a `scene`, which have no box of their own.
+pub fn is_3d(tag: &str) -> bool {
+    matches!(tag, "mesh" | "group" | "light")
 }
 
 #[cfg(test)]

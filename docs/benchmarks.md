@@ -25,22 +25,27 @@ Two timings per action:
 - **settled**: like frame, but also waits for VCWL's accessibility mirror, which is synced in a
   task after the frame (`vcwl.mirrored()`). For the DOM version it equals frame.
 
-Measured 2026-10-22; Linux, Chrome 151 headless, Node 26, median of 25 rounds:
+Measured 2026-10-22 (Milestone 12); Linux, Chrome 151 headless, Node 26, median of 25 rounds:
 
 | action | VCWL sync | DOM sync | VCWL frame | DOM frame | VCWL settled | DOM settled |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| create 1000 rows | 6.4 | 7.3 | 24.7 | 25.1 | 34.0 | 25.3 |
-| update every 10th row | 0.8 | 0.6 | 5.9 | 17.6 | 14.1 | 17.6 |
-| swap two rows | 0.8 | 0.3 | 16.5 | 17.4 | 17.6 | 17.3 |
-| clear | 0.9 | 0.8 | 16.9 | 16.5 | 17.7 | 16.5 |
+| create 1000 rows | 6.2 | 7.4 | 23.8 | 25.1 | 32.7 | 25.4 |
+| update every 10th row | 0.9 | 0.6 | 6.1 | 17.6 | 15.1 | 17.6 |
+| swap two rows | 0.8 | 0.3 | 16.5 | 17.3 | 17.6 | 17.4 |
+| clear | 1.0 | 0.8 | 16.8 | 16.4 | 17.6 | 16.4 |
 
-Timer resolution in the page is 0.1 ms. Rows below the viewport are laid out but not painted
+Timer resolution in the page is 0.1 ms. Whole runs on the same machine and build vary: create (sync) ranged 6.2–7.2 ms across runs
+during Milestone 12, so differences under about 1 ms between rows of the history table are noise. Rows below the viewport are laid out but not painted
 (list bullets included, since Milestone 9: before, each frame drew all 1000 bullets).
 
 Frame numbers are quantized by the 60 Hz frame clock (~16.7 ms), so differences under one frame
 mostly reflect where in the frame the click landed. The settled column shows the remaining cost:
-creating 1000 rows still takes about 9 ms more than the DOM version, mostly the mirror's 2000+
-DOM elements.
+creating 1000 rows still takes about 7 ms more than the DOM version, mostly the browser's style
+and layout of the mirror's 2000+ DOM elements (about 11 ms when measured with forced layout;
+the mirror script itself takes about 3.3 ms since Milestone 12, 4.5 before). Tried in Milestone 12
+and not kept, as they did not reduce the total: `contain: strict` and `content-visibility: auto`
+on mirror elements (the latter cut layout but raised style and removal time), `white-space: pre`,
+and positioning mirror elements relative to their parent instead of the viewport.
 
 Changes in Milestone 9, each measured with this benchmark before being kept:
 
@@ -62,7 +67,8 @@ History of the same benchmark (sync column):
 | canvas renderer, incremental | 6.9 | 1.0 | 1.0 | 0.8 |
 | + accessibility mirror updated during events (first version) | 21.9 | 6.4 | 17.3 | 6.1 |
 | + mirror after paint, keyed moves, entry hashes | 7.0 | 1.1 | 1.1 | 0.8 |
-| + deferred mirror, marker culling, `opt-level = "s"` (current) | 6.4 | 0.8 | 0.8 | 0.9 |
+| + deferred mirror, marker culling, `opt-level = "s"` | 6.4 | 0.8 | 0.8 | 0.9 |
+| Milestone 12 (shared font rules in the mirror, 3D additions; current) | 6.2 | 0.9 | 0.8 | 1.0 |
 
 What this shows: with incremental style and layout and viewport culling, the canvas renderer's
 complete pipeline stays within a small factor of the browser's DOM update for these operations.
@@ -102,9 +108,9 @@ preloads `vcwl.js`, `render.wasm` and `app.wasm` so they download in parallel.
 | file | todo example | rows benchmark |
 | --- | ---: | ---: |
 | app.wasm (includes styles) | 17,291 / 6,598 | 5,740 / 2,651 |
-| render.wasm (same for every app) | 314,278 / 134,052 | 314,278 / 134,052 |
-| vcwl.js (host) | 45,440 / 14,657 | 45,440 / 14,657 |
-| scene3d.js (only fetched by apps showing a `scene`) | 15,766 / 5,679 | — |
+| render.wasm (same for every app) | 316,064 / 134,607 | 316,064 / 134,607 |
+| vcwl.js (host) | 47,032 / 15,195 | 47,032 / 15,195 |
+| scene3d.js (only fetched by apps showing a `scene`) | 31,513 / 10,678 | — |
 | index.html + boot.js | 622 / 474 | 623 / 477 |
 
 `render.wasm` is mostly Rust's standard library (allocator, formatting, Unicode case mapping,

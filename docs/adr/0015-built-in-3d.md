@@ -27,6 +27,9 @@ WebGL calls behind a host bridge for every draw and grow the module every app do
 - Apps without scenes pay nothing (the module is not fetched; render.wasm grows by the op and
   the description only).
 - The copy from WebGL to the 2D canvas costs a full-scene blit per frame while a scene animates.
-- Only primitive shapes, solid colors and simple lights: no models, textures, shadows or
-  transparency yet.
-- The scene's content is visible to assistive technology only through its `label`.
+- Models are loaded by `scene3d.js` itself (OBJ and glTF, geometry only), textures as images;
+  one shadow map (RGBA-packed depth, so no WebGL extension is needed). No materials, skinning
+  or animation from files.
+- Clickable meshes need a `label` and are focusable buttons in the accessibility mirror,
+  placed over the scene (a mesh has no box of its own, so it takes its scene's); the rest of
+  the scene is visible to assistive technology only through its `label`.

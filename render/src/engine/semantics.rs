@@ -4,7 +4,7 @@
 //! the application. Generic containers are left out; their children attach to the nearest
 //! mirrored ancestor.
 
-use super::{Engine, Payload, Writer};
+use super::{Engine, Payload, Writer, is_3d};
 use crate::dom::{Id, Kind};
 use crate::style::Display;
 use crate::text::Measure;
@@ -65,6 +65,8 @@ const ATTRS: &[&str] = &[
 pub const FOCUSED: i32 = 1;
 pub const CHECKED: i32 = 2;
 pub const DISABLED: i32 = 4;
+/// Focusable although its tag is not (an orbiting scene).
+pub const FOCUSABLE: i32 = 8;
 
 /// UTF-16 offset of byte offset `i` in `s` (browser selection offsets are UTF-16).
 pub fn utf16_of(s: &str, i: usize) -> i32 {
@@ -122,6 +124,25 @@ impl Engine {
                     e.str("text").str(&n.text).str("font").str(&n.style.font);
                     entry(&mut w, id, parent, e);
                 }
+                Kind::Element if is_3d(&n.tag) => {
+                    // Clickable meshes are buttons, named by their `label`, over the scene.
+                    if n.is("mesh") && self.focusable(id) {
+                        let attrs: Vec<_> = n
+                            .attrs
+                            .iter()
+                            .filter(|(k, _)| k.starts_with("aria-"))
+                            .collect();
+                        let mut e = Writer(Vec::new());
+                        e.str("button").rect(self.abs(id));
+                        e.int(if self.focus == Some(id) { FOCUSED } else { 0 });
+                        e.int(attrs.len() as i32);
+                        for (k, v) in attrs {
+                            e.str(k).str(v);
+                        }
+                        entry(&mut w, id, parent, e);
+                    }
+                    stack.extend(n.children.iter().rev().map(|&c| (c, parent)));
+                }
                 Kind::Element => {
                     if n.style.display == Display::None {
                         continue;
@@ -161,6 +182,11 @@ impl Engine {
                                 DISABLED
                             } else {
                                 0
+                            }
+                            | if n.is("scene") && self.focusable(id) {
+                                FOCUSABLE
+                            } else {
+                                0
                             };
                         let mut e = Writer(Vec::new());
                         e.str(&n.tag).rect(self.abs(id));
@@ -169,6 +195,10 @@ impl Engine {
                             e.str(k).str(v);
                         }
                         entry(&mut w, id, parent, e);
+                    }
+                    // A scene is an image: its meshes' buttons go next to it, not inside.
+                    if n.is("scene") {
+                        kept = parent;
                     }
                     if !carried {
                         stack.extend(n.children.iter().rev().map(|&c| (c, kept)));
@@ -322,6 +352,33 @@ mod tests {
         assert_eq!(e.tree.n(4).value, "zoé");
         assert_eq!(e.edit.caret, "zoé".len());
         assert!(e.semantics(&mut Mono).is_some());
+    }
+
+    #[test]
+    fn clickable_meshes_are_buttons_beside_their_scene() {
+        let mut b = Buf::default();
+        b.create(1, "scene")
+            .attr(1, "role", "img")
+            .attr(1, "aria-label", "Shop")
+            .attr(1, "orbit", "true")
+            .insert(0, 1, 0);
+        b.create(2, "group").insert(1, 2, 0);
+        b.create(3, "mesh")
+            .attr(3, "aria-label", "Chair")
+            .listen(3, 7, "click")
+            .insert(2, 3, 0);
+        b.create(4, "mesh").insert(1, 4, 0);
+        let mut e = Engine::new("", 800.0, 600.0);
+        e.apply(&b.0).unwrap();
+        let list = entries(&e.semantics(&mut Mono).unwrap());
+        let shape: Vec<_> = list
+            .iter()
+            .map(|(id, p, tag, _)| (*id, *p, tag.as_str()))
+            .collect();
+        assert_eq!(shape, vec![(1, -1, "scene"), (3, -1, "button")]);
+        assert_eq!(list[1].3, vec!["aria-label=Chair"]);
+        assert_eq!(e.focus_order(), vec![1, 3]);
+        assert_eq!(e.abs(3).w, e.abs(1).w, "a mesh is where its scene is");
     }
 
     #[test]

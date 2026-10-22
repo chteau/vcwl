@@ -1,10 +1,13 @@
-// Browser-test fixture: a 3D scene with lights, groups, state-bound meshes and clicks.
+// Browser-test fixture: 3D scenes with lights, groups, state-bound meshes, clicks, models,
+// textures, translucency and shadows.
 app "Scene"
 
 component App {
     state hits: Int = 0
     state wire: Bool = false
     state x: Float = -1.6
+    state shadows: Bool = false
+    state glass: Float = 1.0
 
     column(gap: 8px) {
         style {
@@ -19,7 +22,7 @@ component App {
             light(kind: "ambient", intensity: 0.3)
             light(position: vec3(3.0, 5.0, 4.0), intensity: 0.9)
             mesh(shape: "plane", size: vec3(8.0, 1.0, 8.0), position: vec3(0.0, -0.75, 0.0), color: "#2a2f3a")
-            mesh(shape: "box", position: vec3(x, 0.0, 0.0), rotation: vec3(20.0, 30.0, 0.0), color: "#d16a47", wireframe: wire) {
+            mesh(shape: "box", label: "Box", position: vec3(x, 0.0, 0.0), rotation: vec3(20.0, 30.0, 0.0), color: "#d16a47", wireframe: wire) {
                 on click {
                     hits += 1
                 }
@@ -40,6 +43,28 @@ component App {
                     x = x + 0.4
                 }
             }
+            button("Shadows") {
+                on click {
+                    shadows = !shadows
+                }
+            }
+            button("Fade") {
+                on click {
+                    glass = 0.3
+                }
+            }
+        }
+        scene(label: "Loaded models, a textured box and a glass ball", camera: vec3(0.0, 4.0, 6.0), background: "#15171c", shadows: shadows) {
+            style {
+                height: 300px
+            }
+            light(kind: "ambient", intensity: 0.25)
+            light(position: vec3(3.0, 3.0, 1.0), intensity: 0.9)
+            mesh(shape: "plane", size: vec3(10.0, 1.0, 10.0), position: vec3(0.0, -0.5, 0.0), color: "#8a8f9a", shininess: 0.0)
+            mesh(model: "models/pyramid.obj", size: vec3(1.5, 1.5, 1.5), position: vec3(-2.0, 0.0, 0.0), color: "#ffd400")
+            mesh(model: "models/tetra.glb", size: vec3(1.4, 1.4, 1.4), position: vec3(2.0, 0.2, 0.0), color: "#00e0a0")
+            mesh(shape: "box", texture: "textures/checker.png", position: vec3(0.0, 0.0, -1.0))
+            mesh(shape: "sphere", size: vec3(1.2, 1.2, 1.2), position: vec3(0.0, 0.3, 1.5), color: "#20c0ff", opacity: glass)
         }
     }
 }

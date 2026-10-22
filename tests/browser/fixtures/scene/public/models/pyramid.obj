@@ -1,0 +1,11 @@
+# A square pyramid (no normals: shaded flat)
+v -1 0 -1
+v 1 0 -1
+v 1 0 1
+v -1 0 1
+v 0 1.5 0
+f 1 2 3 4
+f 1 5 2
+f 2 5 3
+f 3 5 4
+f 4 5 1

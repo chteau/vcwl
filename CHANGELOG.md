@@ -11,6 +11,12 @@ All notable changes. The project has no release yet; entries are grouped by mile
 - Accessibility mirror: fonts of mirror elements come from one shared rule per font instead of an
   inline `font` on each element (mirror script time when creating 1000 rows 4.5 → 3.3 ms, median
   of 20 rounds; browser style and layout of the mirror unchanged).
+- 3D: `model` (Wavefront OBJ, glTF and GLB, centered and fitted to a unit cube), `texture`,
+  `opacity` (sorted, blended after opaque meshes), `shadows` on a scene (shadow map from the first
+  directional light). Clickable meshes require a `label`, are reachable with Tab and activated
+  with Enter or Space, appear in the accessibility mirror as buttons and are highlighted when
+  focused; arrow keys orbit a focused `orbit` scene. Pick passes no longer see through meshes
+  without a handler.
 
 ### Milestone 11 — built-in 3D
 

@@ -472,7 +472,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     if (scenes3d !== undefined) return;
     scenes3d = null;
     import(new URL("scene3d.js", import.meta.url).href)
-      .then((m) => (scenes3d = m.createScenes(doc) ?? false))
+      .then((m) => (scenes3d = m.createScenes(doc, { resolve, changed: () => !host.dead && replay() }) ?? false))
       .catch((e) => {
         scenes3d = false;
         console.warn("[vcwl] 3D scenes are not available: " + (e.message ?? e));
@@ -646,7 +646,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
           shape(ctx, x0, y0, w, h, radii);
           ctx.clip();
           if (scenes3d) {
-            ctx.drawImage(scenes3d.draw(d.scene, d.view, Math.round(w * dpr), Math.round(h * dpr), sceneTime(d)), x0, y0, w, h);
+            ctx.drawImage(scenes3d.draw(d.scene, d.view, Math.round(w * dpr), Math.round(h * dpr), sceneTime(d), lastFocus), x0, y0, w, h);
             animate ||= scenes3d.animated(d.scene);
           } else {
             // Until the 3D module is loaded, or without WebGL: the background and the label.
@@ -881,6 +881,8 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
       if (m.flags !== flags) {
         if ("checked" in m.el) m.el.checked = (flags & 2) !== 0;
         if ("disabled" in m.el) m.el.disabled = (flags & 4) !== 0;
+        if (flags & 8) m.el.tabIndex = -1;
+        else if ((m.flags & 8) && m.el.hasAttribute("tabindex")) m.el.removeAttribute("tabindex");
         m.flags = flags;
       }
       kids.get(p).push(m.el);
@@ -944,7 +946,10 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     syncing = true;
     try {
       if (id !== lastFocus || (doc.activeElement !== el && a11y.contains(doc.activeElement))) el.focus({ preventScroll: true });
+      // Scenes highlight their focused mesh.
+      const redraw = id !== lastFocus && [...sceneData.values()].some((d) => d.scene?.items.some((it) => it.id === id || it.id === lastFocus));
       lastFocus = id;
+      if (redraw) replay();
       // Only selections the renderer changed (clicks, drags) go to the DOM: the browser's
       // own selection changes reach the renderer asynchronously and must not be undone.
       const sel = `${id},${anchor},${caret},${value}`;
@@ -1043,6 +1048,15 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   }, { passive: false });
   a11y.addEventListener("keydown", (e) => {
     if (e.isComposing) return;
+    // Arrow keys turn the camera of an orbiting scene that has focus (itself or a mesh).
+    const turn = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    const d = turn && [...sceneData.entries()].find(([id, d]) => d.scene?.attrs.orbit === "true" && (id === lastFocus || d.scene.items.some((it) => it.id === lastFocus)))?.[1];
+    if (d) {
+      e.preventDefault();
+      d.view.yaw -= turn[0] * 0.15;
+      d.view.pitch += turn[1] * 0.15;
+      return replay();
+    }
     // Text fields edit natively; the renderer handles focus movement, submission and escape.
     if (isField(e.target) && !(e.key === "Tab" || e.key === "Escape" || (e.key === "Enter" && e.target.tagName === "INPUT"))) {
       input(() => r.field_keydown(put(e.key)));

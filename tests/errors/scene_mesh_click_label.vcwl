@@ -1,0 +1,14 @@
+// error: a clickable `mesh` requires a `label` argument
+app "T"
+
+component App {
+    state n: Int = 0
+
+    scene(label: "s") {
+        mesh(shape: "box") {
+            on click {
+                n += 1
+            }
+        }
+    }
+}

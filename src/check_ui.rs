@@ -280,6 +280,7 @@ fn spec(name: &str) -> Option<Spec> {
                 ("fov", ArgTy::Float, AttrKind::Attr("fov")),
                 ("background", ArgTy::Str, AttrKind::Attr("background")),
                 ("orbit", ArgTy::Bool, AttrKind::Attr("orbit")),
+                ("shadows", ArgTy::Bool, AttrKind::Attr("shadows")),
                 ("id", ArgTy::Str, AttrKind::Attr("id")),
             ],
             events: &[],
@@ -293,6 +294,8 @@ fn spec(name: &str) -> Option<Spec> {
             layout: false,
             args: &[
                 ("shape", ArgTy::Str, AttrKind::Attr("shape")),
+                ("model", ArgTy::Str, AttrKind::Attr("model")),
+                ("label", ArgTy::Str, AttrKind::Attr("aria-label")),
                 ("size", ArgTy::Vec3, AttrKind::Attr("size")),
                 ("position", ArgTy::Vec3, AttrKind::Attr("position")),
                 ("rotation", ArgTy::Vec3, AttrKind::Attr("rotation")),
@@ -300,6 +303,8 @@ fn spec(name: &str) -> Option<Spec> {
                 ("color", ArgTy::Str, AttrKind::Attr("color")),
                 ("shininess", ArgTy::Float, AttrKind::Attr("shininess")),
                 ("wireframe", ArgTy::Bool, AttrKind::Attr("wireframe")),
+                ("opacity", ArgTy::Float, AttrKind::Attr("opacity")),
+                ("texture", ArgTy::Str, AttrKind::Attr("texture")),
             ],
             events: CLICK,
             required: &[],
@@ -1306,6 +1311,15 @@ impl Checker<'_> {
                     }
                 }
             }
+        }
+        if name == "mesh"
+            && !seen.iter().any(|s| s == "label")
+            && el.children.iter().any(|c| matches!(c, View::On { .. }))
+        {
+            return Err(Diag::ty(
+                el.name.span,
+                "a clickable `mesh` requires a `label` argument (keyboard and screen reader users reach it as a button)",
+            ));
         }
         for r in sp.required {
             if !seen.iter().any(|s| s == r) {

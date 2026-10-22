@@ -6,7 +6,7 @@ import { build, open, tree, click, waitFor, repo } from "./harness.mjs";
 let app;
 before(async () => {
   const dist = build(path.join(repo, "tests/browser/fixtures/scene"));
-  app = await open(dist);
+  app = await open(dist, { viewport: { width: 1000, height: 1000 } });
   await waitForColor(app.page, "box");
 });
 after(async () => app?.close());
@@ -16,11 +16,17 @@ after(async () => app?.close());
 const KINDS = {
   box: "r > 110 && r > g * 1.5 && r > b * 1.5",
   sphere: "b > 120 && b > r * 1.6 && b > g * 1.2",
+  // Second scene.
+  pyramid: "r > 150 && g > 120 && b < 70",
+  tetra: "g > 120 && b > 80 && r < 60 && g > b",
+  checker: "r > 120 && b > 120 && g < 90",
+  glass: "b > 170 && g > 110 && r < 90",
+  any: "true",
 };
 
-/** Count and centroid of the pixels of one mesh inside the scene's box. */
-async function find(page, kind) {
-  const scene = (await tree(page)).one("scene");
+/** Count, centroid and mean brightness of the pixels of one mesh inside scene `n`'s box. */
+async function find(page, kind, n = 0) {
+  const scene = (await tree(page)).all("scene")[n];
   return page.evaluate(
     (rect, test) => {
       const c = document.querySelector("canvas");
@@ -28,25 +34,26 @@ async function find(page, kind) {
       const [x0, y0, w0, h0] = rect.map((v) => Math.round(v * k));
       const d = c.getContext("2d").getImageData(x0, y0, w0, h0).data;
       const match = new Function("r", "g", "b", `return ${test}`);
-      let n = 0, sx = 0, sy = 0;
+      let n = 0, sx = 0, sy = 0, light = 0;
       for (let i = 0; i < d.length; i += 4) {
         if (!match(d[i], d[i + 1], d[i + 2])) continue;
         const p = i / 4;
         n++;
+        light += d[i] + d[i + 1] + d[i + 2];
         sx += p % w0;
         sy += Math.floor(p / w0);
       }
-      return { n, x: (x0 + sx / n) / k, y: (y0 + sy / n) / k };
+      return { n, x: (x0 + sx / n) / k, y: (y0 + sy / n) / k, light: light / n / 3 };
     },
     scene.rect,
     KINDS[kind],
   );
 }
 
-async function waitForColor(page, kind, pred = (f) => f.n > 200, timeout = 10000) {
+async function waitForColor(page, kind, pred = (f) => f.n > 200, timeout = 10000, scene = 0) {
   const end = Date.now() + timeout;
   for (;;) {
-    const f = await find(page, kind);
+    const f = await find(page, kind, scene);
     if (pred(f)) return f;
     if (Date.now() > end) throw new Error(`timed out waiting for the ${kind}: ${JSON.stringify(f)}`);
     await new Promise((r) => setTimeout(r, 50));
@@ -94,6 +101,44 @@ test("dragging orbits the camera without clicking", async () => {
   await page.mouse.up();
   await waitForColor(page, "box", (f) => Math.abs(f.x - before.x) > 15);
   assert.equal((await tree(page)).text("p"), "Hits: 1");
+});
+
+test("meshes load OBJ and glTF models and image textures", async () => {
+  const { page } = app;
+  for (const kind of ["pyramid", "tetra", "checker"]) await waitForColor(page, kind, (f) => f.n > 150, 10000, 1);
+});
+
+test("shadows darken the floor under the meshes", async () => {
+  const { page } = app;
+  const before = await find(page, "any", 1);
+  await click(page, 'button:text("Shadows")');
+  await waitForColor(page, "any", (f) => f.light < before.light - 1, 5000, 1);
+});
+
+test("a translucent mesh lets what is behind it show through", async () => {
+  const { page } = app;
+  const before = await find(page, "glass", 1);
+  assert.ok(before.n > 400, JSON.stringify(before));
+  await click(page, 'button:text("Fade")');
+  await waitForColor(page, "glass", (f) => f.n < before.n / 2, 5000, 1);
+});
+
+test("keyboard: Tab reaches the orbiting scene and its clickable mesh", async () => {
+  const { page } = app;
+  const label = await page.evaluate(() => document.querySelector('button[aria-label="Box"]')?.textContent ?? null);
+  assert.equal(label, "", "the clickable mesh is a button in the accessibility mirror");
+  await page.mouse.click(5, 995);
+  await page.keyboard.press("Tab");
+  assert.equal((await tree(page)).one(":focus").tag, "scene");
+  // Arrow keys turn the camera.
+  const before = await find(page, "box");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowLeft");
+  await waitForColor(page, "box", (f) => Math.abs(f.x - before.x) > 15);
+  await page.keyboard.press("Tab");
+  assert.equal((await tree(page)).one(":focus").attrs["aria-label"], "Box");
+  const hits = (await tree(page)).text("p");
+  await page.keyboard.press("Enter");
+  await waitFor(page, (t) => t.text("p") !== hits);
 });
 
 test("no errors beyond software-WebGL driver notices", () => {

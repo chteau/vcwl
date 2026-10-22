@@ -416,7 +416,7 @@ component Viewer {
     scene(label: "A clickable box", camera: vec3(0.0, 1.5, 5.0), orbit: true) {
         light(kind: "ambient", intensity: 0.3)
         light(position: vec3(3.0, 5.0, 4.0))
-        mesh(shape: "box", rotation: vec3(20.0, 30.0, 0.0), color: "#d16a47") {
+        mesh(shape: "box", label: "Box", rotation: vec3(20.0, 30.0, 0.0), color: "#d16a47") {
             on click {
                 hits += 1
             }
@@ -431,14 +431,21 @@ component Viewer {
 - `scene` is a block element (300px high by default, styled like any element) that draws a 3D
   view with WebGL. `label` is required: it is the scene's accessible name (`role="img"`).
   Arguments: `camera` and `target` (`Vec3`, default `vec3(0, 1.5, 5)` looking at the origin),
-  `fov` in degrees (50), `background` (a CSS color), `orbit` (dragging turns the camera around
-  the target).
+  `fov` in degrees (50), `background` (a CSS color), `orbit` (dragging, or the arrow keys when
+  the scene or one of its meshes has focus, turns the camera around the target), `shadows`
+  (meshes cast shadows from the first directional light).
 - Inside a scene only `mesh`, `light` and `group` are allowed, and they are allowed nowhere
   else. Positions are `Vec3` values (`vec3(x, y, z)`, y up); rotations and `spin` are in
   degrees and degrees per second around x, y and z.
-- `mesh`: `shape` (`box`, `sphere`, `plane`, `cylinder`, `cone`, `torus`), `size` (scale,
-  default 1 unit), `position`, `rotation`, `spin`, `color`, `shininess` (32; 0 for matte),
-  `wireframe`, and `on click`, fired when a click without dragging hits the mesh.
+- `mesh`: `shape` (`box`, `sphere`, `plane`, `cylinder`, `cone`, `torus`) or `model` (a
+  Wavefront `.obj`, glTF `.gltf` or binary `.glb` file of the app, centered and scaled to fit
+  a unit cube; glTF materials are ignored), `size` (scale, default 1 unit), `position`,
+  `rotation`, `spin`, `color`, `texture` (an image; multiplied by `color`, white by default),
+  `opacity` (0 to 1), `shininess` (32; 0 for matte), `wireframe`, and `on click`, fired when a
+  click without dragging hits the mesh.
+- A mesh with `on click` requires a `label`: keyboard users reach it with Tab and press Enter
+  or Space, and screen readers see it as a button named by the label. The focused mesh is
+  highlighted.
 - `group` moves, rotates (`rotation`, `spin`) and scales (`scale`) its children together.
 - `light`: `kind` (`directional`, the default, `point` or `ambient`), `position`, `color`,
   `intensity`. A scene without lights gets an ambient and a directional light.
