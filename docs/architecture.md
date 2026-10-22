@@ -87,7 +87,8 @@ dependencies). Its only import is `host.measure(font, spacing, text) -> width`.
   outside the viewport are skipped. The painted boxes double as the hit-test list.
 - **Input** (`engine.rs`): pointer, wheel, touch and keyboard input becomes events for the app
   (`click`, `dblclick`, `input`, `change`, `keydown`, `focus`, `blur`, `submit`) and default actions
-  (checkbox toggling, form submission, link navigation, select pop-ups, scrolling). Events go to the
+  (checkbox toggling, form submission, link navigation, select pop-ups, scrolling, selecting
+  and copying page text). Events go to the
   host one at a time through `poll()`; an event whose element or listener disappeared in the
   meantime is dropped.
 

@@ -1,9 +1,22 @@
 # Changelog
 
-All notable changes. The project has no release yet; entries are grouped by milestone.
+All notable changes, grouped by milestone.
 
-## Unreleased
+## 0.1.0 — 2026-10-22
 
+The first release, republished in place the same day with the changes under "Republished".
+
+### Republished
+
+- Page text can be selected with the mouse (drag, double and triple click, Ctrl+A) and copied
+  with Ctrl+C; the cursor is a text cursor over it.
+- `font "Inter" from google weight 400..700`: Google Fonts, linked from the page, with the
+  Content-Security-Policy allowing Google's hosts.
+- `touch_icon` in vcwl.toml: a PNG home-screen icon, also a favicon fallback; `icon` gets a
+  `type`.
+- The canvas sizes itself from its own box: on phones, a prerendered page wider than the screen
+  no longer leaves the app laid out at the wider width.
+- The site has a phone menu, and its docs fold the page list into a button on narrow screens.
 - `supabase` (vcwl-supabase), the first package that does something: Supabase auth (password,
   magic link, OAuth), the database through PostgREST, storage URLs; `examples/supabase`.
 - Packages can ship a JavaScript module (`js` in their vcwl.toml) for their `extern fn`s; the
@@ -20,10 +33,6 @@ All notable changes. The project has no release yet; entries are grouped by mile
 - `vcwl lint`: `TODO`/`FIXME` markers are case-sensitive (`todo:` as a property name is fine).
 - Touch scrolling keeps its momentum after the finger lifts (a fling that slows down like
   native scrolling); the next touch stops it.
-
-## 0.1.0 — 2026-10-22
-
-The first release.
 
 ### Milestone 16 — packages, editors, styles beyond CSS, JavaScript interop
 

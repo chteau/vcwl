@@ -191,18 +191,20 @@ component NotFound {
 }
 
 component Nav {
+    state open: Bool = false
+
     nav(label: "Site") {
-        row(justify: between, align: center) {
-            style Mono
-            style {
-                max-width: 1120px
-                margin: 0 auto
-                padding: 18px 24px
-                size: 13px
-                when viewport < 700px {
-                    padding: 14px 16px
-                }
+        style Mono
+        style {
+            max-width: 1120px
+            margin: 0 auto
+            padding: 18px 24px
+            size: 13px
+            when viewport < 700px {
+                padding: 14px 16px
             }
+        }
+        row(justify: between, align: center) {
             row(gap: 8px, align: center) {
                 image(src: "logo.svg", alt: "") {
                     style {
@@ -220,6 +222,9 @@ component Nav {
                         weight: 700
                         decoration: none
                     }
+                    on click {
+                        open = false
+                    }
                 }
                 span("v0.1.0 (vibes edition)") {
                     style Muted
@@ -231,21 +236,55 @@ component Nav {
                 }
             }
             row(gap: 18px, align: center) {
-                link("docs", to: "/docs/install", current: route.starts_with("/docs")) {
-                    style NavLink
+                style {
+                    when viewport < 700px {
+                        display: none
+                    }
                 }
-                link("packages", to: "/packages", current: route == "/packages") {
-                    style NavLink
+                NavLinks()
+            }
+            // Phones get a menu button instead of a row of links.
+            button(if open { "✕ close" } else { "☰ menu" }, label: "Menu") {
+                style Mono
+                style {
+                    display: none
+                    padding: 8px 12px
+                    size: 13px
+                    color: #e6e6e6
+                    background: #111111
+                    border: 1px solid #333333
+                    radius: 8px
+                    cursor: pointer
+                    when viewport < 700px {
+                        display: block
+                    }
                 }
-                link("github ↗", href: "https://github.com/chteau/vcwl") {
-                    style NavLink
+                style if open {
+                    color: #b6ff6c
+                    border: 1px solid #b6ff6c
                 }
-                link("download", href: "https://github.com/chteau/vcwl/releases/latest") {
-                    style NavLink
-                    style {
-                        when viewport < 500px {
-                            display: none
-                        }
+                on click {
+                    open = !open
+                }
+            }
+        }
+        if open {
+            column(gap: 4px) {
+                style {
+                    padding: 14px 0 6px
+                    size: 16px
+                    when viewport >= 700px {
+                        display: none
+                    }
+                    transition: opacity 250ms ease-out, transform 400ms spring
+                    when appear {
+                        opacity: 0
+                        transform: translateY(-8px)
+                    }
+                }
+                NavLinks() {
+                    on picked {
+                        open = false
                     }
                 }
             }
@@ -253,9 +292,43 @@ component Nav {
     }
 }
 
+/// The site's main links; on phones they stack in the menu, with room for a thumb.
+component NavLinks {
+    event picked
+
+    link("docs", to: "/docs/install", current: route.starts_with("/docs")) {
+        style NavLink
+        on click {
+            emit picked
+        }
+    }
+    link("packages", to: "/packages", current: route == "/packages") {
+        style NavLink
+        on click {
+            emit picked
+        }
+    }
+    link("github ↗", href: "https://github.com/chteau/vcwl") {
+        style NavLink
+        on click {
+            emit picked
+        }
+    }
+    link("download", href: "https://github.com/chteau/vcwl/releases/latest") {
+        style NavLink
+        on click {
+            emit picked
+        }
+    }
+}
+
 style NavLink {
     color: #8a8a8a
     decoration: none
+    when viewport < 700px {
+        padding: 10px 0
+        border-bottom: 1px solid #222222
+    }
     transition: color 200ms ease-out
     when hover {
         color: #b6ff6c

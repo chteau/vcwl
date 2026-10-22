@@ -40,6 +40,8 @@ pub struct Hit {
     pub id: Id,
     pub rect: Rect,
     pub clip: Rect,
+    /// For a run of text: the element whose `frags` hold it, and its index there.
+    pub frag: Option<(Id, usize)>,
 }
 
 /// Text editing state of the focused field.
@@ -67,6 +69,9 @@ pub struct Popup {
     pub item_h: f32,
 }
 
+/// Highlight behind selected page text (translucent, so it works on light and dark pages).
+const SELECTION: u32 = 0x3d8bfd66;
+
 pub struct Painter<'a> {
     pub t: &'a Tree,
     pub fonts: &'a mut Fonts,
@@ -74,6 +79,8 @@ pub struct Painter<'a> {
     pub images: &'a HashMap<String, (u32, f32, f32)>,
     pub edit: &'a Edit,
     pub popup: Option<&'a Popup>,
+    /// Selected byte range of each text run with selected text, by (element, run index).
+    pub sel: HashMap<(Id, usize), (usize, usize)>,
     pub out: Vec<u32>,
     pub hits: Vec<Hit>,
     viewport: Rect,
@@ -116,6 +123,7 @@ impl<'a> Painter<'a> {
             images,
             edit,
             popup,
+            sel: HashMap::new(),
             out: Vec::new(),
             hits: Vec::new(),
             viewport,
@@ -348,6 +356,7 @@ impl<'a> Painter<'a> {
             id,
             rect: hit_rect,
             clip,
+            frag: None,
         });
         if s.corner != 0 {
             self.out.extend([op::CORNER, s.corner as u32]);
@@ -396,11 +405,22 @@ impl<'a> Painter<'a> {
             }
             _ => {}
         }
-        for f in &lay.frags {
+        for (fi, f) in lay.frags.iter().enumerate() {
             let ts = &self.t.n(f.node).style;
             let fx = cx + f.rect.x;
             let fy = cy + f.rect.y;
             let style = ts.clone();
+            if let Some(&(a, z)) = self.sel.get(&(id, fi)) {
+                let x1 = self.fonts.width(self.m, &style, &f.text[..a]);
+                let x2 = self.fonts.width(self.m, &style, &f.text[..z]);
+                let r = Rect {
+                    x: fx + x1,
+                    y: fy,
+                    w: (x2 - x1).max(4.0),
+                    h: f.rect.h,
+                };
+                self.fill(r, SELECTION, [0.0; 4]);
+            }
             self.text(&style, fx, fy + f.rect.h / 2.0, &f.text, style.color);
             match style.decoration {
                 Decoration::Underline => {
@@ -428,6 +448,7 @@ impl<'a> Painter<'a> {
                 Decoration::None => {}
             }
             self.hits.push(Hit {
+                frag: Some((id, fi)),
                 id: f.node,
                 rect: Rect {
                     x: fx,
@@ -1059,6 +1080,7 @@ mod tests {
                     h: 100.0,
                 },
                 clip: SCREEN,
+                frag: None,
             },
             Hit {
                 id: 2,
@@ -1069,6 +1091,7 @@ mod tests {
                     h: 50.0,
                 },
                 clip: SCREEN,
+                frag: None,
             },
             Hit {
                 id: 3,
@@ -1084,6 +1107,7 @@ mod tests {
                     w: 5.0,
                     h: 5.0,
                 },
+                frag: None,
             },
         ];
         assert_eq!(hit_test(&hits, 20.0, 20.0), Some(2));

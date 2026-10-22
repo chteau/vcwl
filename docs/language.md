@@ -316,6 +316,20 @@ the family by name (`font: "Tuffy", sans-serif`). The page preloads the files; t
 them before the first frame (waiting at most 3 s, then falling back) and re-measures text when a
 font arrives later.
 
+Google Fonts work without shipping files:
+
+```vcwl
+font "Space Grotesk" from google weight 300..700   // a range needs a variable family
+font "Inter" from google weight 400
+font "Inter" from google weight 700
+font "Inter" from google weight 400 italic
+```
+
+The page links the Google Fonts style sheet for the declared families, weights and styles, and
+its Content-Security-Policy allows `fonts.googleapis.com` and `fonts.gstatic.com`. Visitors'
+browsers then request the fonts from Google (which sees their IP address); download the files
+and use `from "fonts/..."` to avoid that.
+
 ### Styles
 
 ```vcwl

@@ -7,7 +7,7 @@ use crate::dom::{Id, Kind};
 
 /// The renderer's built-in styles that differ from the browser's (`style.rs` `defaults`).
 pub const BASE_CSS: &str = "*,::before,::after{box-sizing:border-box}\
-html,body{margin:0}\
+html,body{margin:0}html{overflow-x:hidden}\
 body{font:16px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif}\
 h1,h2,h3,h4,h5,h6{line-height:1.5}\
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8125em}\

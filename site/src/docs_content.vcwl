@@ -67,7 +67,11 @@ export fn doc_pages() -> [DocPage] {
                 Block { n: 4, kind: "li", lang: "", text: "`grain: 0.4`: film grain, because your landing page needed to feel more analog." },
                 Block { n: 5, kind: "li", lang: "", text: "`sketch: 2px #222`: hand-drawn, wobbly borders that stay still between frames." },
                 Block { n: 6, kind: "li", lang: "", text: "`spring` and `bounce` easings: `transition: transform 500ms spring`." },
-                Block { n: 7, kind: "note", lang: "", text: "This whole site is painted on a canvas by a renderer written in Rust. Yes, that includes the text you are reading. An accessibility mirror keeps it selectable and readable by screen readers." },
+                Block { n: 7, kind: "h", lang: "", text: "Fonts" },
+                Block { n: 8, kind: "p", lang: "", text: "Ship a font file from `public/`, or take one from Google Fonts. Styles then use the family by name: `font: \"Space Grotesk\", sans-serif`." },
+                Block { n: 9, kind: "code", lang: "vcwl", text: "font \"Tuffy\" from \"fonts/tuffy-bold.ttf\" weight 700\nfont \"Space Grotesk\" from google weight 300..700\nfont \"Inter\" from google weight 400 italic" },
+                Block { n: 10, kind: "note", lang: "", text: "Google Fonts are requested by your visitors' browsers, so Google sees their IP address. Download the files and use `from \"fonts/...\"` if that bothers you (or your lawyer)." },
+                Block { n: 11, kind: "note", lang: "", text: "This whole site is painted on a canvas by a renderer written in Rust. Yes, that includes the text you are reading. Drag over it: you can select and copy it anyway. An accessibility mirror keeps it readable by screen readers." },
             ] },
         DocPage { slug: "data", group: "Language", title: "Fetch and server functions", blurb: "Typed HTTP and functions that run on the server, both checked by the compiler.", blocks: [
                 Block { n: 0, kind: "code", lang: "vcwl", text: "on click \{\n    fetch get(\"/api/items\") as [Item] \{\n        Ok(items) => \{\n            list = items\n        \}\n        Err(Status(404, _)) => \{\n            error = \"not found\"\n        \}\n        Err(e) => \{\n            error = e.message()\n        \}\n    \}\n\}" },
@@ -112,7 +116,7 @@ export fn doc_pages() -> [DocPage] {
                 Block { n: 3, kind: "li", lang: "", text: "The in-page debugger: element tree, computed styles, a picker and frame timings, in dev builds only." },
             ] },
         DocPage { slug: "deploy", group: "Ecosystem", title: "Deploy", blurb: "Static files. Any host. Even the one you're on right now.", blocks: [
-                Block { n: 0, kind: "code", lang: "toml", text: "# vcwl.toml\nname = \"my-site\"\nentry = \"src/main.vcwl\"\nprerender = true                         # static HTML for every route\nrouting = \"path\"                         # real URLs instead of #/\nurl = \"https://you.github.io/my-site/\"   # canonical links, sitemap, og:image\ndescription = \"It will revolutionize nothing.\"\nimage = \"og.png\"" },
+                Block { n: 0, kind: "code", lang: "toml", text: "# vcwl.toml\nname = \"my-site\"\nentry = \"src/main.vcwl\"\nprerender = true                         # static HTML for every route\nrouting = \"path\"                         # real URLs instead of #/\nurl = \"https://you.github.io/my-site/\"   # canonical links, sitemap, og:image\ndescription = \"It will revolutionize nothing.\"\nimage = \"og.png\"                         # link previews\nicon = \"logo.svg\"                        # favicon\ntouch_icon = \"icon.png\"                  # 180x180 PNG: home screens, and browsers without SVG icons" },
                 Block { n: 1, kind: "p", lang: "", text: "With GitHub Actions, build with the CLI and upload `dist/` with `actions/upload-pages-artifact`. This very site does exactly that; the workflow is `.github/workflows/pages.yml` in the repository." },
                 Block { n: 2, kind: "p", lang: "", text: "Apps with server functions need `vcwl serve` behind a TLS-terminating proxy; their static part still works anywhere." },
             ] },

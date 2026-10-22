@@ -296,6 +296,9 @@ fn check_font(f: &ast::FontDecl) -> Result<()> {
             .help("use letters, digits, spaces and dashes, e.g. `font \"Inter\" from ...`"));
     }
     let ext = f.src.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    if f.google {
+        return check_weight(f);
+    }
     let relative =
         !f.src.starts_with('/') && !f.src.contains(':') && !f.src.split('/').any(|p| p == "..");
     if !plain(&f.src) || f.src.contains(' ') || !relative {
@@ -311,6 +314,10 @@ fn check_font(f: &ast::FontDecl) -> Result<()> {
             "font files must be .woff2, .woff, .ttf or .otf",
         ));
     }
+    check_weight(f)
+}
+
+fn check_weight(f: &ast::FontDecl) -> Result<()> {
     if let Some((lo, hi)) = f.weight
         && !(1 <= lo && lo <= hi && hi <= 1000)
     {

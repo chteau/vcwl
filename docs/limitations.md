@@ -42,8 +42,9 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
   and selection are drawn by the renderer: composition text is shown without an underline, and
   Up/Down in a `textarea` move by the browser's line breaks, which can differ from the renderer's.
   `on keydown` fires for every key, but the app cannot prevent the browser's edit.
-- No text selection or copy outside text fields (`copy()` writes to the clipboard from handlers),
-  no browser context menus on content, no middle-click on links. Find-in-page searches the mirror,
+- Page text is selected with the mouse (drag, double click for a word, triple click for a block,
+  Ctrl+A) and copied with Ctrl+C, but not with a long press on touch screens, and there is no
+  browser context menu on content and no middle-click on links. Find-in-page searches the mirror,
   so matches are found but highlighted only approximately.
 - CSS subset: no margin collapsing, no inline padding/borders/backgrounds on `span`-like elements,
   no `vertical-align` (items in a line are centered), no `align-content`, no grid rows placement or

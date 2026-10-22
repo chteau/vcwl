@@ -80,6 +80,15 @@ struct Down {
     moved: bool,
 }
 
+/// A point in the page's text: the element whose `lay.frags` hold a run of text, the run's
+/// index, and a byte offset in it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextPos {
+    owner: Id,
+    frag: usize,
+    off: usize,
+}
+
 /// How fast a fling slows down: its velocity falls by e every this many milliseconds.
 const FLING_DECAY_MS: f64 = 325.0;
 
@@ -119,6 +128,12 @@ pub struct Engine {
     page_scroll: Option<(f32, f32, f64)>,
     /// A touch scroll continuing after the finger left: container, velocity (px/ms), last step.
     fling: Option<(Id, f32, f32, f64)>,
+    /// Selected page text (outside fields): anchor and focus.
+    pub sel: Option<(TextPos, TextPos)>,
+    /// The mouse is extending `sel`.
+    sel_drag: bool,
+    /// Last press on text, and how many quick presses in a row (for double and triple clicks).
+    last_press: (f64, f32, f32, u32),
 }
 
 impl Engine {
@@ -158,6 +173,9 @@ impl Engine {
             anims: HashMap::new(),
             page_scroll: None,
             fling: None,
+            sel: None,
+            sel_drag: false,
+            last_press: (f64::MIN, 0.0, 0.0, 0),
         }
     }
 
@@ -381,6 +399,11 @@ impl Engine {
             w: self.media.width,
             h: self.media.height,
         };
+        let sel = self
+            .sel_ranges()
+            .into_iter()
+            .map(|(o, f, a, z)| ((o, f), (a, z)))
+            .collect();
         let mut p = Painter::new(
             &self.tree,
             &mut self.fonts,
@@ -390,6 +413,7 @@ impl Engine {
             self.popup.as_ref(),
             viewport,
         );
+        p.sel = sel;
         p.paint();
         let (out, hits) = (p.out, p.hits);
         for (id, s) in saved {
@@ -877,6 +901,8 @@ impl Engine {
                     && self.closest(t, |n| n.attr("disabled").is_some()).is_some()
                 {
                     Cursor::Default
+                } else if s.cursor == Cursor::Auto && self.selectable_at(x, y) {
+                    Cursor::Text
                 } else {
                     s.cursor
                 }
@@ -917,6 +943,9 @@ impl Engine {
             }
         }
         self.fling = None;
+        if self.sel.take().is_some() {
+            self.paint_dirty = true;
+        }
         let Some(target) = self.hit(x, y) else { return };
         let scroller = if touch {
             self.scroller_at(x, y).map(|s| (s, x, y))
@@ -935,7 +964,199 @@ impl Engine {
         });
         if !touch {
             self.press(target, x, y, m);
+            if !self
+                .chain(Some(target))
+                .into_iter()
+                .any(|c| self.interactive(c))
+            {
+                self.select_from(m, x, y);
+            }
         }
+    }
+
+    /// Whether pressing `id` does something other than selecting text.
+    fn interactive(&self, id: Id) -> bool {
+        self.focusable(id) || self.checkbox_of(id).is_some() || self.tree.n(id).is("a")
+    }
+
+    /// Whether the point is on page text that a drag would select.
+    fn selectable_at(&self, x: f32, y: f32) -> bool {
+        paint::hit_test(&self.hits, x, y)
+            .and_then(|id| self.tree.get(id))
+            .is_some_and(|n| n.kind == Kind::Text)
+            && self
+                .hit(x, y)
+                .is_some_and(|t| !self.chain(Some(t)).into_iter().any(|c| self.interactive(c)))
+    }
+
+    /// A mouse press on page text: starts a selection, or selects a word (double click) or the
+    /// whole block (triple click).
+    fn select_from(&mut self, m: &mut dyn Measure, x: f32, y: f32) {
+        let Some(p) = self.text_pos_at(m, x, y) else {
+            return;
+        };
+        let (t, lx, ly, n) = self.last_press;
+        let n = if self.now - t < DOUBLE_CLICK_MS && (lx - x).abs() < 5.0 && (ly - y).abs() < 5.0 {
+            n + 1
+        } else {
+            1
+        };
+        self.last_press = (self.now, x, y, n);
+        self.sel = Some(match n {
+            1 => {
+                self.sel_drag = true;
+                (p, p)
+            }
+            2 => {
+                let text = &self.tree.n(p.owner).lay.frags[p.frag].text;
+                let word = |c: char| c.is_alphanumeric() || c == '_';
+                let a = text[..p.off]
+                    .char_indices()
+                    .rev()
+                    .take_while(|&(_, c)| word(c))
+                    .last()
+                    .map_or(p.off, |(i, _)| i);
+                let z = text[p.off..]
+                    .char_indices()
+                    .find(|&(_, c)| !word(c))
+                    .map_or(text.len(), |(i, _)| p.off + i);
+                (TextPos { off: a, ..p }, TextPos { off: z, ..p })
+            }
+            _ => {
+                let frags = &self.tree.n(p.owner).lay.frags;
+                let last = frags.len() - 1;
+                (
+                    TextPos {
+                        frag: 0,
+                        off: 0,
+                        ..p
+                    },
+                    TextPos {
+                        frag: last,
+                        off: frags[last].text.len(),
+                        ..p
+                    },
+                )
+            }
+        });
+        self.paint_dirty = true;
+    }
+
+    /// The text position nearest a viewport point: in the run under it, or else the nearest run
+    /// (on the same line first).
+    fn text_pos_at(&mut self, m: &mut dyn Measure, x: f32, y: f32) -> Option<TextPos> {
+        let gap = |v: f32, lo: f32, hi: f32| (lo - v).max(v - hi).max(0.0);
+        let ((owner, frag), r) = self
+            .hits
+            .iter()
+            .filter(|h| h.rect.y < h.clip.y + h.clip.h && h.rect.y + h.rect.h > h.clip.y)
+            .filter_map(|h| Some((h.frag?, h.rect)))
+            .min_by(|(_, a), (_, b)| {
+                let d = |r: &Rect| (gap(y, r.y, r.y + r.h), gap(x, r.x, r.x + r.w));
+                d(a).partial_cmp(&d(b)).unwrap_or(std::cmp::Ordering::Equal)
+            })?;
+        let f = self.tree.n(owner).lay.frags.get(frag)?;
+        let s = self.tree.n(f.node).style.clone();
+        let text = f.text.clone();
+        let target = x - r.x;
+        let mut best = (0, f32::MAX);
+        for i in text.char_indices().map(|(i, _)| i).chain([text.len()]) {
+            let d = (self.fonts.width(m, &s, &text[..i]) - target).abs();
+            if d < best.1 {
+                best = (i, d);
+            }
+        }
+        Some(TextPos {
+            owner,
+            frag,
+            off: best.0,
+        })
+    }
+
+    /// Elements holding runs of text, in document order.
+    fn text_owners(&self) -> Vec<Id> {
+        let mut out = Vec::new();
+        let mut stack = vec![0];
+        while let Some(id) = stack.pop() {
+            let n = self.tree.n(id);
+            if n.kind != Kind::Element || n.style.display == crate::style::Display::None {
+                continue;
+            }
+            if !n.lay.frags.is_empty() {
+                out.push(id);
+            }
+            stack.extend(n.children.iter().rev());
+        }
+        out
+    }
+
+    /// The selected part of each run, in document order: (element, run, from, to).
+    fn sel_ranges(&self) -> Vec<(Id, usize, usize, usize)> {
+        let Some((p, q)) = self.sel else {
+            return Vec::new();
+        };
+        let owners = self.text_owners();
+        let key = |p: TextPos| Some((owners.iter().position(|&o| o == p.owner)?, p.frag, p.off));
+        let (Some(kp), Some(kq)) = (key(p), key(q)) else {
+            return Vec::new();
+        };
+        let (from, to) = if kp <= kq { (kp, kq) } else { (kq, kp) };
+        let mut out = Vec::new();
+        for (r, &owner) in owners.iter().enumerate().take(to.0 + 1).skip(from.0) {
+            for (i, f) in self.tree.n(owner).lay.frags.iter().enumerate() {
+                let at = (r, i);
+                if at < (from.0, from.1) || at > (to.0, to.1) {
+                    continue;
+                }
+                let floor = |mut o: usize| {
+                    o = o.min(f.text.len());
+                    while !f.text.is_char_boundary(o) {
+                        o -= 1;
+                    }
+                    o
+                };
+                let a = if at == (from.0, from.1) {
+                    floor(from.2)
+                } else {
+                    0
+                };
+                let z = if at == (to.0, to.1) {
+                    floor(to.2)
+                } else {
+                    f.text.len()
+                };
+                if a < z {
+                    out.push((owner, i, a, z));
+                }
+            }
+        }
+        out
+    }
+
+    /// The selected page text: wrapped lines joined with spaces, blocks on lines of their own.
+    pub fn selected_text(&self) -> String {
+        let mut out = String::new();
+        let mut prev: Option<(Id, f32, f32, f32)> = None;
+        for (owner, i, a, z) in self.sel_ranges() {
+            let o = self.abs(owner);
+            let f = &self.tree.n(owner).lay.frags[i];
+            let (x, y) = (o.x + f.rect.x, o.y + f.rect.y);
+            if let Some((po, px, py, ph)) = prev {
+                if (y - py).abs() < ph.min(f.rect.h) / 2.0 {
+                    if x - px > 2.0 {
+                        out.push(' ');
+                    }
+                } else if po == owner {
+                    out.push(' ');
+                } else {
+                    out.truncate(out.trim_end_matches(' ').len());
+                    out.push('\n');
+                }
+            }
+            out.push_str(&f.text[a..z]);
+            prev = Some((owner, x + f.rect.w, y, f.rect.h));
+        }
+        out
     }
 
     fn press(&mut self, target: Id, x: f32, y: f32, m: &mut dyn Measure) {
@@ -997,10 +1218,19 @@ impl Engine {
                 self.paint_dirty = true;
             }
         }
+        if self.sel_drag
+            && let Some(p) = self.text_pos_at(m, x, y)
+            && let Some(sel) = &mut self.sel
+            && sel.1 != p
+        {
+            sel.1 = p;
+            self.paint_dirty = true;
+        }
     }
 
     pub fn pointer_up(&mut self, m: &mut dyn Measure, x: f32, y: f32) {
         self.selecting = false;
+        self.sel_drag = false;
         let Some(down) = self.down.take() else {
             if let Some(p) = self.popup.clone()
                 && p.rect.contains(x, y)
@@ -1503,6 +1733,41 @@ impl Engine {
         }
         if key == "Tab" {
             return self.tab(shift);
+        }
+        if !self.focus.is_some_and(|f| self.is_text_field(f)) {
+            match key {
+                "c" | "C" if ctrl && !self.sel_ranges().is_empty() => {
+                    self.out.push_back(Out::Copy(self.selected_text()));
+                    return true;
+                }
+                "a" | "A" if ctrl => {
+                    let owners = self.text_owners();
+                    if let (Some(&first), Some(&last)) = (owners.first(), owners.last()) {
+                        let frags = &self.tree.n(last).lay.frags;
+                        let end = TextPos {
+                            owner: last,
+                            frag: frags.len() - 1,
+                            off: frags[frags.len() - 1].text.len(),
+                        };
+                        self.sel = Some((
+                            TextPos {
+                                owner: first,
+                                frag: 0,
+                                off: 0,
+                            },
+                            end,
+                        ));
+                        self.paint_dirty = true;
+                    }
+                    return true;
+                }
+                "Escape" if self.sel.is_some() => {
+                    self.sel = None;
+                    self.paint_dirty = true;
+                    return true;
+                }
+                _ => {}
+            }
         }
         let Some(f) = self.focus else {
             return self.page_key(key, shift);
@@ -2068,6 +2333,38 @@ mod tests {
                 (1, Payload::None)
             ]
         );
+    }
+
+    #[test]
+    fn dragging_over_page_text_selects_and_copies_it() {
+        let mut b = Buf::default();
+        b.create(1, "p").insert(0, 1, 0);
+        b.text(2, "hello brave").insert(1, 2, 0);
+        b.create(3, "p").insert(0, 3, 0);
+        b.text(4, "new world").insert(3, 4, 0);
+        let mut e = engine(&b, "");
+        let (p1, p3) = (e.abs(1), e.abs(3));
+        // From inside "hello" (after "he") to after "new".
+        e.pointer_down(&mut Mono, p1.x + 2.0 * 8.0 + 1.0, p1.y + 4.0, false);
+        e.pointer_move(&mut Mono, p3.x + 3.0 * 8.0 + 1.0, p3.y + 4.0);
+        e.pointer_up(&mut Mono, p3.x + 3.0 * 8.0 + 1.0, p3.y + 4.0);
+        e.frame(&mut Mono, 1.0);
+        assert_eq!(e.selected_text(), "llo brave\nnew");
+        assert!(e.key(&mut Mono, "c", false, true, false));
+        assert!(e.out.contains(&Out::Copy("llo brave\nnew".into())));
+        // Double click selects a word; a press elsewhere clears it.
+        e.now = 1000.0;
+        for _ in 0..2 {
+            e.pointer_down(&mut Mono, p3.x + 6.0 * 8.0, p3.y + 4.0, false);
+            e.pointer_up(&mut Mono, p3.x + 6.0 * 8.0, p3.y + 4.0);
+        }
+        assert_eq!(e.selected_text(), "world");
+        e.now = 3000.0;
+        e.pointer_down(&mut Mono, p1.x, p1.y + 4.0, false);
+        e.pointer_up(&mut Mono, p1.x, p1.y + 4.0);
+        assert_eq!(e.selected_text(), "");
+        assert!(e.key(&mut Mono, "a", false, true, false));
+        assert_eq!(e.selected_text(), "hello brave\nnew world");
     }
 
     #[test]

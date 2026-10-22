@@ -200,9 +200,14 @@ impl<'a> Parser<'a> {
             self.bump();
             let family = self.plain_str("a font family")?;
             if !self.eat_kw("from") {
-                return self.err("`from \"path/to/font.woff2\"`");
+                return self.err("`from \"path/to/font.woff2\"` or `from google`");
             }
-            let src = self.plain_str("a font file path")?;
+            let google = self.eat_kw("google");
+            let src = if google {
+                String::new()
+            } else {
+                self.plain_str("a font file path")?
+            };
             let (mut weight, mut italic) = (None, false);
             while !self.token().nl && !matches!(self.peek(), Tok::Eof) {
                 if self.eat_kw("weight") {
@@ -229,6 +234,7 @@ impl<'a> Parser<'a> {
             return Ok(Item::Font(FontDecl {
                 family,
                 src,
+                google,
                 weight,
                 italic,
                 span: start.to(self.prev_span()),

@@ -6,6 +6,7 @@ prerender = true
 routing = "path"
 url = "https://vcwl.chteau.bzh/"
 icon = "logo.svg"
+touch_icon = "icon.png"
 image = "og.png"
 description = "VCWL: the Vibe Coded Web Language. It will revolutionize web development. (It will not.)"
 theme_color = "#0d0d0d"

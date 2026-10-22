@@ -225,14 +225,28 @@ pub fn csp(app: &crate::app::AppOutput, pre: Option<&Prerendered>) -> String {
     // 'self' is always allowed for scripts and the module fetch of app.wasm. Rendering uses a
     // canvas, so no style sheets are loaded.
     // A prerendered page carries one inline style sheet, allowed by its hash.
-    let style = pre.map_or(String::new(), |p| {
-        let hash = crate::node::base64(&crate::sha256::digest(p.style.as_bytes()));
-        format!(" style-src 'sha256-{hash}';")
-    });
-    let font = if app.fonts.is_empty() {
-        ""
+    // Google Fonts: a style sheet from fonts.googleapis.com, files from fonts.gstatic.com.
+    let google = app.fonts.iter().any(|f| f.google);
+    let mut styles: Vec<String> = pre
+        .map(|p| {
+            let hash = crate::node::base64(&crate::sha256::digest(p.style.as_bytes()));
+            format!("'sha256-{hash}'")
+        })
+        .into_iter()
+        .collect();
+    if google {
+        styles.push("https://fonts.googleapis.com".into());
+    }
+    let style = if styles.is_empty() {
+        String::new()
     } else {
-        " font-src 'self';"
+        format!(" style-src {};", styles.join(" "))
+    };
+    let font = match (app.fonts.iter().any(|f| !f.google), google) {
+        (false, false) => "",
+        (true, false) => " font-src 'self';",
+        (false, true) => " font-src https://fonts.gstatic.com;",
+        (true, true) => " font-src 'self' https://fonts.gstatic.com;",
     };
     format!(
         "default-src 'none'; script-src 'self' 'wasm-unsafe-eval';{style}{font} img-src 'self' https: data:; \
@@ -250,9 +264,59 @@ fn font_descriptors(f: &crate::ast::FontDecl) -> (String, &'static str) {
     (weight, if f.italic { "italic" } else { "normal" })
 }
 
+/// The Google Fonts style sheet for the app's `font ... from google` declarations, e.g.
+/// `https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400..700;1,400&display=swap`.
+pub fn google_fonts_url(fonts: &[crate::ast::FontDecl]) -> Option<String> {
+    let mut families: Vec<(&str, Vec<(bool, String)>)> = Vec::new();
+    for f in fonts.iter().filter(|f| f.google) {
+        let weight = match f.weight {
+            Some((lo, hi)) if lo != hi => format!("{lo}..{hi}"),
+            Some((lo, _)) => lo.to_string(),
+            None => "400".into(),
+        };
+        match families.iter_mut().find(|(n, _)| *n == f.family) {
+            Some((_, axes)) => axes.push((f.italic, weight)),
+            None => families.push((&f.family, vec![(f.italic, weight)])),
+        }
+    }
+    if families.is_empty() {
+        return None;
+    }
+    let params: Vec<String> = families
+        .into_iter()
+        .map(|(name, mut axes)| {
+            let key = |w: &str| {
+                w.split("..")
+                    .next()
+                    .unwrap_or("")
+                    .parse::<u32>()
+                    .unwrap_or(0)
+            };
+            axes.sort_by_key(|(i, w)| (*i, key(w)));
+            axes.dedup();
+            let name = name.replace(' ', "+");
+            if axes.iter().any(|(i, _)| *i) {
+                let list: Vec<String> = axes
+                    .iter()
+                    .map(|(i, w)| format!("{},{w}", *i as u8))
+                    .collect();
+                format!("family={name}:ital,wght@{}", list.join(";"))
+            } else {
+                let list: Vec<&str> = axes.iter().map(|(_, w)| w.as_str()).collect();
+                format!("family={name}:wght@{}", list.join(";"))
+            }
+        })
+        .collect();
+    Some(format!(
+        "https://fonts.googleapis.com/css2?{}&display=swap",
+        params.join("&")
+    ))
+}
+
 fn font_face_css(fonts: &[crate::ast::FontDecl], root: &str) -> String {
     fonts
         .iter()
+        .filter(|f| !f.google)
         .map(|f| {
             let (weight, style) = font_descriptors(f);
             format!(
@@ -467,12 +531,14 @@ fn assemble(app: &crate::app::AppOutput, root: &str, routes: &[(&str, &str, &str
 
 /// The page: metadata and one script. The app's configuration and styles travel inside
 /// `app.wasm`; the renderer creates the only element, a canvas.
-/// Page metadata from `vcwl.toml` (`description`, `theme_color`, `icon`, `image`, `url`).
+/// Page metadata from `vcwl.toml` (`description`, `theme_color`, `icon`, `touch_icon`, `image`,
+/// `url`).
 #[derive(Default)]
 pub struct Meta {
     pub description: Option<String>,
     pub theme_color: Option<String>,
     pub icon: Option<String>,
+    pub touch_icon: Option<String>,
     pub image: Option<String>,
     pub url: Option<String>,
 }
@@ -484,6 +550,7 @@ impl Meta {
             description: v("description"),
             theme_color: v("theme_color"),
             icon: v("icon"),
+            touch_icon: v("touch_icon"),
             image: v("image"),
             url: v("url"),
         }
@@ -528,9 +595,10 @@ fn index_html(
     let title = &app.title;
     let root = html_escape(&page.root);
     // Fonts download with the modules instead of after them.
-    let fonts: String = app
+    let mut fonts: String = app
         .fonts
         .iter()
+        .filter(|f| !f.google)
         .map(|f| {
             let ext = f.src.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
             format!(
@@ -539,6 +607,13 @@ fn index_html(
             )
         })
         .collect();
+    if let Some(url) = google_fonts_url(&app.fonts) {
+        fonts.push_str(&format!(
+            "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n\
+<link rel=\"stylesheet\" href=\"{}\">\n",
+            html_escape(&url)
+        ));
+    }
     let dev_script = if dev {
         format!("\n<script type=\"module\" src=\"{root}dev.js\"></script>")
     } else {
@@ -547,15 +622,40 @@ fn index_html(
     let canonical = page.canonical.as_ref().map_or(String::new(), |c| {
         format!("<link rel=\"canonical\" href=\"{}\">\n", html_escape(c))
     });
-    let icon = match &meta.icon {
-        Some(i) => format!("{root}{}", html_escape(i)),
-        None => "data:,".into(),
+    let mut icon = match &meta.icon {
+        Some(i) => {
+            let ty = match i
+                .rsplit('.')
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "svg" => " type=\"image/svg+xml\"",
+                "png" => " type=\"image/png\"",
+                "ico" => " type=\"image/x-icon\"",
+                _ => "",
+            };
+            format!(
+                "<link rel=\"icon\" href=\"{root}{}\"{ty}>\n",
+                html_escape(i)
+            )
+        }
+        None => "<link rel=\"icon\" href=\"data:,\">\n".into(),
     };
+    // A PNG for home screens, and for browsers without SVG favicons.
+    if let Some(t) = &meta.touch_icon {
+        let t = html_escape(t);
+        icon.push_str(&format!(
+            "<link rel=\"icon\" href=\"{root}{t}\" type=\"image/png\" sizes=\"180x180\">\n\
+<link rel=\"apple-touch-icon\" href=\"{root}{t}\">\n"
+        ));
+    }
     format!(
         "<!doctype html>\n<html lang=\"en\">\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n\
 <meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n\
-<title>{title}</title>\n{meta}{canonical}<link rel=\"icon\" href=\"{icon}\">\n\
+<title>{title}</title>\n{meta}{canonical}{icon}\
 <link rel=\"modulepreload\" href=\"{root}vcwl.js\">\n\
 <link rel=\"preload\" href=\"{root}render.wasm\" as=\"fetch\" crossorigin>\n\
 <link rel=\"preload\" href=\"{root}app.wasm\" as=\"fetch\" crossorigin>\n\
@@ -623,8 +723,8 @@ pub fn app_wasm(
         .map(|f| {
             let (weight, style) = font_descriptors(f);
             format!(
-                "{{\"family\":\"{}\",\"src\":\"{}\",\"weight\":\"{weight}\",\"style\":\"{style}\"}}",
-                f.family, f.src
+                "{{\"family\":\"{}\",\"src\":\"{}\",\"google\":{},\"weight\":\"{weight}\",\"style\":\"{style}\"}}",
+                f.family, f.src, f.google
             )
         })
         .collect();
@@ -760,7 +860,7 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
             }
         }
     }
-    for f in &app.fonts {
+    for f in app.fonts.iter().filter(|f| !f.google) {
         if !out.join(&f.src).is_file() {
             return Err(format!(
                 "font \"{}\": {} not found (put the file in public/{})",

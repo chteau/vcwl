@@ -190,6 +190,24 @@ fn build_checks_fonts_and_allows_the_prerendered_style_by_hash() {
     );
     assert!(html.contains("font-src 'self'"), "{html}");
     assert!(html.contains(">&lt;hi&gt;<"), "escaped text: {html}");
+    // Google Fonts: no file, a style sheet link, and the CSP allows Google's hosts.
+    std::fs::write(
+        dir.join("src/main.vcwl"),
+        "app \"T\"\n\nfont \"Tuffy\" from \"fonts/t.ttf\"\nfont \"Space Grotesk\" from google weight 300..700\nfont \"Space Grotesk\" from google weight 400 italic\n\ncomponent App {\n    text(\"hi\")\n}\n",
+    )
+    .unwrap();
+    let o = build();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let html = std::fs::read_to_string(dir.join("dist/index.html")).unwrap();
+    assert!(
+        html.contains("href=\"https://fonts.googleapis.com/css2?family=Space+Grotesk:ital,wght@0,300..700;1,400&amp;display=swap\""),
+        "{html}"
+    );
+    assert!(
+        html.contains("font-src 'self' https://fonts.gstatic.com;"),
+        "{html}"
+    );
+    assert!(html.contains("https://fonts.googleapis.com;"), "{html}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

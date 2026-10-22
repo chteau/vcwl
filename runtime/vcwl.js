@@ -428,9 +428,14 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
 
   const ctx = canvas.getContext("2d");
   let dpr = 1;
+  let size = [0, 0];
   function resize() {
     dpr = win.devicePixelRatio || 1;
-    const w = win.innerWidth, h = win.innerHeight;
+    // The canvas fills the viewport; its size, unlike innerWidth, ignores a layout viewport that a
+    // wide prerendered page stretched on phones before the canvas took over.
+    const w = canvas.clientWidth || win.innerWidth, h = canvas.clientHeight || win.innerHeight;
+    if (canvas.width === Math.round(w * dpr) && canvas.height === Math.round(h * dpr) && w === size[0] && h === size[1]) return;
+    size = [w, h];
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     input(() => r.resize(w, h));
@@ -1154,6 +1159,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     if (used) e.preventDefault();
   });
   win.addEventListener("resize", resize);
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => resize()).observe(canvas);
   const dark = win.matchMedia("(prefers-color-scheme: dark)"), motion = win.matchMedia("(prefers-reduced-motion: reduce)");
   const prefs = () => input(() => r.preferences(dark.matches ? 1 : 0, motion.matches ? 1 : 0));
   dark.addEventListener?.("change", prefs);
@@ -1284,10 +1290,18 @@ async function compile(url) {
 const FONT_WAIT_MS = 3000;
 async function loadFonts(doc, fonts, root) {
   if (!fonts.length || typeof FontFace === "undefined") return;
+  const failed = (f) => (e) => console.warn(`[vcwl] font "${f.family}" failed to load: ${e.message ?? e}`);
+  // Google Fonts come from the page's style sheet: once it is in, ask for each face.
+  const sheet = doc.querySelector('link[href^="https://fonts.googleapis.com/"]');
+  const sheetIn = sheet && !sheet.sheet ? new Promise((r) => (sheet.addEventListener("load", r), sheet.addEventListener("error", r))) : Promise.resolve();
   const loads = fonts.map((f) => {
+    if (f.google) {
+      const weight = f.weight.split(" ")[0].replace("normal", "400");
+      return sheetIn.then(() => doc.fonts.load(`${f.style} ${weight} 16px "${f.family}"`)).catch(failed(f));
+    }
     const face = new FontFace(f.family, `url("${new URL(f.src, root)}")`, { weight: f.weight, style: f.style });
     doc.fonts.add(face);
-    return face.load().catch((e) => console.warn(`[vcwl] font "${f.family}" failed to load: ${e.message ?? e}`));
+    return face.load().catch(failed(f));
   });
   await Promise.race([Promise.all(loads), new Promise((r) => setTimeout(r, FONT_WAIT_MS))]);
 }

@@ -29,11 +29,14 @@ pub enum Item {
     Font(FontDecl),
 }
 
-/// `font "Family" from "path" [weight N[..M]] [italic]`: a font file shipped with the app.
+/// `font "Family" from "path" [weight N[..M]] [italic]`: a font file shipped with the app, or
+/// `font "Family" from google ...`: a Google Fonts family.
 #[derive(Clone, Debug)]
 pub struct FontDecl {
     pub family: String,
+    /// The file under `public/`; empty for Google Fonts.
     pub src: String,
+    pub google: bool,
     pub weight: Option<(i64, i64)>,
     pub italic: bool,
     pub span: Span,

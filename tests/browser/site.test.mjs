@@ -34,6 +34,51 @@ test("a touch flick keeps scrolling after the finger lifts", async () => {
   }
 });
 
+test("phones get a menu and a folded docs page list; canvas fits the screen", async () => {
+  const phone = await open(path.join(repo, "site/dist"), {
+    hash: "docs/styles/",
+    viewport: { width: 390, height: 800, isMobile: true, hasTouch: true },
+  });
+  try {
+    const { page } = phone;
+    // A wide prerendered page must not leave the canvas laid out wider than the screen.
+    assert.equal(await page.evaluate(() => document.querySelector("canvas").width), 390);
+    assert.equal(shown(await tree(page), "a:text('Quick start')"), 0);
+    await click(page, "button[aria-label='Documentation pages']");
+    await waitFor(page, (t) => shown(t, "a:text('Quick start')") === 1);
+    assert.equal(shown(await tree(page), "a:text('packages')"), 0);
+    await click(page, "button[aria-label='Menu']");
+    await waitFor(page, (t) => shown(t, "a:text('packages')") === 1);
+    const [x, y, w, h] = (await tree(page)).all("a:text('packages')").find((n) => n.rect[2] > 0).rect;
+    await page.mouse.click(x + w / 2, y + h / 2);
+    await waitFor(page, (t) => t.text("h1") === "Packages");
+    assert.equal(shown(await tree(page), "a:text('github ↗')"), 0, "the menu closes after a pick");
+  } finally {
+    await phone.close();
+  }
+});
+
+test("dragging over painted text selects it and Ctrl+C copies it", async () => {
+  const { page } = app;
+  await page.evaluate(() => {
+    window.copied = [];
+    navigator.clipboard.writeText = async (t) => window.copied.push(t);
+  });
+  const [x, y] = (await tree(page)).nodes.find((n) => n.text?.startsWith("The Vibe Coded")).rect;
+  await page.mouse.move(x + 1, y + 8);
+  await page.mouse.down();
+  await page.mouse.move(x + 150, y + 8, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.down("Control");
+  await page.keyboard.press("c");
+  await page.keyboard.up("Control");
+  await page.waitForFunction(() => window.copied[0]?.startsWith("The Vibe"), { timeout: 5000 });
+  await page.mouse.click(x - 30, y - 30);
+});
+
+/** How many elements matching `sel` are laid out (hidden ones stay in the tree with no size). */
+const shown = (t, sel) => t.all(sel).filter((n) => n.rect[2] > 0).length;
+
 async function flick(page) {
   const cdp = await page.createCDPSession();
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });

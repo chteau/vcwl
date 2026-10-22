@@ -80,13 +80,14 @@ Commit the contents of `dist/` to a `gh-pages` branch and select it as the Pages
 ```toml
 description = "One sentence about the site."
 theme_color = "#d16a47"
-icon = "logo.svg"          # a file in public/
+icon = "logo.svg"          # a file in public/ (SVG, PNG or ICO)
+touch_icon = "icon.png"    # 180×180 PNG: home screen icon, and the favicon where SVG isn't
 image = "og.png"           # preview image, a file in public/
 url = "https://user.github.io/repo/"   # makes og:url and an absolute og:image
 ```
 
 They become `<meta name="description">`, Open Graph and Twitter card tags, `theme-color` and the
-page icon.
+page icons.
 
 ## Prerendering
 

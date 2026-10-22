@@ -219,7 +219,12 @@ component CodeBlock(code: String, lang: String) {
 }
 
 component SideLink(p: DocPage, on: Bool) {
+    event picked
+
     link(p.title, to: "/docs/{p.slug}", current: on) {
+        on click {
+            emit picked
+        }
         style {
             padding: 6px 10px
             radius: 8px
@@ -240,6 +245,8 @@ component SideLink(p: DocPage, on: Bool) {
 }
 
 export component Docs(slug: String) {
+    state toc: Bool = false
+
     let page = find_page(slug)
     let pages = doc_pages()
 
@@ -252,11 +259,33 @@ export component Docs(slug: String) {
                 gap: 20px
             }
         }
-        nav(label: "Documentation") {
-            column(gap: 18px) {
-                style {
-                    padding: 0 0 0 0
+        // On phones the page list folds into a button, so the page itself comes first.
+        button(if toc { "✕  {page.title}" } else { "☰  {page.title}" }, label: "Documentation pages") {
+            style Mono
+            style {
+                display: none
+                padding: 12px 14px
+                size: 14px
+                color: #b6ff6c
+                background: #111111
+                border: 1px solid #333333
+                radius: 10px
+                cursor: pointer
+                when viewport < 820px {
+                    display: block
                 }
+            }
+            on click {
+                toc = !toc
+            }
+        }
+        nav(label: "Documentation") {
+            style if !toc {
+                when viewport < 820px {
+                    display: none
+                }
+            }
+            column(gap: 18px) {
                 for g in ["Start", "Language", "Ecosystem"] key g {
                     column(gap: 2px) {
                         span(g) {
@@ -271,7 +300,11 @@ export component Docs(slug: String) {
                         }
                         for p in pages key p.slug {
                             if p.group == g {
-                                SideLink(p: p, on: p.slug == page.slug)
+                                SideLink(p: p, on: p.slug == page.slug) {
+                                    on picked {
+                                        toc = false
+                                    }
+                                }
                             }
                         }
                     }
