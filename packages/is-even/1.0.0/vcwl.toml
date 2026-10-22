@@ -1,0 +1,4 @@
+name = "is-even"
+version = "1.0.0"
+description = "Tells you if an Int is even. Enterprise grade. Zero dependencies (for now)."
+registry = "../.."

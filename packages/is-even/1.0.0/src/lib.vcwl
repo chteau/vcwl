@@ -1,0 +1,6 @@
+// The flagship package of the VCWL ecosystem. Weekly downloads: yes.
+
+/// Whether `n` is even. Negative numbers are supported at no extra cost.
+export fn is_even(n: Int) -> Bool {
+    n % 2 == 0
+}
