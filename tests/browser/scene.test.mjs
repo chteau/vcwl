@@ -21,6 +21,9 @@ const KINDS = {
   tetra: "g > 120 && b > 80 && r < 60 && g > b",
   checker: "r > 120 && b > 120 && g < 90",
   glass: "b > 170 && g > 110 && r < 90",
+  // Third scene: a glTF model with a red material and a green checker texture.
+  red: "r > 150 && g < 70 && b < 70",
+  green: "g > 150 && r < 100 && b < 100",
   any: "true",
 };
 
@@ -106,6 +109,11 @@ test("dragging orbits the camera without clicking", async () => {
 test("meshes load OBJ and glTF models and image textures", async () => {
   const { page } = app;
   for (const kind of ["pyramid", "tetra", "checker"]) await waitForColor(page, kind, (f) => f.n > 150, 10000, 1);
+});
+
+test("glTF materials give each part its base color or embedded texture", async () => {
+  const { page } = app;
+  for (const kind of ["red", "green"]) await waitForColor(page, kind, (f) => f.n > 100, 10000, 2);
 });
 
 test("shadows darken the floor under the meshes", async () => {

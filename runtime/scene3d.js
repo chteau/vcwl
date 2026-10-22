@@ -242,22 +242,27 @@ function finish({ pos, nrm, uv, idx }) {
 
 // ----- models -----
 
-/** Centers a loaded model and scales it to fit a unit cube, like the built-in shapes. */
-function fit(g) {
+/**
+ * Centers a loaded model (its parts together) and scales it to fit a unit cube, like the
+ * built-in shapes.
+ */
+function fit(parts) {
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < g.pos.length; i += 3)
-    for (let k = 0; k < 3; k++) {
-      lo[k] = Math.min(lo[k], g.pos[i + k]);
-      hi[k] = Math.max(hi[k], g.pos[i + k]);
-    }
+  for (const g of parts)
+    for (let i = 0; i < g.pos.length; i += 3)
+      for (let k = 0; k < 3; k++) {
+        lo[k] = Math.min(lo[k], g.pos[i + k]);
+        hi[k] = Math.max(hi[k], g.pos[i + k]);
+      }
   const s = 1 / (Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1);
-  for (let i = 0; i < g.pos.length; i += 3) for (let k = 0; k < 3; k++) g.pos[i + k] = (g.pos[i + k] - (lo[k] + hi[k]) / 2) * s;
-  return g;
+  for (const g of parts)
+    for (let i = 0; i < g.pos.length; i += 3) for (let k = 0; k < 3; k++) g.pos[i + k] = (g.pos[i + k] - (lo[k] + hi[k]) / 2) * s;
+  return parts;
 }
 
 /** Normals of faces without them: each triangle's own (flat shading). */
 function flatNormals(g) {
-  const out = { pos: [], nrm: [], uv: [], idx: [] };
+  const out = { ...g, pos: [], nrm: [], uv: [], idx: [] };
   for (let i = 0; i < g.idx.length; i += 3) {
     const [a, b, c] = [0, 1, 2].map((k) => g.idx[i + k]);
     const p = (j) => [g.pos[j * 3], g.pos[j * 3 + 1], g.pos[j * 3 + 2]];
@@ -272,7 +277,7 @@ function flatNormals(g) {
   return out;
 }
 
-/** Wavefront OBJ: `v`, `vt`, `vn` and `f` (polygons are fanned into triangles). */
+/** Wavefront OBJ: `v`, `vt`, `vn` and `f` (polygons are fanned into triangles); one part. */
 export function parseObj(text) {
   const v = [], vt = [], vn = [], g = { pos: [], nrm: [], uv: [], idx: [] }, ids = new Map();
   let normals = true;
@@ -301,7 +306,7 @@ export function parseObj(text) {
       for (let i = 1; i + 1 < c.length; i++) g.idx.push(c[0], c[i], c[i + 1]);
     }
   }
-  return fit(normals ? g : flatNormals(g));
+  return fit([normals ? g : flatNormals(g)]);
 }
 
 const quatMatrix = ([x, y, z, w], [tx, ty, tz], [sx, sy, sz]) =>
@@ -316,7 +321,9 @@ const base64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer;
 
 /**
  * glTF 2.0 (`.gltf` with its buffers, or binary `.glb`): the triangles of every mesh in the
- * default scene, with node transforms applied; materials are ignored.
+ * default scene, with node transforms applied, as one part per material. A part carries the
+ * material's base color (sRGB, with alpha) and base color image: `{ uri }` (absolute) or
+ * `{ bytes, mime }` for one stored in a buffer.
  */
 export async function parseGltf(data, url, load) {
   let json, bin = null;
@@ -348,21 +355,37 @@ export async function parseGltf(data, url, load) {
       for (let c = 0; c < n; c++) out[k * n + c] = src[get](start + k * stride + c * T.BYTES_PER_ELEMENT, true) * scale;
     return out;
   };
-  const g = { pos: [], nrm: [], uv: [], idx: [] };
-  let normals = true;
+  const parts = new Map();
+  const part = (mi) => {
+    let g = parts.get(mi);
+    if (g) return g;
+    const pbr = json.materials?.[mi]?.pbrMetallicRoughness ?? {};
+    // Colors in glTF are linear; this renderer works in sRGB.
+    const f = pbr.baseColorFactor;
+    g = { pos: [], nrm: [], uv: [], idx: [], normals: true, color: f ? [...f.slice(0, 3).map((c) => c ** (1 / 2.2)), f[3]] : null, image: null };
+    const img = json.images?.[json.textures?.[pbr.baseColorTexture?.index]?.source];
+    if (img?.uri !== undefined) g.image = { uri: new URL(img.uri, url).href };
+    else if (img?.bufferView !== undefined) {
+      const v = json.bufferViews[img.bufferView];
+      g.image = { bytes: new Uint8Array(buffers[v.buffer], v.byteOffset ?? 0, v.byteLength), mime: img.mimeType, key: `${url}#image${pbr.baseColorTexture.index}` };
+    }
+    parts.set(mi, g);
+    return g;
+  };
   const visit = (ni, parent) => {
     const node = json.nodes[ni];
     const local = node.matrix ? new Float32Array(node.matrix) : quatMatrix(node.rotation ?? [0, 0, 0, 1], node.translation ?? [0, 0, 0], node.scale ?? [1, 1, 1]);
     const m = mul(parent, local), nm = normalMatrix(m);
     for (const prim of node.mesh !== undefined ? json.meshes[node.mesh].primitives : []) {
       if ((prim.mode ?? 4) !== 4 || prim.attributes.POSITION === undefined) continue;
+      const g = part(prim.material ?? -1);
       const base = g.pos.length / 3, p = accessor(prim.attributes.POSITION), count = p.length / 3;
       for (let k = 0; k < p.length; k += 3)
         for (let r = 0; r < 3; r++) g.pos.push(m[r] * p[k] + m[4 + r] * p[k + 1] + m[8 + r] * p[k + 2] + m[12 + r]);
       if (prim.attributes.NORMAL !== undefined) {
         const n = accessor(prim.attributes.NORMAL);
         for (let k = 0; k < n.length; k += 3) g.nrm.push(...norm([0, 1, 2].map((r) => nm[r] * n[k] + nm[3 + r] * n[k + 1] + nm[6 + r] * n[k + 2])));
-      } else normals = false;
+      } else g.normals = false;
       if (prim.attributes.TEXCOORD_0 !== undefined) g.uv.push(...accessor(prim.attributes.TEXCOORD_0));
       else for (let k = 0; k < count; k++) g.uv.push(0, 0);
       const idx = prim.indices !== undefined ? accessor(prim.indices) : [...Array(count).keys()];
@@ -373,8 +396,8 @@ export async function parseGltf(data, url, load) {
   const scene = json.scenes?.[json.scene ?? 0];
   const children = new Set((json.nodes ?? []).flatMap((n) => n.children ?? []));
   for (const ni of scene ? scene.nodes : json.nodes.map((_, i) => i).filter((i) => !children.has(i))) visit(ni, ident());
-  if (!g.idx.length) throw new Error("no triangles");
-  return fit(normals ? g : flatNormals(g));
+  if (!parts.size) throw new Error("no triangles");
+  return fit([...parts.values()].map((g) => (g.normals ? g : flatNormals(g))));
 }
 
 // ----- attributes -----
@@ -463,18 +486,21 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     return r.arrayBuffer();
   };
   const failed = (what, url, e) => console.warn(`[vcwl] ${what} ${url} could not be loaded: ${e.message ?? e}`);
+  // A shape or model is a list of parts, each with its buffers and, for glTF, material.
+  // glTF texture coordinates start at the top of the image, the others at the bottom.
   const geometry = (it) => {
     const model = it.attrs.model;
     const key = model ? resolve(model) : it.attrs.shape ?? "box";
     let g = meshes.get(key);
     if (g === undefined) {
-      if (!model) meshes.set(key, (g = upload(finish(build(key)))));
+      if (!model) meshes.set(key, (g = { flip: true, parts: [{ ...upload(finish(build(key))), color: null, image: null }] }));
       else {
         meshes.set(key, (g = null));
         fetchBytes(key)
           .then(async (data) => {
-            const d = /\.obj(\?|#|$)/i.test(key) ? parseObj(new TextDecoder().decode(data)) : await parseGltf(data, key, fetchBytes);
-            meshes.set(key, upload(finish(d)));
+            const obj = /\.obj(\?|#|$)/i.test(key);
+            const parts = obj ? parseObj(new TextDecoder().decode(data)) : await parseGltf(data, key, fetchBytes);
+            meshes.set(key, { flip: obj, parts: parts.map((d) => ({ ...upload(finish(d)), color: d.color ?? null, image: d.image ?? null })) });
           })
           .catch((e) => {
             meshes.set(key, false);
@@ -486,19 +512,29 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     return g;
   };
 
-  // Textures by URL: `null` while loading, `false` if it failed.
+  // Textures by key: `null` while loading, `false` if it failed. `src` is a URL, or
+  // `{ bytes, mime, key }` for an image stored in a model.
   const textures = new Map();
-  const texture = (url) => {
-    const key = resolve(url);
+  const texture = (src, flip) => {
+    const url = typeof src === "string" ? resolve(src) : null;
+    const key = `${url ?? src.key} ${flip}`;
     let t = textures.get(key);
-    if (t === undefined) {
-      textures.set(key, (t = null));
-      const img = new win.Image();
-      if (new URL(key).origin !== win.location.origin) img.crossOrigin = "anonymous";
-      img.onload = () => {
+    if (t !== undefined) return t;
+    textures.set(key, (t = null));
+    const load = url
+      ? new Promise((ok, err) => {
+          const img = new win.Image();
+          if (new URL(url).origin !== win.location.origin) img.crossOrigin = "anonymous";
+          img.onload = () => ok(img);
+          img.onerror = () => err(new Error("not an image"));
+          img.src = url;
+        })
+      : win.createImageBitmap(new win.Blob([src.bytes], { type: src.mime }), { imageOrientation: flip ? "flipY" : "from-image" });
+    load
+      .then((img) => {
         const tex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flip && !!url);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         // WebGL 1 repeats and mipmaps only power-of-two textures.
@@ -511,16 +547,14 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         }
+        gl.bindTexture(gl.TEXTURE_2D, null);
         textures.set(key, tex);
-        changed();
-      };
-      img.onerror = () => {
+      })
+      .catch((e) => {
         textures.set(key, false);
-        failed("texture", key, new Error("not an image"));
-        changed();
-      };
-      img.src = key;
-    }
+        failed("texture", url ?? src.key, e);
+      })
+      .finally(changed);
     return t;
   };
 
@@ -595,12 +629,14 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     for (const l of [main.nrm, main.uv]) if (l >= 0 && l !== depth.pos) gl.disableVertexAttribArray(l);
     gl.uniformMatrix4fv(depth.lightViewProj, false, vp);
     scene.items.forEach((it, i) => {
-      const g = it.kind === 1 && num(it.attrs.opacity, 1) > 0.5 && geometry(it);
-      if (!g) return;
-      bind(depth, g);
+      const m = it.kind === 1 && num(it.attrs.opacity, 1) > 0.5 && geometry(it);
+      if (!m) return;
       gl.uniformMatrix4fv(depth.model, false, world[i]);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, g.idx);
-      gl.drawElements(gl.TRIANGLES, g.count, g.type, 0);
+      for (const g of m.parts) {
+        bind(depth, g);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, g.idx);
+        gl.drawElements(gl.TRIANGLES, g.count, g.type, 0);
+      }
     });
     return vp;
   }
@@ -655,16 +691,17 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     // Opaque meshes first, then translucent ones from far to near without writing depth.
     const draws = [];
     scene.items.forEach((it, i) => {
-      const g = it.kind === 1 && geometry(it);
-      if (!g) return;
-      const opacity = picking ? 1 : Math.max(0, Math.min(1, num(it.attrs.opacity, 1)));
-      if (opacity === 0) return;
-      const m = world[i];
-      draws.push({ it, i, g, opacity, far: Math.hypot(m[12] - eye[0], m[13] - eye[1], m[14] - eye[2]) });
+      const model = it.kind === 1 && geometry(it);
+      if (!model) return;
+      const m = world[i], far = Math.hypot(m[12] - eye[0], m[13] - eye[1], m[14] - eye[2]);
+      for (const g of model.parts) {
+        const opacity = picking ? 1 : Math.max(0, Math.min(1, num(it.attrs.opacity, 1) * (g.color?.[3] ?? 1)));
+        if (opacity > 0) draws.push({ it, i, g, flip: model.flip, opacity, far });
+      }
     });
     const solid = draws.filter((d) => d.opacity >= 1);
     const glass = draws.filter((d) => d.opacity < 1).sort((a, b) => b.far - a.far);
-    for (const { it, i, g, opacity } of [...solid, ...glass]) {
+    for (const { it, i, g, flip, opacity } of [...solid, ...glass]) {
       const blend = opacity < 1;
       if (blend) {
         gl.enable(gl.BLEND);
@@ -674,10 +711,13 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
       bind(u, g);
       gl.uniformMatrix4fv(u.model, false, world[i]);
       gl.uniformMatrix3fv(u.normalMat, false, normalMatrix(world[i]));
-      const tex = it.attrs.texture ? texture(it.attrs.texture) : null;
+      // The mesh's texture replaces the material's; the mesh's color multiplies it.
+      const image = it.attrs.texture ?? g.image;
+      const tex = image ? texture(image.uri ?? image, flip) : null;
       gl.uniform1i(u.textured, tex ? 1 : 0);
       if (tex) gl.bindTexture(gl.TEXTURE_2D, tex);
-      const c = color(it.attrs.color, it.attrs.texture ? [1, 1, 1, 1] : [0.82, 0.42, 0.28, 1]);
+      const plain = image || g.color ? [1, 1, 1, 1] : [0.82, 0.42, 0.28, 1];
+      const c = color(it.attrs.color, plain).map((v, k) => v * (g.color?.[k] ?? 1));
       gl.uniform3f(u.color, c[0], c[1], c[2]);
       gl.uniform1f(u.shininess, num(it.attrs.shininess, 32));
       gl.uniform1f(u.opacity, opacity);

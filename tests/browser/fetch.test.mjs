@@ -89,11 +89,12 @@ test("a response for a destroyed component is discarded", async () => {
   await click("Toggle loader");
   assert.equal(await count(app.page, "button"), 8);
   releaseSlow();
-  await new Promise((r) => setTimeout(r, 200));
+  // The request's slot is released when its response arrives (polled: the suite runs in
+  // parallel, so the response can take a while).
+  const live = () => app.page.evaluate(() => window.vcwl.exports.live_slots());
+  for (let end = Date.now() + 3000; (await live()) !== slots - 2 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 25));
+  assert.equal(await live(), slots - 2, "the loader's click listener and the request slot are released");
   assert.doesNotMatch(await status(), /^child/);
-  // The request's slot is released when its response arrives.
-  const after = await app.page.evaluate(() => window.vcwl.exports.live_slots());
-  assert.equal(after, slots - 2, "the loader's click listener and the request slot are released");
 });
 
 test("no console errors", () => {

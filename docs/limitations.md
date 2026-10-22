@@ -64,7 +64,8 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## 3D
 
-- Models: triangles only, no materials, skins, morph targets or animations; one shadow-casting
+- Models: triangles only; of glTF materials only the base color and base color texture (no
+  metallic/roughness, normal, emissive or occlusion maps); no skins, morph targets or animations; one shadow-casting
   light, from a fixed 1024×1024 map; no shadows from point lights.
 - Translucent meshes are sorted by their centers, so intersecting or nested translucent meshes
   can blend in the wrong order.

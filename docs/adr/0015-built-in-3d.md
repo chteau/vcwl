@@ -27,7 +27,8 @@ WebGL calls behind a host bridge for every draw and grow the module every app do
 - Apps without scenes pay nothing (the module is not fetched; render.wasm grows by the op and
   the description only).
 - The copy from WebGL to the 2D canvas costs a full-scene blit per frame while a scene animates.
-- Models are loaded by `scene3d.js` itself (OBJ and glTF, geometry only), textures as images;
+- Models are loaded by `scene3d.js` itself (OBJ, and glTF with each material's base color and
+  base color texture), textures as images;
   one shadow map (RGBA-packed depth, so no WebGL extension is needed). No materials, skinning
   or animation from files.
 - Clickable meshes need a `label` and are focusable buttons in the accessibility mirror,

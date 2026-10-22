@@ -4,7 +4,7 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
-### Milestone 13 — slots that pass values
+### Milestone 13 — slots that pass values, glTF materials
 
 - Slots can pass a value to their content: `slot row(Type)` declares it, `slot(row, value)` gives
   it, `slot(row, x) { ... }` names it at the use site.
@@ -12,6 +12,8 @@ All notable changes. The project has no release yet; entries are grouped by mile
   a child's content; a slot's body is fallback content shown when it is not filled. Slot content
   is now created by the child through functions the user passes, once per place it appears.
 - `scene3d.js` is only written to builds of apps that show a `scene`.
+- 3D models are drawn per glTF material, with its base color and base color texture (an image
+  file or one stored in the `.glb`); a mesh's `color` multiplies it and its `texture` replaces it.
 
 ### Milestone 12 — named slots, a cheaper mirror, more 3D
 

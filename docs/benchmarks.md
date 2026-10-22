@@ -110,7 +110,7 @@ preloads `vcwl.js`, `render.wasm` and `app.wasm` so they download in parallel.
 | app.wasm (includes styles) | 17,291 / 6,598 | 5,740 / 2,651 |
 | render.wasm (same for every app) | 316,064 / 134,607 | 316,064 / 134,607 |
 | vcwl.js (host) | 47,032 / 15,195 | 47,032 / 15,195 |
-| scene3d.js (only fetched by apps showing a `scene`) | 31,513 / 10,678 | — |
+| scene3d.js (only in builds of apps showing a `scene`) | 33,879 / 11,597 | — |
 | index.html + boot.js | 622 / 474 | 623 / 477 |
 
 `render.wasm` is mostly Rust's standard library (allocator, formatting, Unicode case mapping,

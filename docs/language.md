@@ -473,7 +473,8 @@ component Viewer {
   degrees and degrees per second around x, y and z.
 - `mesh`: `shape` (`box`, `sphere`, `plane`, `cylinder`, `cone`, `torus`) or `model` (a
   Wavefront `.obj`, glTF `.gltf` or binary `.glb` file of the app, centered and scaled to fit
-  a unit cube; glTF materials are ignored), `size` (scale, default 1 unit), `position`,
+  a unit cube; a glTF material's base color and base color texture are used, the rest of the
+  material is not), `size` (scale, default 1 unit), `position`,
   `rotation`, `spin`, `color`, `texture` (an image; multiplied by `color`, white by default),
   `opacity` (0 to 1), `shininess` (32; 0 for matte), `wireframe`, and `on click`, fired when a
   click without dragging hits the mesh.
