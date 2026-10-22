@@ -21,7 +21,10 @@ All notable changes. The project has no release yet; entries are grouped by mile
   cookies, Intl, Web Crypto and device APIs.
 - The pipe operator: `x |> f(a)` is `f(x, a)`.
 - `site/`: the project's GitHub Pages site, written in VCWL (satire, with a section of real
-  facts), and a Pages workflow that builds it.
+  facts), and a Pages workflow that builds it; styled with the debugger's palette, a typing
+  terminal and a highlighted code sample.
+- Fixed: changing a text node's content did not lay out (or repaint) its parent again when the
+  text node itself had no cached layout.
 
 ### Milestone 15 — the rest of the 3D
 

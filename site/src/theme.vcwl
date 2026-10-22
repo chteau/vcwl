@@ -1,109 +1,182 @@
-// Late-night infomercial meets photocopied zine: acid yellow, hot pink, ink, grain, wobbly lines.
+// The dev debugger's palette (runtime/dev.js): near-black panels, #333 hairlines, lime accent,
+// blue tags, orange classes, purple attributes, monospace for anything that looks like a tool.
 
 export style Page {
-    background: #f4ff3a
-    color: #111111
+    background: #0d0d0d
+    color: #e6e6e6
     min-height: 100vh
-    font: "Arial Black", "Helvetica Neue", Arial, sans-serif
+    font: "Inter", "Helvetica Neue", Arial, sans-serif
     size: 16px
-    line-height: 1.45
-    grain: 0.35
+    line-height: 1.55
+    grain: 0.06
 }
 
 export style Wrap {
-    max-width: 1100px
+    max-width: 1120px
     margin: 0 auto
-    padding: 32px 24px 48px
+    padding: 28px 24px 56px
     when viewport < 700px {
-        padding: 20px 16px 32px
+        padding: 18px 16px 36px
     }
+}
+
+export style Mono {
+    font: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace
 }
 
 export style Shout {
     margin: 0
-    size: 64px
-    weight: 900
-    line-height: 1.0
+    size: 68px
+    weight: 800
+    line-height: 1.02
     letter-spacing: -2px
-    case: upper
+    color: #ffffff
     when viewport < 700px {
-        size: 38px
+        size: 40px
         letter-spacing: -1px
     }
 }
 
+export style Title {
+    margin: 0
+    size: 40px
+    weight: 800
+    letter-spacing: -1px
+    color: #ffffff
+    when viewport < 700px {
+        size: 30px
+    }
+}
+
+export style Muted {
+    color: #8a8a8a
+}
+
+export style Lime {
+    color: #b6ff6c
+}
+
 export style Panel {
     padding: 22px 24px
-    background: #ffffff
-    sketch: 3px #111111
-    radius: 22px
+    background: linear-gradient(160deg, #1a1a1a, #121212)
+    border: 1px solid #2b2b2b
+    radius: 14px
     corner: squircle
+    shadow: 0 24px 48px -28px #000000
+    transition: transform 600ms spring, background 300ms ease-out
+    when hover {
+        transform: translateY(-4px)
+        background: linear-gradient(160deg, #1f2a1a, #131313)
+    }
 }
 
-export style Pink {
+export style Glow {
     padding: 22px 24px
-    background: #ff2e88
-    color: #ffffff
-    sketch: 3px #111111
-    radius: 18px
-    corner: scoop
+    background: linear-gradient(160deg, #1f2a1a, #111111)
+    border: 1px solid #b6ff6c55
+    radius: 14px
+    corner: squircle
+    shadow: 0 0 0 1px #b6ff6c22, 0 30px 60px -30px #b6ff6c55
 }
 
-export style Ink {
-    padding: 22px 24px
+export style Window {
     background: #111111
-    color: #f4ff3a
-    radius: 16px
-    corner: cut
-    grain: 0.5
+    border: 1px solid #333333
+    radius: 12px
+    corner: squircle
+    shadow: 0 40px 80px -40px #000000, 0 0 0 1px #00000080
+    overflow: hidden
 }
 
-export style Sticker {
-    padding: 6px 12px
-    background: #111111
-    color: #f4ff3a
-    size: 13px
-    case: upper
-    letter-spacing: 1px
+export style Bar {
+    padding: 8px 12px
+    background: #1d1d1d
+    color: #8a8a8a
+    size: 12px
+}
+
+export style Pill {
+    padding: 4px 10px
+    background: #1f2a1a
+    color: #b6ff6c
+    border: 1px solid #b6ff6c44
+    size: 12px
     radius: 999px
-    transform: rotate(-4deg)
     align-self: start
 }
 
 export style Fine {
     size: 13px
-    line-height: 1.5
-    font: Georgia, "Times New Roman", serif
+    line-height: 1.55
+    color: #8a8a8a
 }
 
-export style Big {
-    padding: 14px 22px
-    background: #ff2e88
-    color: #ffffff
-    size: 18px
-    weight: 900
-    case: upper
-    sketch: 3px #111111
-    radius: 14px
+export style Primary {
+    padding: 12px 20px
+    background: #b6ff6c
+    color: #111111
+    size: 15px
+    weight: 700
+    border: 1px solid #b6ff6c
+    radius: 10px
     corner: squircle
     cursor: pointer
-    transition: transform 500ms spring
+    shadow: 0 10px 30px -10px #b6ff6c88
+    transition: transform 500ms spring, background 200ms ease-out
     when hover {
-        transform: rotate(-3deg) scale(1.08)
+        transform: translateY(-2px) scale(1.04)
+        background: #c9ff8f
     }
     when active {
-        transform: scale(0.94)
+        transform: scale(0.96)
     }
     when focus {
-        background: #111111
+        background: #e6ffcc
+    }
+}
+
+export style Ghost {
+    padding: 12px 20px
+    background: #1d1d1d
+    color: #e6e6e6
+    size: 15px
+    weight: 600
+    border: 1px solid #333333
+    radius: 10px
+    corner: squircle
+    cursor: pointer
+    transition: transform 500ms spring, background 200ms ease-out, color 200ms ease-out
+    when hover {
+        transform: translateY(-2px)
+        background: #2c3d22
+        color: #b6ff6c
+    }
+    when focus {
+        background: #2c3d22
     }
 }
 
 export style Reveal {
-    transition: opacity 700ms ease-out, transform 700ms bounce
+    transition: opacity 700ms ease-out, transform 900ms spring
     when appear {
         opacity: 0
-        transform: translateY(40px) rotate(2deg)
+        transform: translateY(32px)
+    }
+}
+
+export style Reveal2 {
+    transition: opacity 700ms ease-out 120ms, transform 900ms spring 120ms
+    when appear {
+        opacity: 0
+        transform: translateY(32px)
+    }
+}
+
+export style Reveal3 {
+    transition: opacity 700ms ease-out 240ms, transform 900ms spring 240ms
+    when appear {
+        opacity: 0
+        transform: translateY(32px)
     }
 }
 
@@ -111,7 +184,7 @@ export style TwoCols {
     display: grid
     columns: 1fr 1fr
     gap: 20px
-    when viewport < 760px {
+    when viewport < 820px {
         columns: 1fr
     }
 }

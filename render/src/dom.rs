@@ -207,14 +207,15 @@ impl Tree {
         }
     }
 
-    /// Invalidates the layout of `id` and its ancestors.
+    /// Invalidates the layout of `id` and its ancestors (up to one already invalidated; `id`
+    /// itself, like a text node, may have nothing cached while its parent does).
     pub fn mark_layout(&mut self, id: Id) {
         let mut cur = Some(id);
         while let Some(c) = cur {
             let Some(n) = self.nodes.get_mut(c as usize).and_then(|n| n.as_mut()) else {
                 break;
             };
-            if !n.lay.invalidate() {
+            if !n.lay.invalidate() && c != id {
                 break;
             }
             cur = n.parent;

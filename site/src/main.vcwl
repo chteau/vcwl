@@ -47,6 +47,60 @@ fn hot_takes() -> [String] {
     ]
 }
 
+struct Line {
+    kind: Int,
+    text: String,
+}
+
+/// A token of the code sample: 0 plain, 1 keyword, 2 name, 3 string, 4 comment, 5 accent.
+struct Tok {
+    kind: Int,
+    text: String,
+}
+
+fn term_lines() -> [Line] {
+    [
+        Line { kind: 0, text: "$ vcwl new my-startup && cd my-startup" },
+        Line { kind: 1, text: "created my-startup (series A pending)" },
+        Line { kind: 0, text: "$ vcwl build" },
+        Line { kind: 1, text: "  lexing vibes ........................ ok" },
+        Line { kind: 1, text: "  type-checking feelings .............. ok" },
+        Line { kind: 3, text: "  warning[unused-fn]: function `business_model` is never used" },
+        Line { kind: 1, text: "  emitting WasmGC ..................... ok" },
+        Line { kind: 4, text: "  index.html  app.wasm  render.wasm  vcwl.js" },
+        Line { kind: 2, text: "✓ built dist/ — the web has been revolutionized*" },
+        Line { kind: 1, text: "  * it has not" },
+    ]
+}
+
+fn t(kind: Int, text: String) -> Tok {
+    Tok { kind: kind, text: text }
+}
+
+struct CodeLine {
+    n: Int,
+    toks: [Tok],
+}
+
+fn code_lines() -> [CodeLine] {
+    [
+        CodeLine { n: 1, toks: [t(4, "// a whole app. yes, really.")] },
+        CodeLine { n: 2, toks: [t(1, "app "), t(3, "\"Startup\""), t(0, " \{\}")] },
+        CodeLine { n: 3, toks: [t(0, "")] },
+        CodeLine { n: 4, toks: [t(1, "component "), t(2, "App"), t(0, " \{")] },
+        CodeLine { n: 5, toks: [t(1, "    state "), t(0, "funding: "), t(5, "Int"), t(0, " = "), t(3, "0")] },
+        CodeLine { n: 6, toks: [t(0, "")] },
+        CodeLine { n: 7, toks: [t(2, "    column"), t(0, " \{")] },
+        CodeLine { n: 8, toks: [t(2, "        heading"), t(0, "("), t(3, "\"Disrupting \{funding\}\""), t(0, ")")] },
+        CodeLine { n: 9, toks: [t(2, "        button"), t(0, "("), t(3, "\"Pivot\""), t(0, ") \{")] },
+        CodeLine { n: 10, toks: [t(1, "            style"), t(0, " \{ "), t(5, "corner"), t(0, ": squircle \}")] },
+        CodeLine { n: 11, toks: [t(1, "            on "), t(2, "click"), t(0, " \{ funding "), t(1, "|>"), t(0, " burn \}")] },
+        CodeLine { n: 12, toks: [t(0, "        \}")] },
+        CodeLine { n: 13, toks: [t(0, "    \}")] },
+        CodeLine { n: 14, toks: [t(0, "\}")] },
+    ]
+}
+
 fn plans() -> [Plan] {
     [
         Plan { name: "Hobbyist", price: "$0", perks: ["The whole fucking language", "Five packages", "A changelog longer than your attention span"], cta: "Take it" },
@@ -65,17 +119,19 @@ component App {
                 top: 8px
                 z: 50
                 padding: 6px 10px
-                background: #111111
-                color: #f4ff3a
+                background: #b6ff6c
+                color: #111111
                 when focus {
                     left: 8px
                 }
             }
         }
-        column(gap: 56px) {
+        Nav()
+        column(gap: 72px) {
             style Wrap
             Hero()
-            Ticker()
+            StatusBar()
+            Core()
             Problems()
             VibeCheck()
             Quotes()
@@ -86,36 +142,87 @@ component App {
     }
 }
 
+component Nav {
+    nav(label: "Site") {
+        row(justify: between, align: center) {
+            style Mono
+            style {
+                max-width: 1120px
+                margin: 0 auto
+                padding: 18px 24px
+                size: 13px
+                when viewport < 700px {
+                    padding: 14px 16px
+                }
+            }
+            row(gap: 8px, align: center) {
+                span("●") {
+                    style Lime
+                }
+                strong("vcwl")
+                span("v0.16.0-vibes") {
+                    style Muted
+                    style {
+                        when viewport < 500px {
+                            display: none
+                        }
+                    }
+                }
+            }
+            row(gap: 18px) {
+                link("core", href: "#core") {
+                    style NavLink
+                }
+                link("pricing", href: "#pricing") {
+                    style NavLink
+                }
+                link("is-this-real?", href: "#real") {
+                    style NavLink
+                }
+            }
+        }
+    }
+}
+
+style NavLink {
+    color: #8a8a8a
+    transition: color 200ms ease-out
+    when hover {
+        color: #b6ff6c
+    }
+}
+
 component Hero {
     state adopted: Int = 0
 
     header {
-        grid(gap: 28px) {
+        grid(gap: 36px) {
             style TwoCols
-            column(gap: 18px) {
-                span("Breaking: a programming language") {
-                    style Sticker
+            style {
+                align: center
+            }
+            column(gap: 20px) {
+                style Reveal
+                span("// new: the |> operator. you're welcome.") {
+                    style Pill
+                    style Mono
                 }
                 heading("VCWL is going to revolutionize web development.", level: 1) {
                     style Shout
                 }
-                paragraph("The Vibe Coded Web Language compiles to WebAssembly, draws your website on a canvas like it's 1997 and Flash never died, and ships with a package manager nobody asked for. Thought leaders are calling it \"a language\".") {
+                paragraph("The Vibe Coded Web Language compiles to WebAssembly, paints your website on a canvas like Flash never died, and ships with a package manager nobody asked for. Thought leaders are calling it \"a language\".") {
                     style {
-                        size: 19px
-                        font: Georgia, serif
+                        size: 18px
+                        color: #b5b5b5
                     }
                 }
-                paragraph("(It will not revolutionize shit. It's a joke project. It does compile, though, which is frankly worse.)") {
+                paragraph("// it will not revolutionize shit. it's a joke project. it does compile, which is worse.") {
+                    style Mono
                     style Fine
-                    style {
-                        background: #ffffff
-                        padding: 8px 10px
-                        transform: rotate(1deg)
-                    }
                 }
-                row(gap: 14px, wrap: yes, align: center) {
-                    button("Adopt VCWL in production") {
-                        style Big
+                row(gap: 12px, wrap: yes, align: center) {
+                    button("Adopt in production") {
+                        style Primary
                         on click {
                             adopted += 1
                             if adopted == 1 {
@@ -125,55 +232,214 @@ component Hero {
                             }
                         }
                     }
-                    link("Wait, is any of this real?", href: "#real") {
-                        style {
-                            color: #111111
-                            decoration: underline
-                            weight: 900
-                        }
+                    link("Is any of this real?", href: "#real") {
+                        style Ghost
                     }
                 }
             }
-            column(gap: 10px) {
-                scene(label: "The Vibe Core: a pink torus orbiting a slowly spinning black box", camera: vec3(0.0, 1.2, 5.5), orbit: true, shadows: true, background: "#ff2e88") {
+            Terminal()
+        }
+    }
+}
+
+component Terminal {
+    state shown: Int = 0
+
+    let lines = term_lines()
+
+    on mount {
+        for i in 0..lines.len() {
+            fetch sleep(500 + i * 420) {
+                Ok(_) => {
+                    shown += 1
+                }
+                Err(_) => {
+                    shown = lines.len()
+                }
+            }
+        }
+    }
+
+    article(label: "A terminal running vcwl build") {
+        style Window
+        style Reveal2
+        row(gap: 6px, align: center) {
+            style Bar
+            style Mono
+            span("●") {
+                style {
+                    color: #ff5f57
+                }
+            }
+            span("●") {
+                style {
+                    color: #ffb86c
+                }
+            }
+            span("●") {
+                style Lime
+            }
+            span("  ~/my-startup — zsh")
+        }
+        column(gap: 2px) {
+            style Mono
+            style {
+                padding: 16px 18px 20px
+                size: 13px
+                min-height: 290px
+            }
+            for l in lines.slice(0, shown) key l.text {
+                span(l.text) {
                     style {
-                        height: 380px
-                        sketch: 3px #111111
-                        radius: 28px
-                        corner: squircle
-                    }
-                    light(kind: "ambient", intensity: 0.45)
-                    light(position: vec3(3.0, 5.0, 4.0))
-                    group(spin: vec3(0.0, 40.0, 0.0)) {
-                        mesh(shape: "box", label: "The compiler (it's a box)", size: vec3(0.8, 0.8, 0.8), rotation: vec3(20.0, 30.0, 0.0), color: "#111111")
-                        group(spin: vec3(90.0, 0.0, 30.0)) {
-                            mesh(shape: "torus", label: "The vibes", position: vec3(0.0, 0.0, 0.0), size: vec3(2.6, 2.6, 2.6), color: "#f4ff3a")
+                        white-space: pre-wrap
+                        color: #8a8a8a
+                        transition: opacity 300ms ease-out, transform 400ms spring
+                        when appear {
+                            opacity: 0
+                            transform: translateX(-8px)
                         }
                     }
-                    mesh(shape: "plane", label: "The floor (load-bearing)", position: vec3(0.0, -1.6, 0.0), size: vec3(5.0, 1.0, 5.0), color: "#f4ff3a")
+                    style if l.kind == 0 {
+                        color: #e6e6e6
+                    }
+                    style if l.kind == 2 {
+                        color: #b6ff6c
+                        weight: 700
+                    }
+                    style if l.kind == 3 {
+                        color: #ffb86c
+                    }
+                    style if l.kind == 4 {
+                        color: #7cc4ff
+                    }
                 }
-                paragraph("Fig. 1: The Vibe Core™. Drag it. It's WebGL. We made a 3D engine for a joke. We need help.") {
-                    style Fine
+            }
+            if shown < lines.len() {
+                span("▌") {
+                    style Lime
                 }
             }
         }
     }
 }
 
-component Ticker {
-    row(gap: 28px, wrap: yes, justify: center) {
-        style Ink
+component StatusBar {
+    row(gap: 24px, wrap: yes, justify: center) {
+        style Mono
         style {
-            size: 15px
-            case: upper
-            letter-spacing: 1px
-            transform: rotate(-1deg)
+            padding: 12px 18px
+            background: #111111cc
+            border: 1px solid #333333
+            radius: 18px
+            size: 12px
+            color: #8a8a8a
         }
-        span("★ zero dependencies (we wrote them all, badly)")
-        span("★ blazingly something")
-        span("★ 0 GitHub stars")
-        span("★ 100% vibe coded")
-        span("★ no DOM was harmed")
+        style Reveal
+        span("● 0 errors") {
+            style Lime
+        }
+        span("● 0 warnings")
+        span("● 0 users") {
+            style {
+                color: #ffb86c
+            }
+        }
+        span("● 0 dependencies (we wrote them all, badly)")
+        span("● no DOM was harmed") {
+            style {
+                color: #7cc4ff
+            }
+        }
+    }
+}
+
+component Core {
+    section(id: "core", label: "The Vibe Core") {
+        column(gap: 22px) {
+            span("// fig. 1") {
+                style Pill
+                style Mono
+            }
+            heading("A whole app, and the 3D engine nobody needed.", level: 2) {
+                style Title
+                style Reveal
+            }
+            grid(gap: 20px) {
+                style TwoCols
+                article(label: "Example VCWL code") {
+                    style Window
+                    style Reveal
+                    row {
+                        style Bar
+                        style Mono
+                        span("src/main.vcwl")
+                    }
+                    column {
+                        style Mono
+                        style {
+                            padding: 16px 18px
+                            size: 13px
+                        }
+                        for line in code_lines() key line.n {
+                            row {
+                                for tok in line.toks key tok.text {
+                                    span(tok.text) {
+                                        style {
+                                            white-space: pre
+                                            color: #e6e6e6
+                                            min-height: 20px
+                                        }
+                                        style if tok.kind == 1 {
+                                            color: #c792ea
+                                        }
+                                        style if tok.kind == 2 {
+                                            color: #7cc4ff
+                                        }
+                                        style if tok.kind == 3 {
+                                            color: #ffb86c
+                                        }
+                                        style if tok.kind == 4 {
+                                            color: #6a6a6a
+                                            italic: yes
+                                        }
+                                        style if tok.kind == 5 {
+                                            color: #b6ff6c
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                column(gap: 10px) {
+                    style Reveal2
+                    scene(label: "The Vibe Core: a lime torus orbiting a blue box, with an orange moon", camera: vec3(0.0, 1.4, 5.5), orbit: true, shadows: true, background: "#111111") {
+                        style {
+                            height: 380px
+                            border: 1px solid #333333
+                            radius: 14px
+                            corner: squircle
+                        }
+                        light(kind: "ambient", intensity: 0.35)
+                        light(kind: "point", position: vec3(2.5, 3.5, 2.5), color: "#ffffff", intensity: 1.2)
+                        group(spin: vec3(0.0, 40.0, 0.0)) {
+                            mesh(shape: "box", label: "The compiler (it's a box)", size: vec3(0.8, 0.8, 0.8), rotation: vec3(20.0, 30.0, 0.0), color: "#7cc4ff")
+                            group(spin: vec3(90.0, 0.0, 30.0)) {
+                                mesh(shape: "torus", label: "The vibes", size: vec3(2.6, 2.6, 2.6), color: "#b6ff6c")
+                            }
+                        }
+                        group(spin: vec3(0.0, -70.0, 0.0)) {
+                            mesh(shape: "sphere", label: "A moon of technical debt", position: vec3(2.0, 0.6, 0.0), size: vec3(0.35, 0.35, 0.35), color: "#ffb86c")
+                            mesh(shape: "cone", label: "A party hat", position: vec3(-2.0, -0.2, 0.0), size: vec3(0.4, 0.5, 0.4), color: "#c792ea")
+                        }
+                        mesh(shape: "plane", label: "The floor (load-bearing)", position: vec3(0.0, -1.6, 0.0), size: vec3(6.0, 1.0, 6.0), color: "#1d1d1d")
+                    }
+                    paragraph("Drag it. It's WebGL with shadows. We wrote a 3D engine for a joke and we need help.") {
+                        style Fine
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -184,12 +450,15 @@ component Problems {
             article {
                 style Panel
                 style Reveal
-                column(gap: 10px) {
-                    heading("Problems VCWL solves", level: 2)
+                column(gap: 12px) {
+                    span("✓ solves") {
+                        style Pill
+                        style Mono
+                    }
                     list {
                         style {
                             padding: 0 0 0 20px
-                            font: Georgia, serif
+                            color: #c8c8c8
                         }
                         item("Having too much free time")
                         item("Not knowing what a WasmGC struct is")
@@ -199,19 +468,27 @@ component Problems {
                 }
             }
             article {
-                style Pink
-                style Reveal
-                column(gap: 10px) {
-                    heading("Problems VCWL causes", level: 2)
+                style Panel
+                style Reveal2
+                column(gap: 12px) {
+                    span("✗ causes") {
+                        style Pill
+                        style Mono
+                        style {
+                            background: #2a1d12
+                            color: #ffb86c
+                            border: 1px solid #ffb86c44
+                        }
+                    }
                     list {
                         style {
                             padding: 0 0 0 20px
-                            font: Georgia, serif
+                            color: #c8c8c8
                         }
                         item("All of the above, but in production")
-                        item("Explaining to your manager why the text is drawn with a canvas")
+                        item("Explaining to your manager why the text is drawn on a canvas")
                         item("An irrational urge to put grain on everything")
-                        item("Arguments about whether `|>` is a language feature or a lifestyle")
+                        item("Arguments about whether |> is a language feature or a lifestyle")
                     }
                 }
             }
@@ -221,10 +498,10 @@ component Problems {
 
 component VibeCheck {
     state take: String = "Press the button. Receive wisdom. Regret nothing."
-    state score: Int = -1
+    state score: Int = 0
     state checks: Int = 0
 
-    let verdict = if score < 0 {
+    let verdict = if checks == 0 {
         "unmeasured"
     } else if score < 20 {
         "catastrophic (have you tried a rewrite?)"
@@ -238,27 +515,51 @@ component VibeCheck {
 
     section(label: "Vibe check") {
         article {
-            style Panel
+            style Glow
             style Reveal
-            column(gap: 16px) {
-                span("Interactive! Written in VCWL!") {
-                    style Sticker
+            column(gap: 18px) {
+                span("// interactive. written in vcwl. calls crypto through @web.") {
+                    style Pill
+                    style Mono
                 }
                 heading("The Hot Take Generator™", level: 2) {
-                    style {
-                        size: 36px
-                    }
+                    style Title
                 }
-                paragraph("\"{take}\"") {
+                paragraph("“{take}”") {
                     style {
                         size: 22px
-                        font: Georgia, serif
-                        italic: yes
+                        color: #ffffff
+                    }
+                }
+                column(gap: 6px) {
+                    row(justify: between) {
+                        style Mono
+                        style Fine
+                        span("vibe score")
+                        span("{score}/100 · {verdict}") {
+                            style Lime
+                        }
+                    }
+                    box {
+                        style {
+                            height: 8px
+                            background: #1d1d1d
+                            radius: 999px
+                            overflow: hidden
+                        }
+                        box {
+                            style {
+                                height: 8px
+                                background: linear-gradient(90deg, #7cc4ff, #b6ff6c)
+                                radius: 999px
+                            }
+                            style bind width: score %
+                        }
                     }
                 }
                 row(gap: 14px, wrap: yes, align: center) {
                     button("Generate hot take") {
-                        style Big
+                        style Primary
                         on click {
                             let all = hot_takes()
                             take = all.get(random_int(0, all.len() - 1)).unwrap_or("Error: take too hot")
@@ -266,10 +567,9 @@ component VibeCheck {
                             checks += 1
                         }
                     }
-                    strong("Vibe score: {if score < 0 { 0 } else { score }}/100, {verdict}")
-                }
-                paragraph(if checks > 4 { "You've generated {checks} takes. That's enough to start a newsletter. Please don't." } else { "Randomness courtesy of crypto.getRandomValues, called through `@web`, because we're nothing if not secure about our jokes." }) {
-                    style Fine
+                    span(if checks > 4 { "{checks} takes. That's a newsletter. Please don't." } else { "" }) {
+                        style Fine
+                    }
                 }
             }
         }
@@ -280,10 +580,8 @@ component Quotes {
     section(label: "Testimonials") {
         column(gap: 18px) {
             heading("What people are saying", level: 2) {
-                style Shout
-                style {
-                    size: 44px
-                }
+                style Title
+                style Reveal
             }
             paragraph("All testimonials are made up. That's what makes them authentic in this industry.") {
                 style Fine
@@ -294,16 +592,36 @@ component Quotes {
                     article {
                         style Panel
                         style Reveal
-                        column(gap: 10px) {
+                        column(gap: 14px) {
                             paragraph("“{q.text}”") {
                                 style {
-                                    font: Georgia, serif
-                                    size: 17px
+                                    color: #d6d6d6
                                 }
                             }
-                            strong(q.who)
-                            span(q.role) {
-                                style Fine
+                            row(gap: 10px, align: center) {
+                                box {
+                                    style {
+                                        width: 28px
+                                        height: 28px
+                                        radius: 999px
+                                        background: linear-gradient(135deg, #b6ff6c, #7cc4ff)
+                                    }
+                                }
+                                column {
+                                    strong(q.who) {
+                                        style {
+                                            color: #ffffff
+                                            size: 14px
+                                        }
+                                    }
+                                    span(q.role) {
+                                        style Mono
+                                        style Fine
+                                        style {
+                                            size: 12px
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -316,40 +634,59 @@ component Quotes {
 component Pricing {
     state chosen: String = ""
 
-    section(label: "Pricing") {
+    section(id: "pricing", label: "Pricing") {
         column(gap: 18px) {
             heading("Pricing", level: 2) {
-                style Shout
-                style {
-                    size: 44px
-                }
+                style Title
+                style Reveal
             }
             grid(gap: 18px) {
                 style ThreeCols
                 for p in plans() key p.name {
                     article {
-                        style Ink
+                        style Panel
                         style Reveal
-                        column(gap: 12px) {
-                            heading(p.name, level: 3)
+                        style if p.name == "Startup" {
+                            background: linear-gradient(160deg, #1f2a1a, #111111)
+                            border: 1px solid #b6ff6c66
+                        }
+                        column(gap: 14px) {
+                            row(justify: between, align: center) {
+                                heading(p.name, level: 3) {
+                                    style {
+                                        margin: 0
+                                        color: #ffffff
+                                    }
+                                }
+                                if p.name == "Startup" {
+                                    span("most vibes") {
+                                        style Pill
+                                        style Mono
+                                    }
+                                }
+                            }
                             strong(p.price) {
                                 style {
                                     size: 34px
-                                    color: #ff2e88
+                                    color: #b6ff6c
+                                    letter-spacing: -1px
                                 }
                             }
                             list {
                                 style {
                                     padding: 0 0 0 18px
-                                    color: #ffffff
-                                    font: Georgia, serif
+                                    color: #b5b5b5
                                 }
                                 for perk in p.perks key perk {
                                     item(perk)
                                 }
                             }
                             button(p.cta) {
-                                style Big
+                                style Ghost
+                                style if p.name == "Startup" {
+                                    background: #b6ff6c
+                                    color: #111111
+                                }
                                 on click {
                                     chosen = p.name
                                 }
@@ -359,8 +696,18 @@ component Pricing {
                 }
             }
             if chosen != "" {
-                paragraph("Congratulations on choosing {chosen}. Your invoice for $0.00 is on its way. Late fees apply (also $0.00).") {
-                    style Pink
+                paragraph("✓ {chosen} selected. Your invoice for $0.00 is on its way. Late fees apply (also $0.00).") {
+                    style Mono
+                    style Glow
+                    style {
+                        size: 14px
+                        color: #b6ff6c
+                        transition: opacity 400ms ease-out, transform 600ms bounce
+                        when appear {
+                            opacity: 0
+                            transform: translateY(-12px)
+                        }
+                    }
                 }
             }
         }
@@ -371,30 +718,33 @@ component Honest {
     section(id: "real", label: "Honestly") {
         article {
             style Panel
-            style {
-                background: #ffffff
-            }
-            column(gap: 12px) {
-                span("Okay, for real for a second") {
-                    style Sticker
+            style Reveal
+            column(gap: 14px) {
+                span("// okay, for real for a second") {
+                    style Pill
+                    style Mono
                 }
-                heading("What VCWL actually is", level: 2)
-                paragraph("An experimental language and compiler written in Rust, built for fun. Everything below exists and has tests; nothing here is a claim that it's fast, safe or a good idea.") {
-                    style Fine
+                heading("What VCWL actually is", level: 2) {
+                    style Title
+                }
+                paragraph("An experimental language and compiler written in Rust, built for fun. Everything below exists and has tests; nothing here claims it's fast, safe or a good idea.") {
+                    style {
+                        color: #b5b5b5
+                    }
                 }
                 list {
                     style {
                         padding: 0 0 0 20px
-                        font: Georgia, serif
+                        color: #d6d6d6
                     }
                     item("Statically typed source compiled to WasmGC; components, state and styles checked at compile time.")
                     item("A Rust renderer (also WebAssembly) that lays out and paints on a canvas, with an accessibility tree mirrored into the page.")
                     item("Server functions, fetch, routing, prerendering, fonts, 3D scenes with glTF models.")
                     item("A package manager whose registry is a git branch, with a security review before install.")
-                    item("A linter, a language server, VS Code and Zed extensions.")
-                    item("`extern fn` and `@web` for calling JavaScript and the browser's Web APIs.")
+                    item("A linter, a language server, VS Code and Zed extensions, and an in-page debugger.")
+                    item("extern fn and @web for calling JavaScript and the browser's Web APIs.")
                 }
-                paragraph("Performance: we have benchmarks in bench/, with their methods and limits. This page cites none of them, because this page is a bit.") {
+                paragraph("Performance: there are benchmarks in bench/, with their methods and limits. This page cites none of them, because this page is a bit.") {
                     style Fine
                 }
                 paragraph("WebAssembly sandboxes the module. It does not make an application secure; your bugs are still your bugs, just compiled.") {
@@ -408,10 +758,16 @@ component Honest {
 component Foot {
     footer {
         column(gap: 6px) {
+            style Mono
             style Fine
-            text("This entire page is written in VCWL and drawn on a canvas. Yes, even this sentence. Select it. We dare you. (You can, it's mirrored. Ugh, fine.)")
-            text("Satire. VCWL is not affiliated with anyone sensible. No frameworks were killed; they're fine, they're thriving, leave them alone.")
-            text("© whenever. All vibes reserved.")
+            style {
+                padding: 24px 0 0
+                border: 1px solid #00000000
+                size: 12px
+            }
+            text("// this entire page is written in VCWL and painted on a canvas. even this sentence.")
+            text("// satire. no frameworks were killed; they're fine, they're thriving, leave them alone.")
+            text("// © whenever. all vibes reserved.")
         }
     }
 }

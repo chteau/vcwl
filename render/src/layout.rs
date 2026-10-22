@@ -1654,6 +1654,21 @@ mod tests {
     }
 
     #[test]
+    fn changed_text_is_laid_out_again() {
+        let mut b = Buf::default();
+        b.create(1, "div").class(1, "v-row").insert(0, 1, 0);
+        b.create(3, "div").insert(1, 3, 0);
+        b.text(2, "0/100").insert(3, 2, 0);
+        let mut w = world(".v-row{display:flex}", &b, 800.0);
+        assert_eq!(w.t.n(3).lay.frags[0].text, "0/100");
+        let mut b = Buf::default();
+        b.int(crate::dom::opc::SET_TEXT).int(2).str("26/100 mid");
+        w.t.apply(&b.0, &mut Vec::new()).unwrap();
+        w.run(800.0);
+        assert_eq!(w.t.n(3).lay.frags[0].text, "26/100 mid");
+    }
+
+    #[test]
     fn flex_row_grow_gap_and_align() {
         let mut b = Buf::default();
         b.create(1, "div").class(1, "v-row r").insert(0, 1, 0);
