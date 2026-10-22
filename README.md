@@ -127,7 +127,8 @@ render/         the renderer (Rust → render.wasm): element tree, styles, layou
 runtime/        browser/Node host (vcwl.js), 3D, @web, boot and dev scripts
 editors/        tree-sitter grammar, VS Code and Zed extensions
 examples/       a todo app, a component kit, a remake of the tokenforge website
-packages/       the registry's sample packages (is-even, is-odd, left-pad, ...)
+packages/       the registry's packages (supabase, oauth, is-odd, left-pad, ...), all untested
+                because nobody tests anything in the vibe coding world
 site/           the website, in VCWL
 tests/          compiler, CLI, LSP and package tests (Rust), browser tests (puppeteer)
 bench/          keyed-list benchmark against hand-written DOM code

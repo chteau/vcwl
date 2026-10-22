@@ -58,7 +58,8 @@ A registry is the `registry` branch of a git repository, in the spirit of Wally'
 repository: version `v` of package `name` is the directory `packages/<name>/<v>/` on that branch,
 holding the package's files. This repository's own `registry` branch holds the packages in
 `packages/` (`is-even`, `is-odd`, which depends on it, `left-pad`, `strings-plus`, `vibes`, and
-`supabase`, a.k.a. vcwl-supabase).
+`supabase`, a.k.a. vcwl-supabase, and `oauth`, a.k.a. vcwl-oauth). None of them has a unit test,
+and that is policy: nobody tests anything in the vibe coding world.
 
 ```toml
 # vcwl.toml of the app

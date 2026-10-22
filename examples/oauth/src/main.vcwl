@@ -1,0 +1,84 @@
+app "Sign in with vibes" {
+    capabilities {
+        network: allow("self", "discord.com", "openidconnect.googleapis.com", "api.github.com")
+        storage: local
+    }
+}
+
+import "@oauth"
+
+component App {
+    state user: OAuthUser? = None
+    state error: String = ""
+
+    on mount {
+        oauth_provider("discord", "your-discord-client-id", "")
+        oauth_provider("google", "your-google-client-id.apps.googleusercontent.com", "")
+        oauth_provider("github", "your-github-client-id", "")
+        oauth_token_proxy("/oauth/token")
+    }
+
+    column(gap: 12px) {
+        style {
+            padding: 32px
+            max-width: 420px
+        }
+        heading("Sign in with vibes", level: 1)
+        match user {
+            Some(u) => column(gap: 8px) {
+                paragraph("Hi {u.name} ({u.provider})")
+                button("Sign out") {
+                    on click {
+                        oauth_sign_out(u.provider)
+                        user = None
+                    }
+                }
+            }
+            None => column(gap: 8px) {
+                for provider in ["discord", "google", "github"] key provider {
+                    SignIn(provider: provider) {
+                        on signed_in(u) {
+                            user = Some(u)
+                            error = ""
+                        }
+                        on failed(m) {
+                            error = m
+                        }
+                    }
+                }
+            }
+        }
+        if error != "" {
+            paragraph(error) {
+                style {
+                    color: #c62828
+                }
+            }
+        }
+    }
+}
+
+component SignIn(provider: String) {
+    event signed_in(OAuthUser)
+    event failed(String)
+
+    button("Sign in with {provider}") {
+        on click {
+            fetch oauth_sign_in(provider) {
+                Ok(_) => {
+                    fetch oauth_user(provider) {
+                        Ok(u) => {
+                            emit signed_in(u)
+                        }
+                        Err(e) => {
+                            emit failed(e.message())
+                        }
+                    }
+                }
+                Err(e) => {
+                    emit failed(e.message())
+                }
+            }
+        }
+    }
+}

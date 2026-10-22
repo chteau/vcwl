@@ -1,6 +1,7 @@
 // vcwl's GitHub Pages site. Every word of marketing on it is satire; the "Honestly" section is not.
 app "VCWL — revolutionizing web development (no)" {
     capabilities {
+        network: allow("self", "api.github.com", "raw.githubusercontent.com")
         storage: none
     }
 }
@@ -8,6 +9,7 @@ app "VCWL — revolutionizing web development (no)" {
 import "@web"
 import "./theme.vcwl"
 import "./docs.vcwl"
+import "./packages.vcwl"
 
 struct Quote {
     who: String,
@@ -145,6 +147,7 @@ component App {
                     "/docs/interop" => Docs(slug: "interop")
                     "/docs/tools" => Docs(slug: "tools")
                     "/docs/deploy" => Docs(slug: "deploy")
+                    "/packages" => Packages()
                     _ => NotFound()
                 }
             }
@@ -229,6 +232,9 @@ component Nav {
             }
             row(gap: 18px, align: center) {
                 link("docs", to: "/docs/install", current: route.starts_with("/docs")) {
+                    style NavLink
+                }
+                link("packages", to: "/packages", current: route == "/packages") {
                     style NavLink
                 }
                 link("github ↗", href: "https://github.com/chteau/vcwl") {

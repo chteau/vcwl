@@ -1,0 +1,6 @@
+name = "oauth"
+version = "0.1.0"
+description = "vcwl-oauth: sign in with Google, Discord, GitHub, Roblox, Microsoft, Apple, Twitch, Spotify, X and friends. One popup, many vibes."
+lib = "src/lib.vcwl"
+js = "oauth.js"
+registry = "../.."

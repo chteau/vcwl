@@ -1,0 +1,322 @@
+// The package directory: reads the `registry` branch on GitHub when the page opens (the git
+// tree for names and versions, then each package's latest vcwl.toml), with a search bar.
+
+import "@web"
+import "./theme.vcwl"
+
+struct Entry {
+    path: String,
+}
+
+struct Tree {
+    tree: [Entry],
+}
+
+struct Pkg {
+    name: String,
+    latest: String,
+    versions: Int,
+    description: String,
+    js: Bool,
+}
+
+fn tree_url() -> String {
+    "https://api.github.com/repos/chteau/vcwl/git/trees/registry?recursive=1"
+}
+
+fn manifest_url(p: Pkg) -> String {
+    "https://raw.githubusercontent.com/chteau/vcwl/registry/packages/{p.name}/{p.latest}/vcwl.toml"
+}
+
+/// 1.2.3 as a number that sorts like the version.
+fn version_key(v: String) -> Int {
+    var key = 0
+    for part in v.split(".") {
+        key = key * 1000 + part.parse_int().unwrap_or(0)
+    }
+    key
+}
+
+/// One package per `packages/<name>/<version>/vcwl.toml` in the tree, with its newest version.
+fn index(entries: [Entry]) -> [Pkg] {
+    var out: [Pkg] = []
+    for e in entries {
+        let parts = e.path.split("/")
+        if parts.len() == 4 && parts[0] == "packages" && parts[3] == "vcwl.toml" {
+            let name = parts[1]
+            let v = parts[2]
+            var found = false
+            var next: [Pkg] = []
+            for p in out {
+                if p.name == name {
+                    found = true
+                    next = next.push(Pkg {
+                            name: name,
+                            latest: if version_key(v) > version_key(p.latest) { v } else { p.latest },
+                            versions: p.versions + 1,
+                            description: "",
+                            js: false,
+                        })
+                } else {
+                    next = next.push(p)
+                }
+            }
+            out = if found {
+                next
+            } else {
+                out.push(Pkg { name: name, latest: v, versions: 1, description: "", js: false })
+            }
+        }
+    }
+    out
+}
+
+/// The string value of `key = "..."` in TOML text ("" when missing).
+fn toml_value(text: String, key: String) -> String {
+    var value = ""
+    for line in text.split("\n") {
+        let l = line.trim()
+        if l.starts_with(key + " =") || l.starts_with(key + "=") {
+            let rest = l.slice(l.index_of("\"").unwrap_or(l.len()) + 1, l.len())
+            value = if rest.ends_with("\"") {
+                rest.slice(0, rest.len() - 1)
+            } else {
+                rest
+            }
+        }
+    }
+    value
+}
+
+/// `pkgs` with the description and JavaScript flag of the package whose manifest is `toml`.
+fn describe(pkgs: [Pkg], toml: String) -> [Pkg] {
+    let name = toml_value(toml, "name")
+    var out: [Pkg] = []
+    for p in pkgs {
+        out = out.push(if p.name == name {
+                Pkg { name: p.name, latest: p.latest, versions: p.versions, description: toml_value(toml, "description"), js: toml_value(toml, "js") != "" }
+            } else {
+                p
+            })
+    }
+    out
+}
+
+fn matching(pkgs: [Pkg], query: String) -> [Pkg] {
+    let q = query.trim().to_lower()
+    var out: [Pkg] = []
+    for p in pkgs {
+        if q == "" || p.name.contains(q) || p.description.to_lower().contains(q) {
+            out = out.push(p)
+        }
+    }
+    out
+}
+
+export component Packages {
+    state pkgs: [Pkg] = []
+    state query: String = ""
+    state loading: Bool = true
+    state failed: String = ""
+
+    let shown = matching(pkgs, query)
+
+    on mount {
+        fetch get(tree_url()) as Tree {
+            Ok(t) => {
+                pkgs = index(t.tree)
+                loading = false
+                for p in pkgs {
+                    fetch fetch_text(manifest_url(p)) {
+                        Ok(toml) => {
+                            pkgs = describe(pkgs, toml)
+                        }
+                        Err(_) => {
+                            failed = failed
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                loading = false
+                failed = e.message()
+            }
+        }
+    }
+
+    column(gap: 22px) {
+        style {
+            padding: 24px 0 0
+        }
+        span("// live from the registry branch") {
+            style Pill
+            style Mono
+        }
+        heading("Packages", level: 1) {
+            style Shout
+        }
+        paragraph("Everything published to the registry, read straight from the repository's registry branch on GitHub every time you open this page. No database, no CDN, no npm. Just a git branch and hubris.") {
+            style {
+                size: 18px
+                color: #9a9a9a
+                max-width: 760px
+            }
+        }
+        aside {
+            style Glow
+            style {
+                padding: 14px 18px
+            }
+            paragraph("Heads up: none of these packages are tested. Not ours, not anyone's. Nobody tests anything in the vibe coding world. The security review before install is the only adult in the room.") {
+                style {
+                    margin: 0
+                    color: #c8c8c8
+                }
+            }
+        }
+        input(value: query, label: "Search packages", placeholder: "search: supabase, odd, pad, vibes...") {
+            style Mono
+            style {
+                padding: 14px 16px
+                size: 15px
+                color: #e6e6e6
+                background: #111111
+                border: 1px solid #333333
+                radius: 12px
+                corner: squircle
+                when focus {
+                    border: 1px solid #b6ff6c
+                }
+            }
+            on input(v) {
+                query = v
+            }
+        }
+        if loading {
+            paragraph("// asking GitHub nicely...") {
+                style Mono
+                style Fine
+            }
+        }
+        if failed != "" {
+            paragraph("// GitHub said no ({failed}). Probably the rate limit: 60 requests an hour, shared with everyone on your network. Try later, or run `vcwl search`.") {
+                style Mono
+                style Fine
+                style {
+                    color: #ffb86c
+                }
+            }
+        }
+        if !loading && failed == "" && shown.len() == 0 {
+            paragraph("// nothing matches. Publish it yourself: `vcwl publish`. Nobody will review it. (The installer will.)") {
+                style Mono
+                style Fine
+            }
+        }
+        grid(gap: 16px) {
+            style TwoCols
+            for p in shown key p.name {
+                PackageCard(p: p)
+            }
+        }
+    }
+}
+
+component PackageCard(p: Pkg) {
+    state copied: Bool = false
+
+    article(label: p.name) {
+        style Panel
+        style Reveal
+        column(gap: 12px) {
+            row(justify: between, align: center, gap: 8px) {
+                strong(p.name) {
+                    style Mono
+                    style {
+                        size: 18px
+                        color: #ffffff
+                    }
+                }
+                span("v{p.latest}") {
+                    style Pill
+                    style Mono
+                }
+            }
+            paragraph(if p.description == "" { "…" } else { p.description }) {
+                style {
+                    margin: 0
+                    color: #b5b5b5
+                    min-height: 48px
+                }
+            }
+            row(gap: 8px, wrap: yes) {
+                span("tests: 0") {
+                    style Tag
+                    style {
+                        color: #ffb86c
+                        border: 1px solid #ffb86c44
+                    }
+                }
+                span(if p.versions == 1 { "1 version" } else { "{p.versions} versions" }) {
+                    style Tag
+                }
+                if p.js {
+                    span("ships JS: needs [trust]") {
+                        style Tag
+                        style {
+                            color: #c792ea
+                            border: 1px solid #c792ea44
+                        }
+                    }
+                }
+            }
+            row(justify: between, align: center) {
+                style Mono
+                style {
+                    padding: 8px 10px
+                    background: #0d0d0d
+                    border: 1px solid #2b2b2b
+                    radius: 8px
+                    size: 13px
+                }
+                span("$ vcwl add {p.name}") {
+                    style Lime
+                }
+                button(if copied { "copied ✓" } else { "copy" }) {
+                    style Mono
+                    style {
+                        padding: 2px 8px
+                        size: 12px
+                        color: #8a8a8a
+                        background: #111111
+                        border: 1px solid #333333
+                        radius: 6px
+                        cursor: pointer
+                        when hover {
+                            color: #b6ff6c
+                        }
+                    }
+                    on click {
+                        fetch write_clipboard("vcwl add {p.name}") {
+                            Ok(_) => {
+                                copied = true
+                            }
+                            Err(_) => {
+                                copied = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+style Tag {
+    padding: 2px 8px
+    size: 12px
+    color: #8a8a8a
+    border: 1px solid #333333
+    radius: 999px
+    font: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace
+}

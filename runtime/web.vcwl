@@ -155,6 +155,9 @@ export extern fn confirm(message: String) -> Bool
 export extern fn prompt(message: String, default: String) -> String?
 /// async: the clipboard's text (asks for permission).
 export extern fn read_clipboard() -> String
+/// async: the body of `url` as text (`fetch` decodes JSON only). The page's CSP still decides
+/// which hosts it can reach: list them in the app's `network` capability.
+export extern fn fetch_text(url: String) -> String
 /// async: replaces the clipboard's text.
 export extern fn write_clipboard(text: String)
 /// async: the system share sheet (`navigator.share`); fails when unavailable or dismissed.

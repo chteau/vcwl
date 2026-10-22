@@ -1279,7 +1279,12 @@ impl Engine {
         let value = n.value.clone();
         let c = n.lay.content_box();
         let (line, x) = paint::caret_xy(&mut self.fonts, m, &s, &value, &lines, self.edit.caret);
+        let (a, z) = lines.get(line).copied().unwrap_or((0, 0));
+        let text_w = self.fonts.width(m, &s, &value[a..z]);
         let sc = &mut self.edit.scroll;
+        // Never scrolled further than the text needs: a scroll computed while the field was
+        // laid out narrower (during a resize) does not outlive it.
+        sc.0 = sc.0.min((text_w - c.w + 1.0).max(0.0));
         if x - sc.0 > c.w - 1.0 {
             sc.0 = x - c.w + 1.0;
         }
@@ -2038,6 +2043,11 @@ mod tests {
             assert!(e.key(&mut Mono, k, false, false, false));
         }
         assert_eq!(e.tree.n(2).value, "hi");
+        // A stale scroll (from a narrower layout) is undone by the next layout.
+        e.edit.scroll.0 = 500.0;
+        e.invalidate_all();
+        e.frame(&mut Mono, 1.0);
+        assert_eq!(e.edit.scroll.0, 0.0);
         let ev = emits(&mut e);
         assert_eq!(ev[0], (4, Payload::Str("h".into())));
         assert_eq!(ev[1], (2, Payload::Str("h".into())));

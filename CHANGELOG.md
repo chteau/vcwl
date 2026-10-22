@@ -9,7 +9,15 @@ All notable changes. The project has no release yet; entries are grouped by mile
 - Packages can ship a JavaScript module (`js` in their vcwl.toml) for their `extern fn`s; the
   security review flags it as a danger.
 - `fetch f(args) as T` decodes a JavaScript function's result as `T`; `to_json(value)`.
+- `oauth` (vcwl-oauth): sign-in popups for Google, Discord, GitHub, Roblox, Microsoft, Apple,
+  Twitch, Spotify, GitLab, Facebook, Reddit, LinkedIn, Slack, X and custom providers (PKCE,
+  implicit, or a token proxy for providers that need a client secret); `examples/oauth`.
+- The site has a Packages page that lists the registry branch from GitHub, with a search bar;
+  `@web` gains `fetch_text(url)`.
 - The sample packages have no unit tests anymore. Vibes.
+- A text field no longer keeps a horizontal scroll from a narrower layout (its text showed cut
+  off on the left).
+- `vcwl lint`: `TODO`/`FIXME` markers are case-sensitive (`todo:` as a property name is fine).
 - Touch scrolling keeps its momentum after the finger lifts (a fling that slows down like
   native scrolling); the next touch stops it.
 

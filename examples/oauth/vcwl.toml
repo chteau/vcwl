@@ -1,0 +1,9 @@
+# vcwl-oauth demo: sign in with Discord, Google or GitHub. Put your client IDs in src/main.vcwl
+# and register this site's root ("http://localhost:<port>/" in development) as the redirect URI.
+# GitHub needs the token proxy described in packages/oauth/README.md.
+name = "oauth-demo"
+entry = "src/main.vcwl"
+out = "dist"
+
+[dependencies]
+oauth = "../../packages/oauth"

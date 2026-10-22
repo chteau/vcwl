@@ -558,7 +558,7 @@ their documentation is `runtime/web.vcwl`):
   and `sha256_hex` (async), `base64_encode/decode`, `jwt_payload` (decoded, not verified).
 - Page and device: `title`, `set_title`, `user_agent`, `language(s)`, `online`, `media_matches`,
   viewport size, `device_pixel_ratio`, `vibrate`, `speak`, `download`, `console_*`, `alert`,
-  `confirm`, `prompt`, and async `read_clipboard`, `write_clipboard`, `share`, `notify`, `geolocation`,
+  `confirm`, `prompt`, and async `fetch_text`, `read_clipboard`, `write_clipboard`, `share`, `notify`, `geolocation`,
   `fullscreen`, `exit_fullscreen`, `battery_level`.
 
 An OAuth PKCE sign-in, for instance: `random_token(32)` for the verifier, `fetch
