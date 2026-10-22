@@ -667,6 +667,12 @@ pub fn publish(root: &Path, dry_run: bool) -> Result<String, String> {
         let tree = git_env(&reg.cache, &["write-tree"], &env, None)?;
         let msg = format!("publish {name} {version}");
         let mut args = vec!["commit-tree", tree.trim(), "-m", &msg];
+        // `commit-tree` ignores commit.gpgSign: sign when the user signs their commits.
+        if git(&reg.cache, &["config", "--bool", "commit.gpgsign"])
+            .is_ok_and(|v| v.trim() == "true")
+        {
+            args.push("-S");
+        }
         let parent = reg.head();
         if exists && let Some(p) = &parent {
             args.extend(["-p", p.as_str()]);

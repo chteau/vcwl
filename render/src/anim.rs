@@ -79,6 +79,9 @@ pub fn parse(v: &[Tok]) -> Vec<Transition> {
                         "ease-in" => t.ease = [0.42, 0.0, 1.0, 1.0],
                         "ease-out" => t.ease = [0.0, 0.0, 0.58, 1.0],
                         "ease-in-out" => t.ease = [0.42, 0.0, 0.58, 1.0],
+                        // Not CSS: marked by a negative first control point.
+                        "spring" => t.ease = [SPRING, 0.0, 0.0, 0.0],
+                        "bounce" => t.ease = [BOUNCE, 0.0, 0.0, 0.0],
                         _ => return None,
                     },
                     _ => return None,
@@ -144,13 +147,40 @@ pub fn start(old: &Style, new: &Style, running: &mut Vec<Anim>, now: f64) {
     }
 }
 
+const SPRING: f32 = -1.0;
+const BOUNCE: f32 = -2.0;
+
+/// Progress at `x` (0 to 1) for an easing: a cubic Bézier, a damped spring that overshoots
+/// and settles, or a ball bouncing to rest.
+fn ease(e: [f32; 4], x: f32) -> f32 {
+    if e[0] == SPRING {
+        return 1.0 - (-6.0 * x).exp() * (12.0 * x).cos();
+    }
+    if e[0] == BOUNCE {
+        let (n, d) = (7.5625, 2.75);
+        return if x < 1.0 / d {
+            n * x * x
+        } else if x < 2.0 / d {
+            let x = x - 1.5 / d;
+            n * x * x + 0.75
+        } else if x < 2.5 / d {
+            let x = x - 2.25 / d;
+            n * x * x + 0.9375
+        } else {
+            let x = x - 2.625 / d;
+            n * x * x + 0.984375
+        };
+    }
+    bezier(e, x)
+}
+
 /// Value of `a` at `now`, and whether it has finished.
 pub fn sample(a: &Anim, now: f64) -> (Value, bool) {
     let x = ((now - a.start) as f32 - a.t.delay) / a.t.dur;
     if x >= 1.0 {
         return (a.to.clone(), true);
     }
-    let k = bezier(a.t.ease, x.max(0.0));
+    let k = ease(a.t.ease, x.max(0.0));
     (lerp(&a.from, &a.to, k), false)
 }
 
@@ -296,5 +326,22 @@ mod tests {
         assert!(!apply(&mut s, &mut run, 10_000.0));
         assert!(run.is_empty());
         assert_eq!(mix_color(0x00000000, 0xff000080, 0.5), 0xff000040);
+    }
+
+    #[test]
+    fn spring_overshoots_and_bounce_lands() {
+        let t = parse(&crate::css::tokens(
+            "transform 600ms spring, opacity 1s bounce",
+        ));
+        let peak = (1..100)
+            .map(|i| ease(t[0].ease, i as f32 / 100.0))
+            .fold(0.0, f32::max);
+        assert!(peak > 1.05, "a spring goes past its target: {peak}");
+        assert!((ease(t[0].ease, 1.0) - 1.0).abs() < 0.01);
+        let b = |x| ease(t[1].ease, x);
+        assert!(
+            b(0.5) < 1.0 && (b(1.0) - 1.0).abs() < 1e-4 && b(0.36) > b(0.45),
+            "it bounces"
+        );
     }
 }

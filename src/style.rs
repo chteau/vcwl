@@ -262,6 +262,18 @@ fn prop(name: &str) -> Option<Prop> {
             ]),
         ),
         "shadow" => p(&["box-shadow"], Shadow),
+        // Beyond CSS: drawn by the renderer, ignored by browsers in prerendered pages.
+        "corner" => p(
+            &["-vcwl-corner"],
+            Keyword(&[
+                ("round", "round"),
+                ("squircle", "squircle"),
+                ("cut", "cut"),
+                ("scoop", "scoop"),
+            ]),
+        ),
+        "grain" => p(&["-vcwl-grain"], Number(0.0, 1.0)),
+        "sketch" => p(&["-vcwl-sketch"], Border),
         "fit" => p(
             &["object-fit"],
             Keyword(&[
@@ -359,6 +371,9 @@ const PROPS: &[&str] = &[
     "transition",
     "cursor",
     "shadow",
+    "corner",
+    "grain",
+    "sketch",
     "fit",
     "container",
     "user-select",
@@ -985,8 +1000,16 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
                             true
                         }
                         (Val::Kw(k), 2)
-                            if ["ease", "linear", "ease-in", "ease-out", "ease-in-out"]
-                                .contains(&k.as_str()) =>
+                            if [
+                                "ease",
+                                "linear",
+                                "ease-in",
+                                "ease-out",
+                                "ease-in-out",
+                                "spring",
+                                "bounce",
+                            ]
+                            .contains(&k.as_str()) =>
                         {
                             out.push(k.clone());
                             true

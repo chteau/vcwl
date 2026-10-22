@@ -113,7 +113,7 @@ const FETCH_OK = 0, FETCH_NETWORK = 1, FETCH_TIMEOUT = 2, FETCH_STATUS = 3, FETC
 // Work items produced by the renderer (`render/src/engine.rs`, `out`).
 export const OUT = { EMIT: 1, TITLE: 2, NAVIGATE: 3, OPEN: 4, WARN: 5, FETCH: 6, LOAD_IMAGE: 7, CURSOR: 8, COPY: 9 };
 // Display list opcodes (`render/src/paint.rs`, `op`).
-const PAINT = { FILL: 1, STROKE: 2, TEXT: 3, FONT: 4, CLIP: 5, RESTORE: 6, ALPHA: 7, TRANSFORM: 8, IMAGE: 9, SHADOW: 10, GRADIENT: 11, LINE: 12, INSET_SHADOW: 13, SCENE: 14 };
+const PAINT = { FILL: 1, STROKE: 2, TEXT: 3, FONT: 4, CLIP: 5, RESTORE: 6, ALPHA: 7, TRANSFORM: 8, IMAGE: 9, SHADOW: 10, GRADIENT: 11, LINE: 12, INSET_SHADOW: 13, SCENE: 14, CORNER: 15, GRAIN: 16 };
 const SAFE_URL = /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
 
 /** Rejects `javascript:` and other script-capable URLs. */
@@ -171,9 +171,48 @@ function shape(ctx, x, y, w, h, r) {
   addShape(ctx, x, y, w, h, r);
 }
 
+// Corner shape of the shapes being drawn (the CORNER paint op): 0 round, 1 squircle, 2 cut,
+// 3 scoop.
+let corner = 0;
+
 function addShape(ctx, x, y, w, h, r) {
-  if (r[0] || r[1] || r[2] || r[3]) ctx.roundRect(x, y, w, h, r);
-  else ctx.rect(x, y, w, h);
+  if (!(r[0] || r[1] || r[2] || r[3])) ctx.rect(x, y, w, h);
+  else if (!corner) ctx.roundRect(x, y, w, h, r);
+  else {
+    // Corners clockwise from the top left: position, and the directions of its two sides.
+    const c = [[x, y, 1, 0, 0, 1], [x + w, y, 0, 1, -1, 0], [x + w, y + h, -1, 0, 0, -1], [x, y + h, 0, -1, 1, 0]];
+    c.forEach(([cx, cy, ax, ay, bx, by], i) => {
+      // A squircle starts curving earlier and keeps its curve flatter than a circle.
+      const k = Math.min(r[i] * (corner === 1 ? 1.6 : 1), w / 2, h / 2);
+      // From the end of the previous side (along b, reversed) to the start of the next (along a).
+      const sx = cx + bx * k, sy = cy + by * k, ex = cx + ax * k, ey = cy + ay * k;
+      if (i === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+      if (corner === 2) ctx.lineTo(ex, ey);
+      else if (corner === 3) ctx.quadraticCurveTo(cx + (ax + bx) * k, cy + (ay + by) * k, ex, ey);
+      else ctx.bezierCurveTo(cx + bx * k * 0.2, cy + by * k * 0.2, cx + ax * k * 0.2, cy + ay * k * 0.2, ex, ey);
+    });
+    ctx.closePath();
+  }
+}
+
+// A tile of film grain, the same on every run.
+let grainTile = null;
+function grain(doc) {
+  if (grainTile) return grainTile;
+  const c = doc.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d"), img = g.createImageData(128, 128);
+  let s = 0x2545f491;
+  for (let i = 0; i < img.data.length; i += 4) {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    const v = (s >>> 0) & 255;
+    img.data.set([v, v, v, 255], i);
+  }
+  g.putImageData(img, 0, 0);
+  return (grainTile = c);
 }
 
 /**
@@ -503,6 +542,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.textBaseline = "alphabetic";
     ctx.lineCap = "butt";
+    corner = 0;
     const r4 = () => [b.f32(), b.f32(), b.f32(), b.f32()];
     let animate = false;
     sceneRects = [];
@@ -635,6 +675,21 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
           ctx.moveTo(x1, y1);
           ctx.lineTo(x2, y2);
           ctx.stroke();
+          break;
+        }
+        case PAINT.CORNER:
+          corner = b.u32();
+          break;
+        case PAINT.GRAIN: {
+          const [x0, y0, w, h] = r4(), radii = r4(), k = b.f32();
+          ctx.save();
+          ctx.globalAlpha *= k * 0.5;
+          ctx.globalCompositeOperation = "overlay";
+          ctx.fillStyle = ctx.createPattern(grain(doc), "repeat");
+          shape(ctx, x0, y0, w, h, radii);
+          ctx.fill();
+          ctx.restore();
+          fill = undefined;
           break;
         }
         case PAINT.SCENE: {

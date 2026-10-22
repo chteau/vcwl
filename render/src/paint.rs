@@ -28,6 +28,10 @@ pub mod op {
     pub const INSET_SHADOW: u32 = 13;
     /// A 3D scene: node id, content rectangle, corner radii.
     pub const SCENE: u32 = 14;
+    /// Shape of the corners of the shapes that follow, until the next CORNER (0 is round).
+    pub const CORNER: u32 = 15;
+    /// Film grain: rectangle, corner radii, strength.
+    pub const GRAIN: u32 = 16;
 }
 
 /// A painted box, in viewport coordinates, clipped by its scroll ancestors.
@@ -185,6 +189,66 @@ impl<'a> Painter<'a> {
         self.out.push(color);
     }
 
+    /// A hand-drawn rectangle: each side twice, with wobbly, overshooting strokes that stay
+    /// the same from frame to frame (seeded by the node).
+    fn sketch(&mut self, id: Id, b: Rect, w: f32, color: u32) {
+        let mut seed = id.wrapping_mul(2654435761).wrapping_add(1);
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed % 1000) as f32 / 500.0 - 1.0
+        };
+        let j = (w * 1.5).max(1.5);
+        let corners = [
+            (b.x, b.y),
+            (b.x + b.w, b.y),
+            (b.x + b.w, b.y + b.h),
+            (b.x, b.y + b.h),
+        ];
+        for pass in 0..2 {
+            for side in 0..4 {
+                let (a, c) = (corners[side], corners[(side + 1) % 4]);
+                let (dx, dy) = (c.0 - a.0, c.1 - a.1);
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let (nx, ny) = (-dy / len, dx / len);
+                let over = j * (1.0 + pass as f32);
+                let p0 = (
+                    a.0 - dx / len * over * rnd().abs() + nx * j * rnd(),
+                    a.1 - dy / len * over * rnd().abs() + ny * j * rnd(),
+                );
+                let p2 = (
+                    c.0 + dx / len * over * rnd().abs() + nx * j * rnd(),
+                    c.1 + dy / len * over * rnd().abs() + ny * j * rnd(),
+                );
+                let bow = j * 1.5 * rnd();
+                let p1 = (
+                    (p0.0 + p2.0) / 2.0 + nx * bow,
+                    (p0.1 + p2.1) / 2.0 + ny * bow,
+                );
+                // A quadratic curve through the bowed middle, in six segments.
+                let at = |t: f32| {
+                    let u = 1.0 - t;
+                    (
+                        u * u * p0.0 + 2.0 * u * t * p1.0 + t * t * p2.0,
+                        u * u * p0.1 + 2.0 * u * t * p1.1 + t * t * p2.1,
+                    )
+                };
+                for k in 0..6 {
+                    let (s, e) = (at(k as f32 / 6.0), at((k + 1) as f32 / 6.0));
+                    self.line(
+                        s.0,
+                        s.1,
+                        e.0,
+                        e.1,
+                        w * if pass == 0 { 1.0 } else { 0.7 },
+                        color,
+                    );
+                }
+            }
+        }
+    }
+
     /// Draws `text` with its vertical middle at `mid`.
     pub fn text(&mut self, s: &Style, x: f32, mid: f32, text: &str, color: u32) {
         if text.is_empty() || color & 0xff == 0 {
@@ -285,7 +349,10 @@ impl<'a> Painter<'a> {
             rect: hit_rect,
             clip,
         });
-        self.decorate(n, b);
+        if s.corner != 0 {
+            self.out.extend([op::CORNER, s.corner as u32]);
+        }
+        self.decorate(id, n, b);
         let lay = &n.lay;
         let clips = s.clips() || n.is("input") || n.is("select");
         let inner_clip = if clips {
@@ -302,6 +369,9 @@ impl<'a> Painter<'a> {
         } else {
             clip
         };
+        if s.corner != 0 {
+            self.out.extend([op::CORNER, 0]);
+        }
         let (cx, cy) = (
             x - lay.scroll.0,
             y - if id == 0 { 0.0 } else { lay.scroll.1 },
@@ -405,7 +475,7 @@ impl<'a> Painter<'a> {
     }
 
     /// Shadows, background and borders.
-    fn decorate(&mut self, n: &Node, b: Rect) {
+    fn decorate(&mut self, id: Id, n: &Node, b: Rect) {
         let s = &n.style;
         for sh in s.shadow.iter().filter(|sh| !sh.inset) {
             self.out.push(op::SHADOW);
@@ -457,6 +527,16 @@ impl<'a> Painter<'a> {
                 self.f(v);
             }
             self.out.push(sh.color);
+        }
+        if s.grain > 0.0 {
+            self.out.push(op::GRAIN);
+            self.rect(b);
+            self.radii(s.radius);
+            self.f(s.grain);
+        }
+        if let Some(sk) = s.sketch {
+            self.sketch(id, b, sk.width, sk.color.unwrap_or(s.color));
+            return;
         }
         let bs = s.border;
         let uniform = bs

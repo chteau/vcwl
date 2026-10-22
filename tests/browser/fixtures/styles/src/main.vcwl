@@ -1,0 +1,48 @@
+// Styles beyond CSS: corner shapes, grain, sketched borders.
+app "Styles"
+
+style Tile {
+    width: 100px
+    height: 100px
+    background: #2050ff
+    radius: 30px
+}
+
+component App {
+    row(gap: 40px, padding: 40px) {
+        box(id: "round") {
+            style Tile
+        }
+        box(id: "cut") {
+            style Tile
+            style {
+                corner: cut
+            }
+        }
+        box(id: "scoop") {
+            style Tile
+            style {
+                corner: scoop
+            }
+        }
+        box(id: "squircle") {
+            style Tile
+            style {
+                corner: squircle
+            }
+        }
+        box(id: "grain") {
+            style Tile
+            style {
+                grain: 1.0
+            }
+        }
+        box(id: "sketch") {
+            style {
+                width: 100px
+                height: 100px
+                sketch: 3px #000000
+            }
+        }
+    }
+}

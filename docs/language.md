@@ -343,6 +343,17 @@ Property values are checked at compile time (units, colors, keywords). Propertie
 `right`, `bottom`, `left`, `inset`, `z`, `overflow`, `overflow-x`, `overflow-y`, `opacity`,
 `transform`, `transition`, `cursor`, `shadow`, `fit`, `container`, `user-select`, `list-style`.
 
+Beyond CSS (drawn by the canvas renderer; browsers ignore them in prerendered pages):
+
+- `corner: round | squircle | cut | scoop`: the shape of the `radius` corners (smooth
+  superellipse-like curves, straight bevels, or concave scoops); backgrounds, borders, shadows
+  and clipping all follow it.
+- `grain: 0.4`: film grain over the background (0 to 1).
+- `sketch: 2px #222`: a hand-drawn border instead of `border` (wobbly, overshooting double
+  strokes that stay the same from frame to frame).
+- `spring` and `bounce` easings for `transition`: a damped spring that overshoots and settles,
+  and a ball bouncing to rest (`transition: transform 600ms spring`).
+
 `when` conditions: `viewport < | <= | > | >= length`, `container ...`, `hover`, `focus`,
 `focus-within`, `active`, `disabled`, `checked`, `appear`, `dark`, `light`, `reduced-motion`,
 `print`. `when appear` styles apply until the element first scrolls into view; with a

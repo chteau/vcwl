@@ -250,6 +250,12 @@ pub struct Style {
     pub opacity: f32,
     pub transform: Vec<Transform>,
     pub shadow: Vec<Shadow>,
+    /// Shape of the corners (VCWL's `corner`): 0 round, 1 squircle, 2 cut, 3 scoop.
+    pub corner: u8,
+    /// Film grain over the background, 0 to 1 (VCWL's `grain`).
+    pub grain: f32,
+    /// A hand-drawn border (VCWL's `sketch`), drawn instead of `border`.
+    pub sketch: Option<Border>,
     pub fit: Fit,
     pub container: bool,
     pub transitions: Vec<crate::anim::Transition>,
@@ -315,6 +321,9 @@ impl Default for Style {
             opacity: 1.0,
             transform: Vec::new(),
             shadow: Vec::new(),
+            corner: 0,
+            grain: 0.0,
+            sketch: None,
             fit: Fit::Fill,
             container: false,
             transitions: Vec::new(),
@@ -1051,6 +1060,16 @@ fn apply(s: &mut Style, prop: &str, v: &[Tok], parent_font: f32, m: &Media) {
         "border-top" | "border-right" | "border-bottom" | "border-left" => {
             s.border[side(prop)] = border(v, s.color, font, m)
         }
+        "-vcwl-corner" => {
+            s.corner = match v.first() {
+                Some(Tok::Ident(k)) if k == "squircle" => 1,
+                Some(Tok::Ident(k)) if k == "cut" => 2,
+                Some(Tok::Ident(k)) if k == "scoop" => 3,
+                _ => 0,
+            }
+        }
+        "-vcwl-grain" => s.grain = num().unwrap_or(0.0).clamp(0.0, 1.0),
+        "-vcwl-sketch" => s.sketch = Some(border(v, s.color, font, m)).filter(|b| b.width > 0.0),
         "border-radius" => {
             if let Some(r) = sides(&lens()) {
                 s.radius = r.map(px_of);
