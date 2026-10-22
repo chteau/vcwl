@@ -17,6 +17,7 @@ pub mod lower_ui;
 pub mod node;
 pub mod opt;
 pub mod parser;
+pub mod pkg;
 pub mod project;
 pub mod server;
 pub mod sha256;

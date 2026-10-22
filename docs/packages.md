@@ -48,7 +48,49 @@ cd examples/kit/demo && vcwl serve
 Only `export`ed items are visible to apps. Imports are not re-exported: an app imports each file
 it uses (or the package keeps its public items in its `lib` file).
 
+## The registry
+
+A registry is the `registry` branch of a git repository, in the spirit of Wally's index
+repository: version `v` of package `name` is the directory `packages/<name>/<v>/` on that branch,
+holding the package's files. This repository's own `registry` branch holds the packages in
+`packages/` (`is-even`, `is-odd`, which depends on it, `left-pad`, `strings-plus` and `vibes`).
+
+```toml
+# vcwl.toml of the app
+registry = "https://github.com/someone/vcwl"   # any git URL, or a path relative to this file
+
+[dependencies]
+is-odd = "^1.0"        # a version requirement: a registry package
+kit = "../kit"         # anything else: a path
+```
+
+```sh
+vcwl search [word]       # packages, latest versions and descriptions
+vcwl add is-odd          # adds `is-odd = "^<latest>"` and installs it
+vcwl add left-pad@~1.0   # with a requirement
+vcwl install             # installs everything vcwl.toml asks for
+vcwl remove is-odd
+vcwl publish [--dry-run] # from a package's directory
+```
+
+- Requirements: `^1.2.3` or `1.2.3` (same first non-zero part), `~1.2.3` (same minor), `=1.2.3`,
+  `*`; missing parts count as 0. Versions are `major.minor.patch`, without pre-releases.
+- Installing resolves one version per package across the whole tree (the newest that every
+  requirement allows, or the locked one), copies the packages into `vcwl_packages/` (flat, so
+  packages' own registry dependencies come from there too), and writes `vcwl.lock`. Commit the
+  lock; `vcwl_packages/` belongs in `.gitignore`. Commands that build (`check`, `build`, `dev`,
+  `serve`, `test`) install missing packages first.
+- `vcwl publish` needs `name` (lowercase letters, digits, `-`) and `version` in vcwl.toml,
+  checks that the package's `lib` compiles, and refuses versions already published and path
+  dependencies. It commits `packages/<name>/<version>/` (every file except hidden ones, `dist`,
+  `dist-server`, `vcwl_packages`, `target` and `vcwl.lock`) on top of the branch and pushes it,
+  so publishing needs push access to the repository: that is the whole permission model.
+- Everything goes through the `git` command. Fetched registry branches are cached as bare
+  repositories in `$VCWL_HOME` (default `~/.cache/vcwl`); without network, the cached branch is
+  used with a warning. `$VCWL_REGISTRY` overrides the manifest's `registry`.
+
 ## Not yet
 
-Packages are local paths: there is no registry, version resolution or lock file, and two
-packages with the same exported name in one file are a compile error rather than namespaced.
+No pre-release versions, yanking, checksums or signatures (the registry is trusted as far as its
+git history is); two versions of one package cannot coexist in an app; two packages with the
+same exported name in one file are a compile error rather than namespaced.

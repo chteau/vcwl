@@ -1,0 +1,7 @@
+name = "strings-plus"
+version = "1.0.0"
+description = "Actually useful string helpers. We are as surprised as you are."
+registry = "../.."
+
+[dependencies]
+left-pad = "^1.0"

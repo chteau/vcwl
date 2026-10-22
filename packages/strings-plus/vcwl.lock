@@ -1,0 +1,6 @@
+# Written by `vcwl install`; commit it so everyone gets the same versions.
+registry = "../.."
+commit = "daf55d1cc0f42f9b915fdbc6c06cc1a7643dc7b3"
+
+[packages]
+left-pad = "1.0.0"

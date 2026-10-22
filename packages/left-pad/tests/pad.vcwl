@@ -1,0 +1,7 @@
+import "../src/lib.vcwl"
+
+fn test_pads() {
+    assert(left_pad("7", 3, "0") == "007", "zero padding")
+    assert(left_pad("hello", 3, " ") == "hello", "already long enough")
+    assert(left_pad("x", 4, "") == "x", "empty fill does not loop forever")
+}

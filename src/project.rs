@@ -24,7 +24,15 @@ pub struct Project {
 
 impl Project {
     /// Finds `vcwl.toml` in `start` or its ancestors.
+    /// The project governing `start`, with its missing registry packages installed.
     pub fn find(start: &Path) -> Result<Project, String> {
+        let p = Project::find_only(start)?;
+        crate::pkg::ensure(&p.root, &p.manifest)?;
+        Ok(p)
+    }
+
+    /// The project governing `start` (in it or an ancestor).
+    pub fn find_only(start: &Path) -> Result<Project, String> {
         let start = start
             .canonicalize()
             .map_err(|e| format!("{}: {e}", start.display()))?;
@@ -92,8 +100,9 @@ pub fn manifest_for(dir: &Path) -> Option<(PathBuf, String)> {
 }
 
 /// Resolves `@name` or `@name/path.vcwl` imported from a file in `dir`: packages are the
-/// `[dependencies]` of the importing file's project (`name = "path/to/package"`), and `@name`
-/// alone is the package's `lib` file (default `src/lib.vcwl`).
+/// `[dependencies]` of the importing file's project (`name = "path/to/package"`, or a registry
+/// version installed in `vcwl_packages`), and `@name` alone is the package's `lib` file
+/// (default `src/lib.vcwl`).
 pub fn resolve_package(dir: &Path, spec: &str) -> Result<PathBuf, String> {
     let (name, rest) = spec.split_once('/').unwrap_or((spec, ""));
     let Some((root, text)) = manifest_for(dir) else {
@@ -114,7 +123,12 @@ pub fn resolve_package(dir: &Path, spec: &str) -> Result<PathBuf, String> {
             }
         ));
     };
-    let pkg = root.join(path);
+    let pkg = crate::pkg::dep_dir(&root, name, path);
+    if crate::pkg::is_registry_dep(path) && !pkg.is_dir() {
+        return Err(format!(
+            "package `@{name}` is not installed (run `vcwl install`)"
+        ));
+    }
     if rest.is_empty() {
         let lib = std::fs::read_to_string(pkg.join("vcwl.toml"))
             .ok()
@@ -134,8 +148,8 @@ pub fn packages(root: &Path) -> Vec<PathBuf> {
         let Ok(text) = std::fs::read_to_string(dir.join("vcwl.toml")) else {
             continue;
         };
-        for (_, path) in manifest_table(&text, "dependencies") {
-            let pkg = dir.join(path);
+        for (name, path) in manifest_table(&text, "dependencies") {
+            let pkg = crate::pkg::dep_dir(&dir, &name, &path);
             let pkg = pkg.canonicalize().unwrap_or(pkg);
             if !out.contains(&pkg) {
                 out.push(pkg.clone());

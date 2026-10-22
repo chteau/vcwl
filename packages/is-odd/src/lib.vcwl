@@ -1,0 +1,7 @@
+// Proudly built on the shoulders of is-even.
+import "@is-even"
+
+/// Whether `n` is odd: whatever is-even says, the opposite.
+export fn is_odd(n: Int) -> Bool {
+    !is_even(n)
+}

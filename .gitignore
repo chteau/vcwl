@@ -2,3 +2,4 @@ target/
 dist/
 *.wasm
 node_modules/
+vcwl_packages/

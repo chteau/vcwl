@@ -15,7 +15,14 @@ commands:
   fmt [--check] [files]  format source files
   clean                  remove build artifacts
   run <file>             compile a program and run its `main` with Node.js
-  compile <file> [-o f]  compile a single file to a .wasm module";
+  compile <file> [-o f]  compile a single file to a .wasm module
+
+packages (the registry is the `registry` branch of a git repository):
+  add <name>[@req]       add a registry dependency and install it
+  remove <name>          remove a dependency
+  install                install registry dependencies into vcwl_packages/ (writes vcwl.lock)
+  publish [--dry-run]    publish this package to the registry
+  search [word]          list registry packages";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -35,6 +42,7 @@ fn main() -> ExitCode {
         "serve" => vcwl::server::run(rest),
         "test" => vcwl::testrunner::run(rest),
         "fmt" => vcwl::fmt::run(rest),
+        "install" | "add" | "remove" | "publish" | "search" => vcwl::pkg::run(cmd, rest),
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             Ok(())

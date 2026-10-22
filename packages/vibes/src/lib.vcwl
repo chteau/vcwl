@@ -1,0 +1,37 @@
+// Emotional support for developers who chose a canvas-rendered WebAssembly language on purpose.
+
+fn compliment(n: Int) -> String {
+    let all = [
+        "your code compiles, which is more than most",
+        "that component? chef's kiss",
+        "you are 10x. maybe 11x",
+        "nobody writes `state` like you do",
+        "your bundle is small and so are your problems",
+        "the borrow checker would be proud of you (it is not involved)",
+    ]
+    all[n % all.len()]
+}
+
+/// A compliment that changes every time you click it. Infinite validation, finite list.
+export component Compliment {
+    state n: Int = 0
+
+    button(compliment(n)) {
+        on click {
+            n += 1
+        }
+    }
+}
+
+/// An honest assessment of a project of `lines` lines.
+export fn vibe_check(lines: Int) -> String {
+    if lines < 100 {
+        "immaculate. suspicious, even"
+    } else if lines < 1000 {
+        "good vibes, minor chaos"
+    } else if lines < 10000 {
+        "it works and nobody knows why"
+    } else {
+        "this is a legacy system now. congratulations"
+    }
+}
