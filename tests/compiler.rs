@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use vcwl::compile::{compile, Options};
+use vcwl::compile::{Options, compile};
 use vcwl::diag::SourceMap;
 
 fn vcwl_files(dir: &str) -> Vec<PathBuf> {
@@ -18,7 +18,9 @@ fn vcwl_files(dir: &str) -> Vec<PathBuf> {
 
 fn directives(src: &str, key: &str) -> Vec<String> {
     let prefix = format!("// {key}: ");
-    src.lines().filter_map(|l| l.strip_prefix(&prefix).map(str::to_string)).collect()
+    src.lines()
+        .filter_map(|l| l.strip_prefix(&prefix).map(str::to_string))
+        .collect()
 }
 
 #[test]
@@ -31,7 +33,11 @@ fn programs_run_with_expected_output() {
         let out = match compile(&path, &mut sm, &Options { dev: true }) {
             Ok(o) => o,
             Err(f) => {
-                failures.push(format!("{}: failed to compile:\n{}", path.display(), f.diags.iter().map(|d| d.render(&sm)).collect::<String>()));
+                failures.push(format!(
+                    "{}: failed to compile:\n{}",
+                    path.display(),
+                    f.diags.iter().map(|d| d.render(&sm)).collect::<String>()
+                ));
                 continue;
             }
         };
@@ -39,7 +45,13 @@ fn programs_run_with_expected_output() {
         let r = vcwl::node::run_main(&out.wasm, "main").expect("node is required for tests");
         let got: Vec<&str> = r.stdout.lines().collect();
         if got != expected || !r.ok {
-            failures.push(format!("{}:\n  expected {:?}\n  got      {:?}\n  stderr   {}", path.display(), expected, got, r.stderr));
+            failures.push(format!(
+                "{}:\n  expected {:?}\n  got      {:?}\n  stderr   {}",
+                path.display(),
+                expected,
+                got,
+                r.stderr
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -51,7 +63,11 @@ fn invalid_programs_are_rejected() {
     for path in vcwl_files("tests/errors") {
         let src = std::fs::read_to_string(&path).unwrap();
         let expected = directives(&src, "error");
-        assert!(!expected.is_empty(), "{} has no `// error:` directive", path.display());
+        assert!(
+            !expected.is_empty(),
+            "{} has no `// error:` directive",
+            path.display()
+        );
         let mut sm = SourceMap::default();
         match compile(&path, &mut sm, &Options { dev: true }) {
             Ok(_) => failures.push(format!("{}: compiled but should fail", path.display())),
@@ -59,11 +75,17 @@ fn invalid_programs_are_rejected() {
                 let text: String = f.diags.iter().map(|d| d.render(&sm)).collect();
                 for e in &expected {
                     if !text.contains(e.as_str()) {
-                        failures.push(format!("{}: expected diagnostic containing {e:?}, got:\n{text}", path.display()));
+                        failures.push(format!(
+                            "{}: expected diagnostic containing {e:?}, got:\n{text}",
+                            path.display()
+                        ));
                     }
                 }
                 if !text.contains(":") || !text.contains("-->") {
-                    failures.push(format!("{}: diagnostic lacks a location:\n{text}", path.display()));
+                    failures.push(format!(
+                        "{}: diagnostic lacks a location:\n{text}",
+                        path.display()
+                    ));
                 }
             }
         }

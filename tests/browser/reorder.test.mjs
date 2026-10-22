@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { build, open, repo } from "./harness.mjs";
+import { build, open, tree, click, repo } from "./harness.mjs";
 
 let app;
 before(async () => {
@@ -9,26 +9,25 @@ before(async () => {
 });
 after(async () => app?.close());
 
-/** Applies `keys`; returns the DOM moves (existing nodes re-inserted) the update made. */
+/** Types `keys` into the form and submits; returns how many attached nodes were moved. */
 async function apply(keys) {
-  return app.page.evaluate(async (text) => {
-    const ul = document.querySelector("ul");
-    const before = new Set(ul.children);
-    const moved = new Set();
-    const obs = new MutationObserver((recs) => recs.forEach((r) => r.addedNodes.forEach((n) => before.has(n) && moved.add(n))));
-    obs.observe(ul, { childList: true });
-    const input = document.querySelector("input");
-    input.value = text;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    document.querySelector("form").requestSubmit();
-    await Promise.resolve();
-    obs.takeRecords().forEach((r) => r.addedNodes.forEach((n) => before.has(n) && moved.add(n)));
-    obs.disconnect();
-    return moved.size;
-  }, keys.join(","));
+  const { page } = app;
+  const before = await page.evaluate(() => window.vcwl.moves());
+  await click(page, "input");
+  await page.keyboard.down("Control");
+  await page.keyboard.press("a");
+  await page.keyboard.up("Control");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type(keys.join(","));
+  await page.keyboard.press("Enter");
+  return (await page.evaluate(() => window.vcwl.moves())) - before;
 }
 
-const rendered = () => app.page.$$eval("li", (ls) => ls.map((l) => Number(l.textContent)));
+/** Keys of the rendered items, and the node id of each. */
+async function rendered() {
+  const t = await tree(app.page);
+  return t.all("li").map((l) => [Number(t.text(l)), l.id]);
+}
 
 function lisLength(xs) {
   const tails = [];
@@ -59,13 +58,13 @@ test("random permutations, insertions and removals render in order with minimal 
         [keys[i], keys[j]] = [keys[j], keys[i]];
       }
     }
-    await app.page.$$eval("li", (ls) => ls.forEach((l) => (l.__key = Number(l.textContent))));
+    const ids = new Map(await rendered());
     const moves = await apply(keys);
-    assert.deepEqual(await rendered(), keys, `round ${round}`);
+    const now = await rendered();
+    assert.deepEqual(now.map(([k]) => k), keys, `round ${round}`);
     // Nodes of keys present before and after are reused, never recreated.
-    const reused = await app.page.$$eval("li", (ls) => ls.filter((l) => l.__key !== undefined).map((l) => l.__key));
     const kept = keys.filter((k) => prev.includes(k));
-    assert.deepEqual(reused, kept, `round ${round}: kept nodes`);
+    assert.deepEqual(now.filter(([k, id]) => ids.get(k) === id).map(([k]) => k), kept, `round ${round}: kept nodes`);
     const oldIndex = kept.map((k) => prev.indexOf(k));
     assert.equal(moves, kept.length - lisLength(oldIndex), `round ${round}: moves`);
     prev = keys;
@@ -77,7 +76,7 @@ test("reversal and clearing", async () => {
   const keys = Array.from({ length: 30 }, (_, i) => i + 1);
   await apply(keys);
   assert.equal(await apply([...keys].reverse()), 29);
-  assert.deepEqual(await rendered(), [...keys].reverse());
+  assert.deepEqual((await rendered()).map(([k]) => k), [...keys].reverse());
   await apply([]);
   assert.deepEqual(await rendered(), []);
   assert.equal(await app.page.evaluate(() => window.vcwl.liveListeners()), 2, "only the form's listeners remain");

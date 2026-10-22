@@ -100,15 +100,39 @@ pub struct Block {
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Let { name: Ident, mutable: bool, ty: Option<TypeExpr>, value: Expr, span: Span },
-    Assign { target: Expr, op: Option<BinOp>, value: Expr, span: Span },
+    Let {
+        name: Ident,
+        mutable: bool,
+        ty: Option<TypeExpr>,
+        value: Expr,
+        span: Span,
+    },
+    Assign {
+        target: Expr,
+        op: Option<BinOp>,
+        value: Expr,
+        span: Span,
+    },
     Expr(Expr),
-    While { cond: Expr, body: Block, span: Span },
-    For { var: Ident, iter: Expr, body: Block, span: Span },
+    While {
+        cond: Expr,
+        body: Block,
+        span: Span,
+    },
+    For {
+        var: Ident,
+        iter: Expr,
+        body: Block,
+        span: Span,
+    },
     Break(Span),
     Continue(Span),
     /// `emit name(value)` raises a component event (event handlers only).
-    Emit { name: Ident, value: Option<Expr>, span: Span },
+    Emit {
+        name: Ident,
+        value: Option<Expr>,
+        span: Span,
+    },
     /// `fetch get(url) as T { Ok(v) => ..., Err(e) => ... }` (event handlers only).
     Fetch(Box<Fetch>),
 }
@@ -197,17 +221,37 @@ pub enum ExprKind {
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Unary(UnOp, Box<Expr>),
     /// `callee<T>(args)`; the callee is a plain name (function, variant or builtin).
-    Call { callee: Ident, type_args: Vec<TypeExpr>, args: Vec<Arg> },
+    Call {
+        callee: Ident,
+        type_args: Vec<TypeExpr>,
+        args: Vec<Arg>,
+    },
     /// `recv.name(args)` — a builtin method or a function called with `recv` as first argument.
-    Method { recv: Box<Expr>, name: Ident, type_args: Vec<TypeExpr>, args: Vec<Arg> },
+    Method {
+        recv: Box<Expr>,
+        name: Ident,
+        type_args: Vec<TypeExpr>,
+        args: Vec<Arg>,
+    },
     Field(Box<Expr>, Ident),
     Index(Box<Expr>, Box<Expr>),
     /// `expr?`: unwraps `Ok`/`Some`, or returns the `Err`/`None` from the enclosing function.
     Try(Box<Expr>),
-    If { cond: Box<Expr>, then: Block, els: Option<Box<Expr>> },
+    If {
+        cond: Box<Expr>,
+        then: Block,
+        els: Option<Box<Expr>>,
+    },
     Block(Block),
-    Match { scrut: Box<Expr>, arms: Vec<Arm> },
-    StructLit { name: Ident, fields: Vec<(Ident, Expr)>, base: Option<Box<Expr>> },
+    Match {
+        scrut: Box<Expr>,
+        arms: Vec<Arm>,
+    },
+    StructLit {
+        name: Ident,
+        fields: Vec<(Ident, Expr)>,
+        base: Option<Box<Expr>>,
+    },
     Array(Vec<Expr>),
     Range(Box<Expr>, Box<Expr>),
     Return(Option<Box<Expr>>),
@@ -230,7 +274,11 @@ pub enum PatKind {
     Str(String),
     Bool(bool),
     /// `Name` or `Name(p, ...)` or `Enum.Name(p, ...)`.
-    Variant { qual: Option<Ident>, name: Ident, args: Vec<Pattern> },
+    Variant {
+        qual: Option<Ident>,
+        name: Ident,
+        args: Vec<Pattern>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -252,19 +300,61 @@ pub struct Component {
 
 #[derive(Clone, Debug)]
 pub enum View {
-    State { name: Ident, ty: Option<TypeExpr>, init: Expr, span: Span },
-    Let { name: Ident, ty: Option<TypeExpr>, value: Expr, span: Span },
+    State {
+        name: Ident,
+        ty: Option<TypeExpr>,
+        init: Expr,
+        span: Span,
+    },
+    Let {
+        name: Ident,
+        ty: Option<TypeExpr>,
+        value: Expr,
+        span: Span,
+    },
     Element(Element),
-    If { cond: Expr, then: Vec<View>, els: Option<Vec<View>>, span: Span },
-    For { var: Ident, index: Option<Ident>, iter: Expr, key: Option<Expr>, body: Vec<View>, span: Span },
-    Match { scrut: Expr, arms: Vec<(Pattern, Vec<View>)>, span: Span },
-    On { event: Ident, param: Option<Ident>, body: Block, span: Span },
+    If {
+        cond: Expr,
+        then: Vec<View>,
+        els: Option<Vec<View>>,
+        span: Span,
+    },
+    For {
+        var: Ident,
+        index: Option<Ident>,
+        iter: Expr,
+        key: Option<Expr>,
+        body: Vec<View>,
+        span: Span,
+    },
+    Match {
+        scrut: Expr,
+        arms: Vec<(Pattern, Vec<View>)>,
+        span: Span,
+    },
+    On {
+        event: Ident,
+        param: Option<Ident>,
+        body: Block,
+        span: Span,
+    },
     /// `event name(Type)` declares an event the component can emit to its parent.
-    Event { name: Ident, ty: Option<TypeExpr>, span: Span },
+    Event {
+        name: Ident,
+        ty: Option<TypeExpr>,
+        span: Span,
+    },
     Style(StyleBlock),
     StyleRef(Ident),
-    StyleIf { cond: Expr, block: StyleBlock, span: Span },
-    Routes { arms: Vec<(Option<String>, Span, Vec<View>)>, span: Span },
+    StyleIf {
+        cond: Expr,
+        block: StyleBlock,
+        span: Span,
+    },
+    Routes {
+        arms: Vec<(Option<String>, Span, Vec<View>)>,
+        span: Span,
+    },
 }
 
 #[derive(Clone, Debug)]

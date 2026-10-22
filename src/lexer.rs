@@ -33,9 +33,9 @@ pub struct Token {
 }
 
 const PUNCTS: &[&str] = &[
-    "..=", "...", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=", "/=", "..", "(",
-    ")", "{", "}", "[", "]", ",", ".", ":", ";", "=", "<", ">", "+", "-", "*", "/", "%", "!", "?",
-    "|", "&", "@",
+    "..=", "...", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=", "/=", "..",
+    "(", ")", "{", "}", "[", "]", ",", ".", ":", ";", "=", "<", ">", "+", "-", "*", "/", "%", "!",
+    "?", "|", "&", "@",
 ];
 
 pub fn lex(src: &str, base: u32) -> Result<Vec<Token>> {
@@ -46,7 +46,11 @@ pub fn lex(src: &str, base: u32) -> Result<Vec<Token>> {
         nl |= lx.skip_trivia()?;
         let start = lx.pos;
         let Some(c) = lx.peek() else {
-            out.push(Token { tok: Tok::Eof, span: lx.span(start), nl: true });
+            out.push(Token {
+                tok: Tok::Eof,
+                span: lx.span(start),
+                nl: true,
+            });
             return Ok(out);
         };
         let tok = if c.is_ascii_digit() {
@@ -66,17 +70,27 @@ pub fn lex(src: &str, base: u32) -> Result<Vec<Token>> {
             }
             let hex = &src[s..lx.pos];
             if ![3, 4, 6, 8].contains(&hex.len()) || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-                return Err(Diag::syntax(lx.span(start), format!("invalid color literal `#{hex}`"))
-                    .help("colors are written as #rgb, #rgba, #rrggbb or #rrggbbaa"));
+                return Err(Diag::syntax(
+                    lx.span(start),
+                    format!("invalid color literal `#{hex}`"),
+                )
+                .help("colors are written as #rgb, #rgba, #rrggbb or #rrggbbaa"));
             }
             Tok::Color(hex.to_ascii_lowercase())
         } else if let Some(p) = PUNCTS.iter().find(|p| src[lx.pos..].starts_with(**p)) {
             lx.pos += p.len();
             Tok::Punct(p)
         } else {
-            return Err(Diag::syntax(lx.span_len(start, c.len_utf8()), format!("unexpected character `{c}`")));
+            return Err(Diag::syntax(
+                lx.span_len(start, c.len_utf8()),
+                format!("unexpected character `{c}`"),
+            ));
         };
-        out.push(Token { tok, span: lx.span(start), nl });
+        out.push(Token {
+            tok,
+            span: lx.span(start),
+            nl,
+        });
         nl = false;
     }
 }
@@ -134,7 +148,12 @@ impl Lexer<'_> {
                         match self.bump() {
                             Some('\n') => nl = true,
                             Some(_) => {}
-                            None => return Err(Diag::syntax(self.span_len(start, 2), "unterminated block comment")),
+                            None => {
+                                return Err(Diag::syntax(
+                                    self.span_len(start, 2),
+                                    "unterminated block comment",
+                                ));
+                            }
                         }
                     }
                 }
@@ -156,7 +175,10 @@ impl Lexer<'_> {
                 self.bump();
             }
         }
-        let text: String = self.src[start..self.pos].chars().filter(|&c| c != '_').collect();
+        let text: String = self.src[start..self.pos]
+            .chars()
+            .filter(|&c| c != '_')
+            .collect();
         let unit_start = self.pos;
         if self.peek() == Some('%') {
             self.bump();
@@ -172,9 +194,9 @@ impl Lexer<'_> {
         if float {
             Ok(Tok::Float(text.parse().unwrap()))
         } else {
-            text.parse::<i64>()
-                .map(Tok::Int)
-                .map_err(|_| Diag::syntax(self.span(start), "integer literal does not fit in 64 bits"))
+            text.parse::<i64>().map(Tok::Int).map_err(|_| {
+                Diag::syntax(self.span(start), "integer literal does not fit in 64 bits")
+            })
         }
     }
 
@@ -185,7 +207,10 @@ impl Lexer<'_> {
         let mut lit = String::new();
         loop {
             let Some(c) = self.bump() else {
-                return Err(Diag::syntax(self.span(start), "unterminated string literal"));
+                return Err(Diag::syntax(
+                    self.span(start),
+                    "unterminated string literal",
+                ));
             };
             match c {
                 '"' => break,
@@ -198,8 +223,11 @@ impl Lexer<'_> {
                         Some('0') => '\0',
                         Some(c @ ('\\' | '"' | '{' | '}')) => c,
                         _ => {
-                            return Err(Diag::syntax(self.span_len(self.pos - 2, 2), "unknown escape sequence")
-                                .help("supported escapes: \\n \\t \\r \\0 \\\\ \\\" \\{ \\}"));
+                            return Err(Diag::syntax(
+                                self.span_len(self.pos - 2, 2),
+                                "unknown escape sequence",
+                            )
+                            .help("supported escapes: \\n \\t \\r \\0 \\\\ \\\" \\{ \\}"));
                         }
                     });
                 }
@@ -211,17 +239,29 @@ impl Lexer<'_> {
                             Some('{') => depth += 1,
                             Some('}') => depth -= 1,
                             Some('"') => {
-                                return Err(Diag::syntax(self.span(inner_start), "string literals are not allowed inside interpolation")
-                                    .help("bind the value with `let` first"));
+                                return Err(Diag::syntax(
+                                    self.span(inner_start),
+                                    "string literals are not allowed inside interpolation",
+                                )
+                                .help("bind the value with `let` first"));
                             }
                             Some(_) => {}
-                            None => return Err(Diag::syntax(self.span(start), "unterminated interpolation in string")),
+                            None => {
+                                return Err(Diag::syntax(
+                                    self.span(start),
+                                    "unterminated interpolation in string",
+                                ));
+                            }
                         }
                     }
                     let inner = &self.src[inner_start..self.pos - 1];
-                    let span = Span::new(self.base + inner_start as u32, self.base + self.pos as u32 - 1);
+                    let span = Span::new(
+                        self.base + inner_start as u32,
+                        self.base + self.pos as u32 - 1,
+                    );
                     if inner.trim().is_empty() {
-                        return Err(Diag::syntax(span, "empty interpolation `{}`").help("write `\\{` for a literal brace"));
+                        return Err(Diag::syntax(span, "empty interpolation `{}`")
+                            .help("write `\\{` for a literal brace"));
                     }
                     let mut toks = lex(inner, self.base + inner_start as u32)?;
                     toks.last_mut().unwrap().span = Span::new(span.hi, span.hi);
@@ -230,7 +270,13 @@ impl Lexer<'_> {
                     }
                     pieces.push(StrPiece::Expr(toks, span));
                 }
-                '}' => return Err(Diag::syntax(self.span_len(self.pos - 1, 1), "unmatched `}` in string").help("write `\\}` for a literal brace")),
+                '}' => {
+                    return Err(Diag::syntax(
+                        self.span_len(self.pos - 1, 1),
+                        "unmatched `}` in string",
+                    )
+                    .help("write `\\}` for a literal brace"));
+                }
                 c => lit.push(c),
             }
         }

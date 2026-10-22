@@ -5,6 +5,12 @@
                                     │                  │                         │
                               check_ui/app       lower_ui (views)            wasmparser
                               style (CSS)        json (generated)            validation
+
+In the browser:
+
+app.wasm ──commands──▶ render.wasm (tree, styles, layout, paint, input) ──display list──▶ <canvas>
+   ▲                          │
+   └──── events (dispatch) ───┘        runtime/vcwl.js connects the two and owns the canvas
 ```
 
 | stage | file | role |
@@ -20,6 +26,7 @@
 | opt | `src/opt.rs` | constant folding, removal of unreachable functions and imports |
 | codegen | `src/codegen.rs` | binary encoding with `wasm-encoder`; validated with `wasmparser` |
 | project | `src/project.rs`, `src/devserver.rs` | static output, CSP, dev server |
+| renderer | `render/src/*.rs` (built to `render.wasm` by `build.rs`) | element tree, CSS engine, layout, painting, input |
 
 The prelude (`src/prelude.vcwl`) is file 0 of every compilation and is written in VCWL; only it may
 call `__` intrinsics, which lower to WebAssembly instructions or host imports.
@@ -34,13 +41,13 @@ the module. Linear memory (2 pages, growable) only carries data between the modu
 ## Browser protocol
 
 ```
-page 0 (64 KiB)        DOM command buffer
+page 0 (64 KiB)        command buffer
 page 1 and above       I/O region (IO_BASE = 65536): strings passed to and from the host
 ```
 
-The module never touches the DOM. Rendering writes commands into the buffer and calls the
-`flush(len)` import, which applies them. Each command is an opcode, integer operands and
-length-prefixed UTF-8 strings (4-byte aligned).
+Rendering writes commands into the buffer and calls the `flush(len)` import; the host copies the
+bytes into the renderer, which applies them to its own element tree. Each command is an opcode,
+integer operands and length-prefixed UTF-8 strings (4-byte aligned).
 
 | opcode | command | opcode | command |
 | --- | --- | --- | --- |
@@ -54,20 +61,50 @@ length-prefixed UTF-8 strings (4-byte aligned).
 | 8 | remove attribute | 17 | clear children |
 | 9 | set `value` | 18 | fetch |
 
-Exports: `start()`, `set_route(len)`, `dispatch(slot, len)` (DOM events), `fetch_done(slot, kind,
+Exports: `start()`, `set_route(len)`, `dispatch(slot, len)` (events), `fetch_done(slot, kind,
 status, len)`, `live_slots()`, `memory`, and `main`/`test_*` for programs. Imports: `print`,
 `panic`, `fmt_f64`, `now`, `flush`, and `json_*` for decoding responses.
+
+## Renderer
+
+`render.wasm` is a Rust crate compiled for `wasm32-unknown-unknown` (linear memory, no
+dependencies). Its only import is `host.measure(font, spacing, text) -> width`.
+
+- **Tree** (`dom.rs`): nodes indexed by the ids the app allocates; each command marks the nodes it
+  affects for restyle or relayout.
+- **Styles** (`css.rs`, `style.rs`): parses the app's style sheet from the `vcwl.styles` custom
+  section of `app.wasm` (single-class rules, pseudo-classes, media and container conditions), adds
+  per-element defaults (headings, buttons, inputs, lists, ...) and inheritance. Only dirty nodes,
+  and descendants whose inherited values changed, are restyled.
+- **Layout** (`layout.rs`): `box-sizing: border-box` everywhere; block flow with inline formatting
+  (words, atomic inline boxes, `text-align`, `white-space`); flexbox (direction, wrap, grow/shrink
+  with min/max clamping, automatic minimum size, justify/align, auto margins, gaps); grid (track
+  counts, `fill(min)`, explicit px/fr/auto tracks, column spans, stacks); absolute, fixed and relative
+  positioning; scroll containers. Each node caches the inputs and result of its last layout, so
+  unchanged subtrees cost a lookup.
+- **Paint** (`paint.rs`): a display list of fills, strokes, text runs, clips, opacity, transforms,
+  images, shadows and gradients, in paint order with `z-index`. Subtrees whose painted extent is
+  outside the viewport are skipped. The painted boxes double as the hit-test list.
+- **Input** (`engine.rs`): pointer, wheel, touch and keyboard input becomes events for the app
+  (`click`, `dblclick`, `input`, `change`, `keydown`, `focus`, `blur`, `submit`) and default actions
+  (checkbox toggling, form submission, link navigation, select pop-ups, scrolling). Events go to the
+  host one at a time through `poll()`; an event whose element or listener disappeared in the
+  meantime is dropped.
+
+The host (`runtime/vcwl.js`) forwards browser events to the renderer, delivers events to the app,
+replays display lists on the canvas each animation frame, and performs effects the renderer asks
+for: title, hash navigation, opening links, `fetch`, image loading, cursor, clipboard writes.
 
 ## Components and reactivity
 
 Each component instance is a GC struct: a dirty bitmask, one field per property/state/derived value,
-DOM node ids and child scopes. Conditional branches and list items are scopes of their own with
+node ids and child scopes. Conditional branches and list items are scopes of their own with
 generated `mount`, `update`, `destroy`, `move` and `first` functions.
 
 Dependencies are computed at compile time: every view expression knows which component values it
 reads (bit *i* for value *i*). A handler marks the bits of the values it assigns; when it returns,
 the component's `update` runs once and only re-evaluates expressions whose bits intersect the dirty
-mask. There is no virtual DOM.
+mask. There is no virtual tree diffing.
 
 Keyed lists match new items to old fragments by key, destroy fragments whose key disappeared,
 mount new ones, and move only fragments outside the longest increasing subsequence of old positions.

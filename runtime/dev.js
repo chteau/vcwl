@@ -3,7 +3,7 @@
 import { showError } from "./vcwl.js";
 
 let version = null;
-let shown = null;
+let shown = "";
 async function poll() {
   try {
     const r = await fetch("/__vcwl/status", { cache: "no-store" });
@@ -12,8 +12,8 @@ async function poll() {
     const v = text.slice(0, nl), error = text.slice(nl + 1);
     if (version !== null && v !== version) location.reload();
     version = v;
-    shown?.remove();
-    shown = error ? showError(document, "compile error:\n" + error) : null;
+    if (error !== shown) showError(document, error ? "compile error:\n" + error : null);
+    shown = error;
   } catch {
     // The dev server may be restarting.
   }

@@ -24,7 +24,11 @@ pub enum Type {
 impl Type {
     pub fn subst(&self, map: &[(String, Type)]) -> Type {
         match self {
-            Type::Param(n) => map.iter().find(|(m, _)| m == n).map(|(_, t)| t.clone()).unwrap_or_else(|| self.clone()),
+            Type::Param(n) => map
+                .iter()
+                .find(|(m, _)| m == n)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_else(|| self.clone()),
             Type::Array(t) => Type::Array(Box::new(t.subst(map))),
             Type::Adt(id, args) => Type::Adt(*id, args.iter().map(|a| a.subst(map)).collect()),
             _ => self.clone(),

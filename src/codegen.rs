@@ -1,10 +1,11 @@
 //! IR -> WebAssembly binary (GC proposal, standardized in Wasm 3.0).
 
 use wasm_encoder::{
-    AbstractHeapType, ArrayType, BlockType, CodeSection, ElementSection, Elements, CompositeInnerType, CompositeType, ConstExpr, DataCountSection,
-    DataSection, EntityType, ExportKind, ExportSection, FieldType, FuncType, Function, FunctionSection, GlobalSection,
-    GlobalType, HeapType, ImportSection, Instruction as I, MemArg, MemorySection, MemoryType, RefType, StorageType,
-    StructType, SubType, TypeSection, ValType,
+    AbstractHeapType, ArrayType, BlockType, CodeSection, CompositeInnerType, CompositeType,
+    ConstExpr, DataCountSection, DataSection, ElementSection, Elements, EntityType, ExportKind,
+    ExportSection, FieldType, FuncType, Function, FunctionSection, GlobalSection, GlobalType,
+    HeapType, ImportSection, Instruction as I, MemArg, MemorySection, MemoryType, RefType,
+    StorageType, StructType, SubType, TypeSection, ValType,
 };
 
 use crate::ir::*;
@@ -16,8 +17,14 @@ fn val(t: VT) -> ValType {
         VT::I32 => ValType::I32,
         VT::I64 => ValType::I64,
         VT::F64 => ValType::F64,
-        VT::Ref(i) => ValType::Ref(RefType { nullable: false, heap_type: HeapType::Concrete(i) }),
-        VT::RefNull(i) => ValType::Ref(RefType { nullable: true, heap_type: HeapType::Concrete(i) }),
+        VT::Ref(i) => ValType::Ref(RefType {
+            nullable: false,
+            heap_type: HeapType::Concrete(i),
+        }),
+        VT::RefNull(i) => ValType::Ref(RefType {
+            nullable: true,
+            heap_type: HeapType::Concrete(i),
+        }),
         VT::Any => ValType::Ref(RefType::ANYREF),
     }
 }
@@ -30,7 +37,12 @@ fn storage(s: Storage) -> StorageType {
 }
 
 fn composite(inner: CompositeInnerType) -> CompositeType {
-    CompositeType { inner, shared: false, descriptor: None, describes: None }
+    CompositeType {
+        inner,
+        shared: false,
+        descriptor: None,
+        describes: None,
+    }
 }
 
 pub fn emit(m: &Module) -> Vec<u8> {
@@ -47,39 +59,71 @@ pub fn emit(m: &Module) -> Vec<u8> {
         });
         n_gc + i as u32
     };
-    let import_sigs: Vec<u32> = m.imports.iter().map(|im| sig(&im.params, im.result)).collect();
-    let func_sigs: Vec<u32> = m.funcs.iter().enumerate().map(|(i, f)| {
-        match m.sig_override.iter().find(|(fi, _)| *fi == i as u32) {
-            Some((_, t)) => *t,
-            None => sig(&f.params, f.result),
-        }
-    }).collect();
+    let import_sigs: Vec<u32> = m
+        .imports
+        .iter()
+        .map(|im| sig(&im.params, im.result))
+        .collect();
+    let func_sigs: Vec<u32> = m
+        .funcs
+        .iter()
+        .enumerate()
+        .map(
+            |(i, f)| match m.sig_override.iter().find(|(fi, _)| *fi == i as u32) {
+                Some((_, t)) => *t,
+                None => sig(&f.params, f.result),
+            },
+        )
+        .collect();
 
     let mut types = TypeSection::new();
     if n_gc > 0 {
-        let subs: Vec<SubType> = m.types.iter().map(|t| match t {
-            TypeDef::Struct { fields, sup, is_final } => SubType {
-                is_final: *is_final,
-                supertype_idxs: sup.iter().copied().collect(),
-                composite_type: composite(CompositeInnerType::Struct(StructType {
-                    fields: fields.iter().map(|(s, m)| FieldType { element_type: storage(*s), mutable: *m }).collect(),
-                })),
-            },
-            TypeDef::Array { elem } => SubType {
-                is_final: true,
-                supertype_idxs: vec![],
-                composite_type: composite(CompositeInnerType::Array(ArrayType(FieldType { element_type: storage(*elem), mutable: true }))),
-            },
-            TypeDef::Func { params, result } => SubType {
-                is_final: true,
-                supertype_idxs: vec![],
-                composite_type: composite(CompositeInnerType::Func(FuncType::new(params.iter().map(|t| val(*t)), result.iter().map(|t| val(*t))))),
-            },
-        }).collect();
+        let subs: Vec<SubType> = m
+            .types
+            .iter()
+            .map(|t| match t {
+                TypeDef::Struct {
+                    fields,
+                    sup,
+                    is_final,
+                } => SubType {
+                    is_final: *is_final,
+                    supertype_idxs: sup.iter().copied().collect(),
+                    composite_type: composite(CompositeInnerType::Struct(StructType {
+                        fields: fields
+                            .iter()
+                            .map(|(s, m)| FieldType {
+                                element_type: storage(*s),
+                                mutable: *m,
+                            })
+                            .collect(),
+                    })),
+                },
+                TypeDef::Array { elem } => SubType {
+                    is_final: true,
+                    supertype_idxs: vec![],
+                    composite_type: composite(CompositeInnerType::Array(ArrayType(FieldType {
+                        element_type: storage(*elem),
+                        mutable: true,
+                    }))),
+                },
+                TypeDef::Func { params, result } => SubType {
+                    is_final: true,
+                    supertype_idxs: vec![],
+                    composite_type: composite(CompositeInnerType::Func(FuncType::new(
+                        params.iter().map(|t| val(*t)),
+                        result.iter().map(|t| val(*t)),
+                    ))),
+                },
+            })
+            .collect();
         types.ty().rec(subs);
     }
     for (p, r) in &sigs {
-        types.ty().func_type(&FuncType::new(p.iter().map(|t| val(*t)), r.iter().map(|t| val(*t))));
+        types.ty().func_type(&FuncType::new(
+            p.iter().map(|t| val(*t)),
+            r.iter().map(|t| val(*t)),
+        ));
     }
     module.section(&types);
 
@@ -98,7 +142,13 @@ pub fn emit(m: &Module) -> Vec<u8> {
     module.section(&funcs);
 
     let mut mems = MemorySection::new();
-    mems.memory(MemoryType { minimum: m.memory_pages as u64, maximum: Some(16384), memory64: false, shared: false, page_size_log2: None });
+    mems.memory(MemoryType {
+        minimum: m.memory_pages as u64,
+        maximum: Some(16384),
+        memory64: false,
+        shared: false,
+        page_size_log2: None,
+    });
     module.section(&mems);
 
     if !m.globals.is_empty() {
@@ -109,10 +159,20 @@ pub fn emit(m: &Module) -> Vec<u8> {
                 IExpr::I64(v) => ConstExpr::i64_const(*v),
                 IExpr::F64(v) => ConstExpr::f64_const((*v).into()),
                 IExpr::Null(t) => ConstExpr::ref_null(HeapType::Concrete(*t)),
-                IExpr::NullAny => ConstExpr::ref_null(HeapType::Abstract { shared: false, ty: AbstractHeapType::Any }),
+                IExpr::NullAny => ConstExpr::ref_null(HeapType::Abstract {
+                    shared: false,
+                    ty: AbstractHeapType::Any,
+                }),
                 e => panic!("unsupported global initializer {e:?}"),
             };
-            globals.global(GlobalType { val_type: val(g.ty), mutable: true, shared: false }, &init);
+            globals.global(
+                GlobalType {
+                    val_type: val(g.ty),
+                    mutable: true,
+                    shared: false,
+                },
+                &init,
+            );
         }
         module.section(&globals);
     }
@@ -159,8 +219,18 @@ pub fn emit(m: &Module) -> Vec<u8> {
             t => *t,
         });
         let mut func = Function::new_with_locals_types(declared.map(val));
-        let non_null: Vec<bool> = f.params.iter().map(|_| false).chain(f.locals.iter().map(|t| matches!(t, VT::Ref(_)))).collect();
-        let mut cx = Emit { f: &mut func, labels: Vec::new(), n_imports, non_null };
+        let non_null: Vec<bool> = f
+            .params
+            .iter()
+            .map(|_| false)
+            .chain(f.locals.iter().map(|t| matches!(t, VT::Ref(_))))
+            .collect();
+        let mut cx = Emit {
+            f: &mut func,
+            labels: Vec::new(),
+            n_imports,
+            non_null,
+        };
         for e in &f.body {
             cx.expr(e);
         }
@@ -191,16 +261,25 @@ impl Emit<'_> {
     }
 
     fn depth(&self, l: Label) -> u32 {
-        let pos = self.labels.iter().rposition(|x| *x == Some(l)).expect("branch to unknown label");
+        let pos = self
+            .labels
+            .iter()
+            .rposition(|x| *x == Some(l))
+            .expect("branch to unknown label");
         (self.labels.len() - 1 - pos) as u32
     }
 
     fn block_type(t: Option<VT>) -> BlockType {
-        t.map(|t| BlockType::Result(val(t))).unwrap_or(BlockType::Empty)
+        t.map(|t| BlockType::Result(val(t)))
+            .unwrap_or(BlockType::Empty)
     }
 
     fn mem(align: u32) -> MemArg {
-        MemArg { offset: 0, align, memory_index: 0 }
+        MemArg {
+            offset: 0,
+            align,
+            memory_index: 0,
+        }
     }
 
     fn expr(&mut self, e: &IExpr) {
@@ -210,7 +289,10 @@ impl Emit<'_> {
             I64(v) => self.i(I::I64Const(*v)),
             F64(v) => self.i(I::F64Const((*v).into())),
             Null(t) => self.i(I::RefNull(HeapType::Concrete(*t))),
-            NullAny => self.i(I::RefNull(HeapType::Abstract { shared: false, ty: AbstractHeapType::Any })),
+            NullAny => self.i(I::RefNull(HeapType::Abstract {
+                shared: false,
+                ty: AbstractHeapType::Any,
+            })),
             LocalGet(l) => {
                 self.i(I::LocalGet(*l));
                 if self.non_null[*l as usize] {
@@ -326,12 +408,18 @@ impl Emit<'_> {
             }
             StructGet(t, i, o) => {
                 self.expr(o);
-                self.i(I::StructGet { struct_type_index: *t, field_index: *i });
+                self.i(I::StructGet {
+                    struct_type_index: *t,
+                    field_index: *i,
+                });
             }
             StructSet(t, i, o, v) => {
                 self.expr(o);
                 self.expr(v);
-                self.i(I::StructSet { struct_type_index: *t, field_index: *i });
+                self.i(I::StructSet {
+                    struct_type_index: *t,
+                    field_index: *i,
+                });
             }
             ArrayNew(t, init, len) => {
                 self.expr(init);
@@ -344,12 +432,18 @@ impl Emit<'_> {
             }
             ArrayNewFixed(t, xs) => {
                 xs.iter().for_each(|x| self.expr(x));
-                self.i(I::ArrayNewFixed { array_type_index: *t, array_size: xs.len() as u32 });
+                self.i(I::ArrayNewFixed {
+                    array_type_index: *t,
+                    array_size: xs.len() as u32,
+                });
             }
             ArrayNewData(t, off, len) => {
                 self.i(I::I32Const(*off as i32));
                 self.i(I::I32Const(*len as i32));
-                self.i(I::ArrayNewData { array_type_index: *t, array_data_index: 0 });
+                self.i(I::ArrayNewData {
+                    array_type_index: *t,
+                    array_data_index: 0,
+                });
             }
             ArrayGet(t, a, i) => {
                 self.expr(a);
@@ -373,7 +467,10 @@ impl Emit<'_> {
             }
             ArrayCopy(t, args) => {
                 args.iter().for_each(|x| self.expr(x));
-                self.i(I::ArrayCopy { array_type_index_dst: *t, array_type_index_src: *t });
+                self.i(I::ArrayCopy {
+                    array_type_index_dst: *t,
+                    array_type_index_src: *t,
+                });
             }
             RefCast(t, v) => {
                 self.expr(v);
@@ -411,7 +508,10 @@ impl Emit<'_> {
                 self.expr(dst);
                 self.i(I::I32Const(*off as i32));
                 self.i(I::I32Const(*len as i32));
-                self.i(I::MemoryInit { mem: 0, data_index: 0 });
+                self.i(I::MemoryInit {
+                    mem: 0,
+                    data_index: 0,
+                });
             }
             MemoryGrow(n) => {
                 self.expr(n);

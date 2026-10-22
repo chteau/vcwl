@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::ast::BinOp;
 use crate::ir::*;
-use crate::tir::{self, AdtKind, LocalId, TExpr, TPat, TStmt, Type, TK};
+use crate::tir::{self, AdtKind, LocalId, TExpr, TK, TPat, TStmt, Type};
 
 /// Start of the host I/O region in linear memory (page 0 holds the DOM command buffer).
 pub const IO_BASE: i32 = 65536;
@@ -47,7 +47,17 @@ pub struct FnCx {
 
 impl FnCx {
     pub fn new(params: Vec<VT>, tlocals: Vec<tir::Local>, subst: Vec<(String, Type)>) -> FnCx {
-        FnCx { n_params: params.len() as u32, locals: params, map: HashMap::new(), tlocals, subst, next_label: 0, loops: Vec::new(), scope: None, unbound: Vec::new() }
+        FnCx {
+            n_params: params.len() as u32,
+            locals: params,
+            map: HashMap::new(),
+            tlocals,
+            subst,
+            next_label: 0,
+            loops: Vec::new(),
+            scope: None,
+            unbound: Vec::new(),
+        }
     }
     pub fn temp(&mut self, t: VT) -> u32 {
         self.locals.push(t);
@@ -65,9 +75,23 @@ impl FnCx {
 
 impl<'a> Lower<'a> {
     pub fn new(adts: &'a [tir::Adt], fns: &'a [tir::TFn]) -> Lower<'a> {
-        let mut m = Module { memory_pages: 2, ..Default::default() };
+        let mut m = Module {
+            memory_pages: 2,
+            ..Default::default()
+        };
         let str_ty = m.array_type(Storage::I8);
-        Lower { adts, fns, m, str_ty, layouts: HashMap::new(), insts: HashMap::new(), queue: Vec::new(), helpers: HashMap::new(), strings: HashMap::new(), ui: None }
+        Lower {
+            adts,
+            fns,
+            m,
+            str_ty,
+            layouts: HashMap::new(),
+            insts: HashMap::new(),
+            queue: Vec::new(),
+            helpers: HashMap::new(),
+            strings: HashMap::new(),
+            ui: None,
+        }
     }
 
     /// Lowers all queued function instances until the queue is empty.
@@ -115,25 +139,45 @@ impl<'a> Lower<'a> {
     }
 
     pub fn layout(&mut self, t: &Type) -> Layout {
-        let Type::Adt(id, args) = t else { panic!("layout of non-ADT") };
+        let Type::Adt(id, args) = t else {
+            panic!("layout of non-ADT")
+        };
         let key = (*id, args.clone());
         if let Some(l) = self.layouts.get(&key) {
             return l.clone();
         }
         let adt = &self.adts[*id];
         let map: Vec<(String, Type)> = adt.generics.iter().cloned().zip(args.clone()).collect();
-        let placeholder = TypeDef::Struct { fields: vec![], sup: None, is_final: true };
+        let placeholder = TypeDef::Struct {
+            fields: vec![],
+            sup: None,
+            is_final: true,
+        };
         match &adt.kind {
             AdtKind::Struct(fields) => {
                 let idx = self.m.add_type(placeholder);
                 self.layouts.insert(key, Layout::Struct(idx));
-                let fs = fields.iter().map(|(_, t)| (self.storage(&t.subst(&map)), false)).collect();
-                self.m.types[idx as usize] = TypeDef::Struct { fields: fs, sup: None, is_final: true };
+                let fs = fields
+                    .iter()
+                    .map(|(_, t)| (self.storage(&t.subst(&map)), false))
+                    .collect();
+                self.m.types[idx as usize] = TypeDef::Struct {
+                    fields: fs,
+                    sup: None,
+                    is_final: true,
+                };
                 Layout::Struct(idx)
             }
             AdtKind::Enum(variants) => {
-                let base = self.m.add_type(TypeDef::Struct { fields: vec![(Storage::Val(VT::I32), false)], sup: None, is_final: false });
-                let vs: Vec<u32> = variants.iter().map(|_| self.m.add_type(placeholder.clone())).collect();
+                let base = self.m.add_type(TypeDef::Struct {
+                    fields: vec![(Storage::Val(VT::I32), false)],
+                    sup: None,
+                    is_final: false,
+                });
+                let vs: Vec<u32> = variants
+                    .iter()
+                    .map(|_| self.m.add_type(placeholder.clone()))
+                    .collect();
                 let l = Layout::Enum(base, vs.clone());
                 self.layouts.insert(key, l.clone());
                 for ((_, ftys), vi) in variants.iter().zip(&vs) {
@@ -141,7 +185,11 @@ impl<'a> Lower<'a> {
                     for ft in ftys {
                         fs.push((self.storage(&ft.subst(&map)), false));
                     }
-                    self.m.types[*vi as usize] = TypeDef::Struct { fields: fs, sup: Some(base), is_final: true };
+                    self.m.types[*vi as usize] = TypeDef::Struct {
+                        fields: fs,
+                        sup: Some(base),
+                        is_final: true,
+                    };
                 }
                 l
             }
@@ -154,7 +202,14 @@ impl<'a> Lower<'a> {
             return i;
         }
         let idx = self.m.funcs.len() as u32;
-        self.m.funcs.push(Func { name: String::new(), params: vec![], result: None, locals: vec![], body: vec![], export: None });
+        self.m.funcs.push(Func {
+            name: String::new(),
+            params: vec![],
+            result: None,
+            locals: vec![],
+            body: vec![],
+            export: None,
+        });
         self.insts.insert(key, idx);
         self.queue.push((id, targs.to_vec(), idx));
         idx
@@ -162,7 +217,12 @@ impl<'a> Lower<'a> {
 
     fn lower_fn(&mut self, id: usize, targs: &[Type]) -> Func {
         let f = &self.fns[id];
-        let subst: Vec<(String, Type)> = f.generics.iter().cloned().zip(targs.iter().cloned()).collect();
+        let subst: Vec<(String, Type)> = f
+            .generics
+            .iter()
+            .cloned()
+            .zip(targs.iter().cloned())
+            .collect();
         let mut cx = FnCx::new(vec![], f.locals.clone(), subst.clone());
         for &p in &f.params {
             let t = f.locals[p].ty.subst(&subst);
@@ -176,8 +236,19 @@ impl<'a> Lower<'a> {
         let ret = f.ret.subst(&subst);
         let result = self.vt(&ret);
         let body = self.expr_as(&mut cx, &f.body, result);
-        let name = if targs.is_empty() { f.name.clone() } else { format!("{}<{}>", f.name, targs.len()) };
-        Func { name, params, result, locals: cx.body_locals(), body: vec![body], export: None }
+        let name = if targs.is_empty() {
+            f.name.clone()
+        } else {
+            format!("{}<{}>", f.name, targs.len())
+        };
+        Func {
+            name,
+            params,
+            result,
+            locals: cx.body_locals(),
+            body: vec![body],
+            export: None,
+        }
     }
 
     pub fn ty(&self, cx: &FnCx, t: &Type) -> Type {
@@ -211,7 +282,11 @@ impl<'a> Lower<'a> {
         let ty = self.ty(cx, &e.ty);
         let has = self.vt(&ty).is_some();
         let x = self.expr(cx, e);
-        if has && want.is_none() { IExpr::Drop(b(x)) } else { x }
+        if has && want.is_none() {
+            IExpr::Drop(b(x))
+        } else {
+            x
+        }
     }
 
     pub fn stmt_expr(&mut self, cx: &mut FnCx, e: &TExpr) -> IExpr {
@@ -236,7 +311,11 @@ impl<'a> Lower<'a> {
             TK::Not(a) => un(UnOp::I32Eqz, self.expr(cx, a)),
             TK::Neg(a) => {
                 let x = self.expr(cx, a);
-                if ty == Type::Float { un(UnOp::F64Neg, x) } else { bin(Op::I64Sub, IExpr::I64(0), x) }
+                if ty == Type::Float {
+                    un(UnOp::F64Neg, x)
+                } else {
+                    bin(Op::I64Sub, IExpr::I64(0), x)
+                }
             }
             TK::Call(id, targs, args) => {
                 let targs: Vec<Type> = targs.iter().map(|t| self.ty(cx, t)).collect();
@@ -254,7 +333,11 @@ impl<'a> Lower<'a> {
                 let s = self.base_type(&ot);
                 let o = self.expr(cx, obj);
                 let g = IExpr::StructGet(s, *i as u32, b(o));
-                if self.vt(&ty).is_none() { IExpr::Drop(b(g)) } else { g }
+                if self.vt(&ty).is_none() {
+                    IExpr::Drop(b(g))
+                } else {
+                    g
+                }
             }
             TK::StructNew(_, _, fields) => {
                 let s = self.base_type(&ty);
@@ -262,7 +345,9 @@ impl<'a> Lower<'a> {
                 IExpr::StructNew(s, fs)
             }
             TK::Variant(_, _, v, fields) => {
-                let Layout::Enum(base, vs) = self.layout(&ty) else { unreachable!() };
+                let Layout::Enum(base, vs) = self.layout(&ty) else {
+                    unreachable!()
+                };
                 if fields.is_empty() {
                     return IExpr::StructNew(base, vec![IExpr::I32(*v as i32)]);
                 }
@@ -271,17 +356,25 @@ impl<'a> Lower<'a> {
                 IExpr::StructNew(vs[*v], fs)
             }
             TK::Array(items) => {
-                let VT::Ref(at) = self.vt(&ty).unwrap() else { unreachable!() };
+                let VT::Ref(at) = self.vt(&ty).unwrap() else {
+                    unreachable!()
+                };
                 let xs = items.iter().map(|f| self.field_value(cx, f)).collect();
                 IExpr::ArrayNewFixed(at, xs)
             }
             TK::Index(arr, idx) => {
                 let at_ty = self.ty(cx, &arr.ty);
-                let VT::Ref(at) = self.vt(&at_ty).unwrap() else { unreachable!() };
+                let VT::Ref(at) = self.vt(&at_ty).unwrap() else {
+                    unreachable!()
+                };
                 let a = self.expr(cx, arr);
                 let i = self.expr(cx, idx);
                 let g = self.bounds_checked_get(cx, at, a, i);
-                if self.vt(&ty).is_none() { IExpr::Drop(b(g)) } else { g }
+                if self.vt(&ty).is_none() {
+                    IExpr::Drop(b(g))
+                } else {
+                    g
+                }
             }
             TK::If(c, t, f) => {
                 let vt = self.vt(&ty);
@@ -308,7 +401,9 @@ impl<'a> Lower<'a> {
                     b(self.expr_as(cx, v, vt))
                 });
                 match v {
-                    Some(v) if matches!(*v, IExpr::Seq(ref xs) if xs.is_empty()) => IExpr::Return(None),
+                    Some(v) if matches!(*v, IExpr::Seq(ref xs) if xs.is_empty()) => {
+                        IExpr::Return(None)
+                    }
                     v => IExpr::Return(v),
                 }
             }
@@ -319,7 +414,11 @@ impl<'a> Lower<'a> {
     fn field_value(&mut self, cx: &mut FnCx, e: &TExpr) -> IExpr {
         let t = self.ty(cx, &e.ty);
         let x = self.expr(cx, e);
-        if self.vt(&t).is_none() { IExpr::Seq(vec![x, IExpr::I32(0)]) } else { x }
+        if self.vt(&t).is_none() {
+            IExpr::Seq(vec![x, IExpr::I32(0)])
+        } else {
+            x
+        }
     }
 
     pub fn bounds_checked_get(&mut self, cx: &mut FnCx, at: u32, a: IExpr, i: IExpr) -> IExpr {
@@ -329,7 +428,16 @@ impl<'a> Lower<'a> {
         IExpr::Seq(vec![
             set(ta, a),
             set(ti, i),
-            IExpr::If(None, b(bin(Op::I64GeU, get(ti), un(UnOp::I64ExtendI32U, IExpr::ArrayLen(b(get(ta)))))), vec![panic], vec![]),
+            IExpr::If(
+                None,
+                b(bin(
+                    Op::I64GeU,
+                    get(ti),
+                    un(UnOp::I64ExtendI32U, IExpr::ArrayLen(b(get(ta)))),
+                )),
+                vec![panic],
+                vec![],
+            ),
             IExpr::ArrayGet(at, b(get(ta)), b(un(UnOp::I32WrapI64, get(ti)))),
         ])
     }
@@ -341,7 +449,11 @@ impl<'a> Lower<'a> {
 
     fn binop(&mut self, cx: &mut FnCx, op: BinOp, a: &TExpr, bb: &TExpr) -> IExpr {
         let t = self.ty(cx, &a.ty);
-        let t = if t == Type::Never { self.ty(cx, &bb.ty) } else { t };
+        let t = if t == Type::Never {
+            self.ty(cx, &bb.ty)
+        } else {
+            t
+        };
         let x = self.expr(cx, a);
         let y = self.expr(cx, bb);
         use BinOp::*;
@@ -373,7 +485,15 @@ impl<'a> Lower<'a> {
                 return IExpr::Seq(vec![
                     set(tx, x),
                     set(ty_, y),
-                    bin(Op::F64Sub, get(tx), bin(Op::F64Mul, un(UnOp::F64Trunc, bin(Op::F64Div, get(tx), get(ty_))), get(ty_))),
+                    bin(
+                        Op::F64Sub,
+                        get(tx),
+                        bin(
+                            Op::F64Mul,
+                            un(UnOp::F64Trunc, bin(Op::F64Div, get(tx), get(ty_))),
+                            get(ty_),
+                        ),
+                    ),
                 ]);
             }
             (Type::Float, Eq) => Op::F64Eq,
@@ -387,7 +507,11 @@ impl<'a> Lower<'a> {
             (Type::Adt(..), Eq | Ne) => {
                 let base = self.base_type(&t);
                 let o = if op == Eq { Op::I32Eq } else { Op::I32Ne };
-                return bin(o, IExpr::StructGet(base, 0, b(x)), IExpr::StructGet(base, 0, b(y)));
+                return bin(
+                    o,
+                    IExpr::StructGet(base, 0, b(x)),
+                    IExpr::StructGet(base, 0, b(y)),
+                );
             }
             _ => unreachable!("checker admitted {op:?} on {t:?}"),
         };
@@ -422,11 +546,18 @@ impl<'a> Lower<'a> {
                 cx.loops.push((brk, cont));
                 let body = self.stmt_expr(cx, body);
                 cx.loops.pop();
-                IExpr::Block(brk, None, vec![IExpr::Loop(lp, vec![
-                    IExpr::BrIf(brk, b(un(UnOp::I32Eqz, c))),
-                    IExpr::Block(cont, None, vec![body]),
-                    IExpr::Br(lp),
-                ])])
+                IExpr::Block(
+                    brk,
+                    None,
+                    vec![IExpr::Loop(
+                        lp,
+                        vec![
+                            IExpr::BrIf(brk, b(un(UnOp::I32Eqz, c))),
+                            IExpr::Block(cont, None, vec![body]),
+                            IExpr::Br(lp),
+                        ],
+                    )],
+                )
             }
             TStmt::ForRange(id, a, bnd, body) => {
                 let (brk, cont, lp) = (cx.label(), cx.label(), cx.label());
@@ -441,19 +572,28 @@ impl<'a> Lower<'a> {
                 IExpr::Seq(vec![
                     set(counter, a),
                     set(end, bnd),
-                    IExpr::Block(brk, None, vec![IExpr::Loop(lp, vec![
-                        IExpr::BrIf(brk, b(bin(Op::I64GeS, get(counter), get(end)))),
-                        set(i, get(counter)),
-                        IExpr::Block(cont, None, vec![body]),
-                        set(counter, bin(Op::I64Add, get(counter), IExpr::I64(1))),
-                        IExpr::Br(lp),
-                    ])]),
+                    IExpr::Block(
+                        brk,
+                        None,
+                        vec![IExpr::Loop(
+                            lp,
+                            vec![
+                                IExpr::BrIf(brk, b(bin(Op::I64GeS, get(counter), get(end)))),
+                                set(i, get(counter)),
+                                IExpr::Block(cont, None, vec![body]),
+                                set(counter, bin(Op::I64Add, get(counter), IExpr::I64(1))),
+                                IExpr::Br(lp),
+                            ],
+                        )],
+                    ),
                 ])
             }
             TStmt::ForArray(id, arr, body) => {
                 let (brk, cont, lp) = (cx.label(), cx.label(), cx.label());
                 let at_ty = self.ty(cx, &arr.ty);
-                let VT::Ref(at) = self.vt(&at_ty).unwrap() else { unreachable!() };
+                let VT::Ref(at) = self.vt(&at_ty).unwrap() else {
+                    unreachable!()
+                };
                 let ta = cx.temp(VT::Ref(at));
                 let idx = cx.temp(VT::I32);
                 let a = self.expr(cx, arr);
@@ -469,13 +609,23 @@ impl<'a> Lower<'a> {
                 IExpr::Seq(vec![
                     set(ta, a),
                     set(idx, IExpr::I32(0)),
-                    IExpr::Block(brk, None, vec![IExpr::Loop(lp, vec![
-                        IExpr::BrIf(brk, b(bin(Op::I32GeU, get(idx), IExpr::ArrayLen(b(get(ta)))))),
-                        bind,
-                        IExpr::Block(cont, None, vec![body]),
-                        set(idx, bin(Op::I32Add, get(idx), IExpr::I32(1))),
-                        IExpr::Br(lp),
-                    ])]),
+                    IExpr::Block(
+                        brk,
+                        None,
+                        vec![IExpr::Loop(
+                            lp,
+                            vec![
+                                IExpr::BrIf(
+                                    brk,
+                                    b(bin(Op::I32GeU, get(idx), IExpr::ArrayLen(b(get(ta))))),
+                                ),
+                                bind,
+                                IExpr::Block(cont, None, vec![body]),
+                                set(idx, bin(Op::I32Add, get(idx), IExpr::I32(1))),
+                                IExpr::Br(lp),
+                            ],
+                        )],
+                    ),
                 ])
             }
             TStmt::Break => IExpr::Br(cx.loops.last().expect("break outside loop").0),
@@ -487,7 +637,13 @@ impl<'a> Lower<'a> {
 
     // ----- pattern matching -----
 
-    pub fn lower_match(&mut self, cx: &mut FnCx, scrut: &TExpr, arms: &[(TPat, TExpr)], ty: &Type) -> IExpr {
+    pub fn lower_match(
+        &mut self,
+        cx: &mut FnCx,
+        scrut: &TExpr,
+        arms: &[(TPat, TExpr)],
+        ty: &Type,
+    ) -> IExpr {
         let st = self.ty(cx, &scrut.ty);
         let svt = self.vt(&st);
         let s = self.expr(cx, scrut);
@@ -528,12 +684,22 @@ impl<'a> Lower<'a> {
                 Some(IExpr::Call(f, vec![v.clone(), lit]))
             }
             TPat::Variant(adt, _, vi, subs) => {
-                let Layout::Enum(base, vs) = self.layout(t) else { unreachable!() };
-                let tag = bin(Op::I32Eq, IExpr::StructGet(base, 0, b(v.clone())), IExpr::I32(*vi as i32));
+                let Layout::Enum(base, vs) = self.layout(t) else {
+                    unreachable!()
+                };
+                let tag = bin(
+                    Op::I32Eq,
+                    IExpr::StructGet(base, 0, b(v.clone())),
+                    IExpr::I32(*vi as i32),
+                );
                 let ftys = self.variant_fields(*adt, t, *vi);
                 let mut test = tag;
                 for (i, (sp, ft)) in subs.iter().zip(&ftys).enumerate() {
-                    let fv = IExpr::StructGet(vs[*vi], i as u32 + 1, b(IExpr::RefCast(vs[*vi], b(v.clone()))));
+                    let fv = IExpr::StructGet(
+                        vs[*vi],
+                        i as u32 + 1,
+                        b(IExpr::RefCast(vs[*vi], b(v.clone()))),
+                    );
                     if let Some(st) = self.pat_test(cx, sp, ft, &fv) {
                         test = IExpr::If(Some(VT::I32), b(test), vec![st], vec![IExpr::I32(0)]);
                     }
@@ -550,11 +716,17 @@ impl<'a> Lower<'a> {
                 None => vec![],
             },
             TPat::Variant(adt, _, vi, subs) => {
-                let Layout::Enum(_, vs) = self.layout(t) else { unreachable!() };
+                let Layout::Enum(_, vs) = self.layout(t) else {
+                    unreachable!()
+                };
                 let ftys = self.variant_fields(*adt, t, *vi);
                 let mut out = Vec::new();
                 for (i, (sp, ft)) in subs.iter().zip(&ftys).enumerate() {
-                    let fv = IExpr::StructGet(vs[*vi], i as u32 + 1, b(IExpr::RefCast(vs[*vi], b(v.clone()))));
+                    let fv = IExpr::StructGet(
+                        vs[*vi],
+                        i as u32 + 1,
+                        b(IExpr::RefCast(vs[*vi], b(v.clone()))),
+                    );
                     out.extend(self.pat_bind(cx, sp, ft, &fv));
                 }
                 out
@@ -564,14 +736,20 @@ impl<'a> Lower<'a> {
     }
 
     fn variant_fields(&self, adt: usize, t: &Type, vi: usize) -> Vec<Type> {
-        let Type::Adt(_, args) = t else { unreachable!() };
+        let Type::Adt(_, args) = t else {
+            unreachable!()
+        };
         let a = &self.adts[adt];
         let map: Vec<(String, Type)> = a.generics.iter().cloned().zip(args.clone()).collect();
         a.variants()[vi].1.iter().map(|f| f.subst(&map)).collect()
     }
 
     fn str_eq_fn(&mut self) -> FuncRef {
-        let id = self.fns.iter().position(|f| f.name == "str_eq").expect("prelude str_eq");
+        let id = self
+            .fns
+            .iter()
+            .position(|f| f.name == "str_eq")
+            .expect("prelude str_eq");
         FuncRef::Local(self.fn_inst(id, &[]))
     }
 
@@ -606,13 +784,21 @@ impl<'a> Lower<'a> {
             "__arr_alloc" => {
                 let t = arr(self);
                 let (n, fill) = (take(), take());
-                let fill = if self.vt(&targs[0]).is_none() { IExpr::Seq(vec![fill, IExpr::I32(0)]) } else { fill };
+                let fill = if self.vt(&targs[0]).is_none() {
+                    IExpr::Seq(vec![fill, IExpr::I32(0)])
+                } else {
+                    fill
+                };
                 IExpr::ArrayNew(t, b(fill), b(wrap(n)))
             }
             "__arr_set" => {
                 let t = arr(self);
                 let (x, i, v) = (take(), take(), take());
-                let v = if self.vt(&targs[0]).is_none() { IExpr::Seq(vec![v, IExpr::I32(0)]) } else { v };
+                let v = if self.vt(&targs[0]).is_none() {
+                    IExpr::Seq(vec![v, IExpr::I32(0)])
+                } else {
+                    v
+                };
                 IExpr::ArraySet(t, b(x), b(wrap(i)), b(v))
             }
             "__float_from_int" => un(UnOp::F64ConvertI64S, take()),
@@ -639,14 +825,22 @@ impl<'a> Lower<'a> {
                 let f = self.m.import(host, vec![VT::I32], None);
                 let to = self.helper_str_to_mem();
                 let call = IExpr::Call(f, vec![IExpr::Call(to, vec![take()])]);
-                if name == "__panic" { IExpr::Seq(vec![call, IExpr::Unreachable]) } else { call }
+                if name == "__panic" {
+                    IExpr::Seq(vec![call, IExpr::Unreachable])
+                } else {
+                    call
+                }
             }
             "__str_from_io" => {
                 let from = self.helper_str_from_mem();
                 IExpr::Call(from, vec![wrap(take())])
             }
             "__json_kind" | "__json_len" => {
-                let host = if name == "__json_kind" { "json_kind" } else { "json_len" };
+                let host = if name == "__json_kind" {
+                    "json_kind"
+                } else {
+                    "json_len"
+                };
                 let f = self.m.import(host, vec![VT::I32], Some(VT::I32));
                 un(UnOp::I64ExtendI32S, IExpr::Call(f, vec![wrap(take())]))
             }
@@ -659,12 +853,16 @@ impl<'a> Lower<'a> {
                 IExpr::Call(f, vec![wrap(take())])
             }
             "__json_index" => {
-                let f = self.m.import("json_index", vec![VT::I32, VT::I32], Some(VT::I32));
+                let f = self
+                    .m
+                    .import("json_index", vec![VT::I32, VT::I32], Some(VT::I32));
                 let (h, i) = (take(), take());
                 ext(IExpr::Call(f, vec![wrap(h), wrap(i)]))
             }
             "__json_field" => {
-                let f = self.m.import("json_field", vec![VT::I32, VT::I32], Some(VT::I32));
+                let f = self
+                    .m
+                    .import("json_field", vec![VT::I32, VT::I32], Some(VT::I32));
                 let to = self.helper_str_to_mem();
                 let (h, key) = (take(), take());
                 ext(IExpr::Call(f, vec![wrap(h), IExpr::Call(to, vec![key])]))
@@ -676,7 +874,11 @@ impl<'a> Lower<'a> {
                 let (host, param, arg) = match name {
                     "__json_str" => ("json_str", VT::I32, wrap(arg)),
                     "__json_num_text" => ("json_num_text", VT::F64, arg),
-                    _ => ("json_quote", VT::I32, IExpr::Call(self.helper_str_to_mem(), vec![arg])),
+                    _ => (
+                        "json_quote",
+                        VT::I32,
+                        IExpr::Call(self.helper_str_to_mem(), vec![arg]),
+                    ),
                 };
                 let f = self.m.import(host, vec![param], Some(VT::I32));
                 IExpr::Call(from, vec![IExpr::Call(f, vec![arg])])
@@ -691,7 +893,14 @@ impl<'a> Lower<'a> {
             return FuncRef::Local(i);
         }
         let idx = self.m.funcs.len() as u32;
-        self.m.funcs.push(Func { name: name.into(), params: vec![], result: None, locals: vec![], body: vec![], export: None });
+        self.m.funcs.push(Func {
+            name: name.into(),
+            params: vec![],
+            result: None,
+            locals: vec![],
+            body: vec![],
+            export: None,
+        });
         self.helpers.insert(name, idx);
         let f = build(self);
         self.m.funcs[idx as usize] = f;
@@ -700,11 +909,26 @@ impl<'a> Lower<'a> {
 
     /// Grows linear memory so that `[IO_BASE, IO_BASE + len)` is addressable.
     fn ensure_io(len: IExpr) -> IExpr {
-        let need = bin(Op::I32ShrU, bin(Op::I32Add, bin(Op::I32Add, IExpr::I32(IO_BASE), len), IExpr::I32(65535)), IExpr::I32(16));
+        let need = bin(
+            Op::I32ShrU,
+            bin(
+                Op::I32Add,
+                bin(Op::I32Add, IExpr::I32(IO_BASE), len),
+                IExpr::I32(65535),
+            ),
+            IExpr::I32(16),
+        );
         let cur = IExpr::MemorySize;
-        IExpr::If(None, b(bin(Op::I32GtS, need.clone(), cur.clone())), vec![
-            IExpr::Drop(b(IExpr::MemoryGrow(b(bin(Op::I32Sub, need, cur))))),
-        ], vec![])
+        IExpr::If(
+            None,
+            b(bin(Op::I32GtS, need.clone(), cur.clone())),
+            vec![IExpr::Drop(b(IExpr::MemoryGrow(b(bin(
+                Op::I32Sub,
+                need,
+                cur,
+            )))))],
+            vec![],
+        )
     }
 
     /// `(s: str) -> i32`: copies a string into the I/O region and returns its byte length.
@@ -721,12 +945,22 @@ impl<'a> Lower<'a> {
                 body: vec![
                     set(n, IExpr::ArrayLen(b(get(str_)))),
                     Self::ensure_io(get(n)),
-                    IExpr::Block(brk, None, vec![IExpr::Loop(lp, vec![
-                        IExpr::BrIf(brk, b(bin(Op::I32GeU, get(i), get(n)))),
-                        IExpr::Store8(b(bin(Op::I32Add, IExpr::I32(IO_BASE), get(i))), b(IExpr::ArrayGetU(s, b(get(str_)), b(get(i))))),
-                        set(i, bin(Op::I32Add, get(i), IExpr::I32(1))),
-                        IExpr::Br(lp),
-                    ])]),
+                    IExpr::Block(
+                        brk,
+                        None,
+                        vec![IExpr::Loop(
+                            lp,
+                            vec![
+                                IExpr::BrIf(brk, b(bin(Op::I32GeU, get(i), get(n)))),
+                                IExpr::Store8(
+                                    b(bin(Op::I32Add, IExpr::I32(IO_BASE), get(i))),
+                                    b(IExpr::ArrayGetU(s, b(get(str_)), b(get(i)))),
+                                ),
+                                set(i, bin(Op::I32Add, get(i), IExpr::I32(1))),
+                                IExpr::Br(lp),
+                            ],
+                        )],
+                    ),
                     get(n),
                 ],
                 export: None,
@@ -747,12 +981,28 @@ impl<'a> Lower<'a> {
                 locals: vec![VT::Ref(s), VT::I32],
                 body: vec![
                     set(out, IExpr::ArrayNewDefault(s, b(get(n)))),
-                    IExpr::Block(brk, None, vec![IExpr::Loop(lp, vec![
-                        IExpr::BrIf(brk, b(bin(Op::I32GeU, get(i), get(n)))),
-                        IExpr::ArraySet(s, b(get(out)), b(get(i)), b(IExpr::Load8U(b(bin(Op::I32Add, IExpr::I32(IO_BASE), get(i)))))),
-                        set(i, bin(Op::I32Add, get(i), IExpr::I32(1))),
-                        IExpr::Br(lp),
-                    ])]),
+                    IExpr::Block(
+                        brk,
+                        None,
+                        vec![IExpr::Loop(
+                            lp,
+                            vec![
+                                IExpr::BrIf(brk, b(bin(Op::I32GeU, get(i), get(n)))),
+                                IExpr::ArraySet(
+                                    s,
+                                    b(get(out)),
+                                    b(get(i)),
+                                    b(IExpr::Load8U(b(bin(
+                                        Op::I32Add,
+                                        IExpr::I32(IO_BASE),
+                                        get(i),
+                                    )))),
+                                ),
+                                set(i, bin(Op::I32Add, get(i), IExpr::I32(1))),
+                                IExpr::Br(lp),
+                            ],
+                        )],
+                    ),
                     get(out),
                 ],
                 export: None,

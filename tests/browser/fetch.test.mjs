@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { build, open, text, count, repo } from "./harness.mjs";
+import { build, open, tree, text, count, click as clickSel, waitFor, repo } from "./harness.mjs";
 
 const ITEMS = [
   { id: 1, name: "Dune", tags: ["sf", "classic"], note: null, kind: "Book", extra: true },
@@ -34,22 +34,19 @@ before(async () => {
 });
 after(async () => app?.close());
 
-async function click(label) {
-  const [btn] = await app.page.$$(`xpath/.//button[text()=${JSON.stringify(label)}]`);
-  await btn.click();
-}
+const click = (label) => clickSel(app.page, `button:text(${JSON.stringify(label)})`);
 const status = () => text(app.page, "p");
 async function waitStatus(re) {
-  await app.page.waitForFunction((src) => new RegExp(src).test(document.querySelector("p").textContent), { timeout: 5000 }, re.source);
-  return status();
+  return (await waitFor(app.page, (t) => re.test(t.text("p")))).text("p");
 }
 
 test("GET decodes typed JSON into state", async () => {
   await click("Load");
   assert.equal(await waitStatus(/^loaded/), "loaded 2");
-  assert.deepEqual(await app.page.$$eval("li", (ls) => ls.map((l) => l.textContent)), ["1: Dune [sf, classic] -", "2: <img src=x onerror=alert(1)> [] -"]);
-  // Response data is inserted as text, never parsed as HTML.
-  assert.equal(await count(app.page, "img"), 0);
+  const t = await tree(app.page);
+  assert.deepEqual(t.all("li").map((l) => t.text(l)), ["1: Dune [sf, classic] -", "2: <img src=x onerror=alert(1)> [] -"]);
+  // Response data is text, never markup.
+  assert.equal(t.count("img"), 0);
 });
 
 test("POST sends the encoded body", async () => {

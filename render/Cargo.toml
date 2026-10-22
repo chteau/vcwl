@@ -1,0 +1,10 @@
+[package]
+name = "vcwl-render"
+version = "0.1.0"
+edition = "2024"
+description = "VCWL's renderer: element tree, styles, layout, painting and input, compiled to WebAssembly"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]

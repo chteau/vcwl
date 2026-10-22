@@ -5,15 +5,26 @@ use vcwl::fmt::format;
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 fn dedent(src: &str) -> String {
-    src.lines().map(|l| format!("{}  \n", l.trim_start())).collect()
+    src.lines()
+        .map(|l| format!("{}  \n", l.trim_start()))
+        .collect()
 }
 
 #[test]
 fn restores_indentation_of_repository_sources() {
-    for f in ["src/prelude.vcwl", "examples/todo/src/main.vcwl", "examples/todo/src/components/todo_item.vcwl", "tests/programs/features.vcwl"] {
+    for f in [
+        "src/prelude.vcwl",
+        "examples/todo/src/main.vcwl",
+        "examples/todo/src/components/todo_item.vcwl",
+        "tests/programs/features.vcwl",
+    ] {
         let src = std::fs::read_to_string(format!("{ROOT}/{f}")).unwrap();
         assert_eq!(format(f, &src).unwrap(), src, "{f} is not formatted");
-        assert_eq!(format(f, &dedent(&src)).unwrap(), src, "{f}: indentation not restored");
+        assert_eq!(
+            format(f, &dedent(&src)).unwrap(),
+            src,
+            "{f}: indentation not restored"
+        );
     }
 }
 
@@ -28,7 +39,10 @@ fn continuation_comments_and_blank_lines() {
 #[test]
 fn multi_line_strings_are_verbatim() {
     let src = "fn f() -> String {\n\"a\n  b {1 +\n2}\n\"\n}\n";
-    assert_eq!(format("t.vcwl", src).unwrap(), "fn f() -> String {\n    \"a\n  b {1 +\n2}\n\"\n}\n");
+    assert_eq!(
+        format("t.vcwl", src).unwrap(),
+        "fn f() -> String {\n    \"a\n  b {1 +\n2}\n\"\n}\n"
+    );
 }
 
 #[test]

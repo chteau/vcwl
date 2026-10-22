@@ -13,7 +13,10 @@ impl Span {
         Span { lo, hi }
     }
     pub fn to(self, other: Span) -> Span {
-        Span { lo: self.lo.min(other.lo), hi: self.hi.max(other.hi) }
+        Span {
+            lo: self.lo.min(other.lo),
+            hi: self.hi.max(other.hi),
+        }
     }
 }
 
@@ -32,13 +35,25 @@ pub struct SourceMap {
 
 impl SourceMap {
     pub fn add(&mut self, path: &str, text: String) -> u32 {
-        let base = self.files.last().map(|f| f.base + f.text.len() as u32 + 1).unwrap_or(0);
-        self.files.push(SourceFile { path: path.to_string(), text, base });
+        let base = self
+            .files
+            .last()
+            .map(|f| f.base + f.text.len() as u32 + 1)
+            .unwrap_or(0);
+        self.files.push(SourceFile {
+            path: path.to_string(),
+            text,
+            base,
+        });
         base
     }
 
     pub fn file_of(&self, pos: u32) -> &SourceFile {
-        self.files.iter().rev().find(|f| f.base <= pos).expect("span outside source map")
+        self.files
+            .iter()
+            .rev()
+            .find(|f| f.base <= pos)
+            .expect("span outside source map")
     }
 
     /// 1-based line and column (in characters) of a global offset.
@@ -69,7 +84,12 @@ pub struct Diag {
 
 impl Diag {
     pub fn new(kind: Kind, span: Span, msg: impl Into<String>) -> Diag {
-        Diag { kind, msg: msg.into(), span, help: None }
+        Diag {
+            kind,
+            msg: msg.into(),
+            span,
+            help: None,
+        }
     }
     pub fn syntax(span: Span, msg: impl Into<String>) -> Diag {
         Diag::new(Kind::Syntax, span, msg)

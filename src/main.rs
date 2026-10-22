@@ -71,7 +71,13 @@ fn cmd_build(rest: &[String]) -> Result<(), String> {
     for (name, n) in &sizes {
         println!("  {name:<12} {n:>8} bytes");
     }
-    println!("built {} ({} bytes, {} mode) in {:.0?}", p.out.display(), total, if dev { "dev" } else { "release" }, start.elapsed());
+    println!(
+        "built {} ({} bytes, {} mode) in {:.0?}",
+        p.out.display(),
+        total,
+        if dev { "dev" } else { "release" },
+        start.elapsed()
+    );
     Ok(())
 }
 
@@ -96,10 +102,21 @@ fn cmd_clean() -> Result<(), String> {
 }
 
 fn cmd_compile(rest: &[String]) -> Result<(), String> {
-    let file = rest.first().ok_or("usage: vcwl compile <file> [-o out.wasm]")?;
+    let file = rest
+        .first()
+        .ok_or("usage: vcwl compile <file> [-o out.wasm]")?;
     let (o, _) = project::compile_entry(Path::new(file), false)?;
-    let dest = rest.iter().position(|a| a == "-o").and_then(|i| rest.get(i + 1)).cloned()
-        .unwrap_or_else(|| PathBuf::from(file).with_extension("wasm").display().to_string());
+    let dest = rest
+        .iter()
+        .position(|a| a == "-o")
+        .and_then(|i| rest.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| {
+            PathBuf::from(file)
+                .with_extension("wasm")
+                .display()
+                .to_string()
+        });
     std::fs::write(&dest, &o.wasm).map_err(|e| format!("cannot write {dest}: {e}"))?;
     println!("wrote {dest} ({} bytes)", o.wasm.len());
     Ok(())

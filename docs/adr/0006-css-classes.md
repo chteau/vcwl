@@ -1,6 +1,7 @@
 # 6. Typed styles compiled to hashed CSS classes
 
-Status: accepted
+Status: accepted; since [ADR 10](0010-canvas-renderer.md) the style sheet travels in `app.wasm`
+and is applied by the renderer instead of the browser
 
 ## Context
 

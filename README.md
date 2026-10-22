@@ -1,9 +1,11 @@
 # VCWL — Vibe Coded Web Language
 
 A statically typed language for web applications. The compiler, written in Rust, compiles VCWL
-to WebAssembly (with the GC proposal, Wasm 3.0) plus a static `index.html`, a CSS file and a small
-JavaScript host. Application logic, views, state and styles are written in VCWL; JavaScript is
-limited to the host that applies DOM commands and calls browser APIs.
+to WebAssembly (with the GC proposal, Wasm 3.0). Application logic, views, state and styles are
+written in VCWL. Apps do not use the browser DOM: a renderer written in Rust and compiled to
+WebAssembly keeps its own element tree, applies the styles, lays out, paints into a single
+`<canvas>` and handles input. JavaScript is limited to a host that connects the two modules to
+browser APIs (canvas drawing, text measurement, `fetch`, events).
 
 ```vcwl
 app "Counter"
@@ -23,6 +25,7 @@ component App {
 ```
 
 This is an experimental project; see [known limitations](docs/limitations.md) before relying on it.
+In particular, the canvas renderer is not accessible to screen readers.
 
 ## Status
 
@@ -32,16 +35,19 @@ Working end to end, tested in Node.js and headless Chrome:
   exhaustiveness checking, immutable values with `var` locals, string interpolation, modules;
 - components with props, state, derived values, typed events, conditional and keyed list
   rendering, hash routing and forms with native HTML elements;
-- typed styles compiled to CSS classes, with responsive (`when viewport < 600px`) and state
-  (`when hover`) variants;
+- typed styles with responsive (`when viewport < 600px`) and state (`when hover`) variants;
+- a renderer of its own ([ADR 10](docs/adr/0010-canvas-renderer.md)): CSS cascade and
+  inheritance, block/inline/flex/grid layout, text wrapping, painting to canvas, focus and keyboard
+  navigation, text fields with selection and clipboard, checkboxes, select pop-ups, scrolling;
 - `fetch` with JSON validated at run time against the expected type, and network access limited
   by declared capabilities (enforced by the host and the Content-Security-Policy);
 - tooling: `vcwl new | dev | build | check | test | fmt | run | compile | clean`.
 
 ## Quick start
 
-Requirements: Rust (edition 2024), Node.js for `vcwl run`/`vcwl test`, a browser with WebAssembly GC
-(Chrome/Edge 119+, Firefox 120+, Safari 18.2+).
+Requirements: Rust (edition 2024) with the `wasm32-unknown-unknown` target
+(`rustup target add wasm32-unknown-unknown`), Node.js for `vcwl run`/`vcwl test`, a browser with
+WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari 18.2+).
 
 ```sh
 cargo build --release
@@ -81,6 +87,7 @@ cd hello
 ```
 src/            compiler (lexer, parser, checker, lowering, codegen) and CLI
 src/prelude.vcwl standard library, written in VCWL
+render/         the renderer (Rust → render.wasm): element tree, styles, layout, paint, input
 runtime/        browser/Node host (vcwl.js), boot and dev-reload scripts
 examples/todo/  routed todo app with components, forms and tests
 tests/          compiler tests (Rust), CLI tests, browser tests (puppeteer)
@@ -91,7 +98,7 @@ docs/           reference, architecture, ADRs
 ## Development
 
 ```sh
-cargo test                                # compiler, CLI and formatter tests (needs node)
+cargo test --workspace                    # compiler, renderer, CLI and formatter tests (needs node)
 (cd tests/browser && npm ci && npm test)  # headless Chrome tests (CHROME=/path/to/chrome)
 node bench/run.mjs                        # benchmark (after the two steps above)
 ```

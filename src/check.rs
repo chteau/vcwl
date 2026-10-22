@@ -65,7 +65,11 @@ const INTRINSICS: &[(&str, &[&str], &str)] = &[
     ("__str_byte", &["String", "Int"], "Int"),
     ("__str_alloc", &["Int"], "String"),
     ("__str_set_byte", &["String", "Int", "Int"], "()"),
-    ("__str_copy", &["String", "Int", "String", "Int", "Int"], "()"),
+    (
+        "__str_copy",
+        &["String", "Int", "String", "Int", "Int"],
+        "()",
+    ),
     ("__arr_len", &["[T]"], "Int"),
     ("__arr_alloc", &["Int", "T"], "[T]"),
     ("__arr_set", &["[T]", "Int", "T"], "()"),
@@ -126,15 +130,30 @@ impl<'a> Checker<'a> {
             for (ii, item) in f.items.iter().enumerate() {
                 let (sym, name, exported) = match item {
                     ast::Item::Struct(s) => {
-                        self.adts.push(Adt { name: s.name.name.clone(), generics: names(&s.generics), kind: AdtKind::Struct(vec![]) });
+                        self.adts.push(Adt {
+                            name: s.name.name.clone(),
+                            generics: names(&s.generics),
+                            kind: AdtKind::Struct(vec![]),
+                        });
                         (Sym::Adt(self.adts.len() - 1), &s.name, s.exported)
                     }
                     ast::Item::Enum(e) => {
-                        self.adts.push(Adt { name: e.name.name.clone(), generics: names(&e.generics), kind: AdtKind::Enum(vec![]) });
+                        self.adts.push(Adt {
+                            name: e.name.name.clone(),
+                            generics: names(&e.generics),
+                            kind: AdtKind::Enum(vec![]),
+                        });
                         (Sym::Adt(self.adts.len() - 1), &e.name, e.exported)
                     }
                     ast::Item::Fn(f) => {
-                        self.sigs.push(FnSig { name: f.name.name.clone(), generics: names(&f.generics), params: vec![], ret: Type::Unit, file: fi, item: ii });
+                        self.sigs.push(FnSig {
+                            name: f.name.name.clone(),
+                            generics: names(&f.generics),
+                            params: vec![],
+                            ret: Type::Unit,
+                            file: fi,
+                            item: ii,
+                        });
                         self.fns.push(None);
                         (Sym::Fn(self.sigs.len() - 1), &f.name, f.exported)
                     }
@@ -150,7 +169,10 @@ impl<'a> Checker<'a> {
                 };
                 if let Some(prev) = self.scopes[fi].insert(name.name.clone(), sym) {
                     let _ = prev;
-                    self.diags.push(Diag::ty(name.span, format!("`{}` is defined more than once in this file", name.name)));
+                    self.diags.push(Diag::ty(
+                        name.span,
+                        format!("`{}` is defined more than once in this file", name.name),
+                    ));
                 }
                 decls.push((fi, item, sym, name, exported));
             }
@@ -189,7 +211,10 @@ impl<'a> Checker<'a> {
                         let mut fields: Vec<(String, Type)> = Vec::new();
                         for (n, t) in &s.fields {
                             if fields.iter().any(|(m, _)| *m == n.name) {
-                                return Err(Diag::ty(n.span, format!("duplicate field `{}`", n.name)));
+                                return Err(Diag::ty(
+                                    n.span,
+                                    format!("duplicate field `{}`", n.name),
+                                ));
                             }
                             fields.push((n.name.clone(), self.resolve_type(t)?));
                         }
@@ -200,25 +225,42 @@ impl<'a> Checker<'a> {
                         let mut vs: Vec<(String, Vec<Type>)> = Vec::new();
                         for v in &e.variants {
                             if vs.iter().any(|(m, _)| *m == v.name.name) {
-                                return Err(Diag::ty(v.name.span, format!("duplicate variant `{}`", v.name.name)));
+                                return Err(Diag::ty(
+                                    v.name.span,
+                                    format!("duplicate variant `{}`", v.name.name),
+                                ));
                             }
-                            let fs = v.fields.iter().map(|t| self.resolve_type(t)).collect::<Result<Vec<_>>>()?;
+                            let fs = v
+                                .fields
+                                .iter()
+                                .map(|t| self.resolve_type(t))
+                                .collect::<Result<Vec<_>>>()?;
                             vs.push((v.name.name.clone(), fs));
                         }
                         if vs.is_empty() {
-                            return Err(Diag::ty(e.name.span, "an enum needs at least one variant"));
+                            return Err(Diag::ty(
+                                e.name.span,
+                                "an enum needs at least one variant",
+                            ));
                         }
                         self.adts[id].kind = AdtKind::Enum(vs);
                     }
                     (ast::Item::Fn(f), Sym::Fn(id)) => {
                         self.generics = names(&f.generics);
-                        let params = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect::<Result<Vec<_>>>()?;
+                        let params = f
+                            .params
+                            .iter()
+                            .map(|p| self.resolve_type(&p.ty))
+                            .collect::<Result<Vec<_>>>()?;
                         let ret = match &f.ret {
                             Some(t) => self.resolve_type(t)?,
                             None => Type::Unit,
                         };
                         if f.name.name.starts_with("__") && fi != 0 {
-                            return Err(Diag::ty(f.name.span, "names starting with `__` are reserved for the standard library"));
+                            return Err(Diag::ty(
+                                f.name.span,
+                                "names starting with `__` are reserved for the standard library",
+                            ));
                         }
                         self.sigs[id].params = params;
                         self.sigs[id].ret = ret;
@@ -237,7 +279,9 @@ impl<'a> Checker<'a> {
     pub fn check_fns(&mut self) {
         for id in 0..self.sigs.len() {
             let (fi, ii) = (self.sigs[id].file, self.sigs[id].item);
-            let ast::Item::Fn(f) = &self.files[fi].items[ii] else { unreachable!() };
+            let ast::Item::Fn(f) = &self.files[fi].items[ii] else {
+                unreachable!()
+            };
             match self.check_fn(id, f) {
                 Ok(tf) => self.fns[id] = Some(tf),
                 Err(d) => self.diags.push(d),
@@ -250,19 +294,40 @@ impl<'a> Checker<'a> {
         self.begin_body(names(&f.generics), self.sigs[id].ret.clone(), Ctx::Fn);
         let mut params = Vec::new();
         for (p, ty) in f.params.iter().zip(self.sigs[id].params.clone()) {
-            if params.iter().any(|&l: &LocalId| self.locals[l].name == p.name.name) {
-                return Err(Diag::ty(p.name.span, format!("duplicate parameter `{}`", p.name.name)));
+            if params
+                .iter()
+                .any(|&l: &LocalId| self.locals[l].name == p.name.name)
+            {
+                return Err(Diag::ty(
+                    p.name.span,
+                    format!("duplicate parameter `{}`", p.name.name),
+                ));
             }
             params.push(self.bind(&p.name.name, ty, false));
         }
         let ret = self.ret.clone();
         let body = self.check_block(&f.body, Some(&ret))?;
         if ret != Type::Unit {
-            self.coerce(&body.ty, &ret, f.body.tail.as_ref().map(|t| t.span).unwrap_or(f.body.span))
-                .map_err(|d| if self.zonk(&body.ty) == Type::Unit {
-                    Diag::ty(f.name.span, format!("function `{}` must return a value of type `{}` on every path", f.name.name, self.show(&ret)))
-                        .help("end the body with the value to return, or add `return value`")
-                } else { d })?;
+            self.coerce(
+                &body.ty,
+                &ret,
+                f.body.tail.as_ref().map(|t| t.span).unwrap_or(f.body.span),
+            )
+            .map_err(|d| {
+                if self.zonk(&body.ty) == Type::Unit {
+                    Diag::ty(
+                        f.name.span,
+                        format!(
+                            "function `{}` must return a value of type `{}` on every path",
+                            f.name.name,
+                            self.show(&ret)
+                        ),
+                    )
+                    .help("end the body with the value to return, or add `return value`")
+                } else {
+                    d
+                }
+            })?;
         }
         let body = self.finish_body(body)?;
         Ok(TFn {
@@ -292,8 +357,14 @@ impl<'a> Checker<'a> {
         for (span, t) in std::mem::take(&mut self.pending) {
             let z = self.zonk(&t);
             if has_var(&z) {
-                return Err(Diag::ty(span, format!("cannot infer the type of this expression (`{}`)", self.show(&z)))
-                    .help("add a type annotation, e.g. `let items: [Int] = []`"));
+                return Err(Diag::ty(
+                    span,
+                    format!(
+                        "cannot infer the type of this expression (`{}`)",
+                        self.show(&z)
+                    ),
+                )
+                .help("add a type annotation, e.g. `let items: [Int] = []`"));
             }
         }
         for i in 0..self.locals.len() {
@@ -317,7 +388,10 @@ impl<'a> Checker<'a> {
                 self.zonk_expr(b);
             }
             TK::Not(a) | TK::Neg(a) | TK::Field(a, _) => self.zonk_expr(a),
-            TK::Call(_, ts, args) | TK::Intrinsic(_, ts, args) | TK::StructNew(_, ts, args) | TK::Variant(_, ts, _, args) => {
+            TK::Call(_, ts, args)
+            | TK::Intrinsic(_, ts, args)
+            | TK::StructNew(_, ts, args)
+            | TK::Variant(_, ts, _, args) => {
                 fix(ts);
                 args.iter_mut().for_each(|a| self.zonk_expr(a));
             }
@@ -400,13 +474,19 @@ impl<'a> Checker<'a> {
                 };
                 if let Some(p) = prim {
                     if !args.is_empty() {
-                        return Err(Diag::ty(t.span, format!("`{name}` does not take type arguments")));
+                        return Err(Diag::ty(
+                            t.span,
+                            format!("`{name}` does not take type arguments"),
+                        ));
                     }
                     return Ok(p);
                 }
                 if self.generics.contains(name) {
                     if !args.is_empty() {
-                        return Err(Diag::ty(t.span, "type parameters cannot take type arguments"));
+                        return Err(Diag::ty(
+                            t.span,
+                            "type parameters cannot take type arguments",
+                        ));
                     }
                     return Ok(Type::Param(name.clone()));
                 }
@@ -415,15 +495,31 @@ impl<'a> Checker<'a> {
                         let id = *id;
                         let want = self.adts[id].generics.len();
                         if args.len() != want {
-                            return Err(Diag::ty(t.span, format!("`{name}` expects {want} type argument(s), found {}", args.len())));
+                            return Err(Diag::ty(
+                                t.span,
+                                format!(
+                                    "`{name}` expects {want} type argument(s), found {}",
+                                    args.len()
+                                ),
+                            ));
                         }
-                        let args = args.iter().map(|a| self.resolve_type(a)).collect::<Result<Vec<_>>>()?;
+                        let args = args
+                            .iter()
+                            .map(|a| self.resolve_type(a))
+                            .collect::<Result<Vec<_>>>()?;
                         Type::Adt(id, args)
                     }
                     _ => {
                         let mut d = Diag::ty(t.span, format!("unknown type `{name}`"));
-                        let cands: Vec<String> = ["Int", "Float", "Bool", "String"].iter().map(|s| s.to_string())
-                            .chain(self.scopes[self.file].iter().filter(|(_, s)| matches!(s, Sym::Adt(_))).map(|(n, _)| n.clone()))
+                        let cands: Vec<String> = ["Int", "Float", "Bool", "String"]
+                            .iter()
+                            .map(|s| s.to_string())
+                            .chain(
+                                self.scopes[self.file]
+                                    .iter()
+                                    .filter(|(_, s)| matches!(s, Sym::Adt(_)))
+                                    .map(|(n, _)| n.clone()),
+                            )
                             .collect();
                         if let Some(s) = suggest(name, cands.iter().map(|s| s.as_str())) {
                             d = d.help(format!("did you mean `{s}`?"));
@@ -462,9 +558,20 @@ impl<'a> Checker<'a> {
             Type::Unit => "()".into(),
             Type::Never => "Never".into(),
             Type::Array(t) => format!("[{}]", self.show(&t)),
-            Type::Adt(id, args) if self.adts[id].name == "Option" && id == self.prelude_adt("Option") => format!("{}?", self.show(&args[0])),
+            Type::Adt(id, args)
+                if self.adts[id].name == "Option" && id == self.prelude_adt("Option") =>
+            {
+                format!("{}?", self.show(&args[0]))
+            }
             Type::Adt(id, args) if args.is_empty() => self.adts[id].name.clone(),
-            Type::Adt(id, args) => format!("{}<{}>", self.adts[id].name, args.iter().map(|a| self.show(a)).collect::<Vec<_>>().join(", ")),
+            Type::Adt(id, args) => format!(
+                "{}<{}>",
+                self.adts[id].name,
+                args.iter()
+                    .map(|a| self.show(a))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Type::Param(n) => n,
             Type::Var(_) => "_".into(),
         }
@@ -508,7 +615,9 @@ impl<'a> Checker<'a> {
                 true
             }
             (Type::Array(x), Type::Array(y)) => self.unify(x, y),
-            (Type::Adt(i, xs), Type::Adt(j, ys)) => i == j && xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| self.unify(x, y)),
+            (Type::Adt(i, xs), Type::Adt(j, ys)) => {
+                i == j && xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| self.unify(x, y))
+            }
             _ => a == b,
         }
     }
@@ -524,10 +633,20 @@ impl<'a> Checker<'a> {
         let ze = self.zonk(expected);
         d = match (&za, &ze) {
             (Type::Int, Type::Float) => d.help("convert explicitly with `x.to_float()`"),
-            (Type::Float, Type::Int) => d.help("convert explicitly with `x.to_int()` (truncates) or `x.round().to_int()`"),
-            (Type::Int | Type::Float | Type::Bool, Type::Str) => d.help("convert explicitly with `x.to_string()` or use interpolation: \"{x}\""),
-            (_, Type::Adt(id, args)) if *id == self.prelude_adt("Option") && self.zonk(&args[0]) == za => d.help("wrap the value: `Some(value)`"),
-            (Type::Adt(id, args), _) if *id == self.prelude_adt("Option") && self.zonk(&args[0]) == ze => {
+            (Type::Float, Type::Int) => {
+                d.help("convert explicitly with `x.to_int()` (truncates) or `x.round().to_int()`")
+            }
+            (Type::Int | Type::Float | Type::Bool, Type::Str) => {
+                d.help("convert explicitly with `x.to_string()` or use interpolation: \"{x}\"")
+            }
+            (_, Type::Adt(id, args))
+                if *id == self.prelude_adt("Option") && self.zonk(&args[0]) == za =>
+            {
+                d.help("wrap the value: `Some(value)`")
+            }
+            (Type::Adt(id, args), _)
+                if *id == self.prelude_adt("Option") && self.zonk(&args[0]) == ze =>
+            {
                 d.help("the value may be absent; handle it with `match` or `.unwrap_or(default)`")
             }
             _ => d,
@@ -538,18 +657,34 @@ impl<'a> Checker<'a> {
     // ----- scopes -----
 
     pub fn bind(&mut self, name: &str, ty: Type, mutable: bool) -> LocalId {
-        self.locals.push(Local { name: name.to_string(), ty });
+        self.locals.push(Local {
+            name: name.to_string(),
+            ty,
+        });
         let id = self.locals.len() - 1;
-        self.local_scopes.last_mut().unwrap().push((name.to_string(), id, mutable));
+        self.local_scopes
+            .last_mut()
+            .unwrap()
+            .push((name.to_string(), id, mutable));
         id
     }
 
     fn lookup_local(&self, name: &str) -> Option<(LocalId, bool)> {
-        self.local_scopes.iter().rev().flat_map(|s| s.iter().rev()).find(|(n, _, _)| n == name).map(|&(_, id, m)| (id, m))
+        self.local_scopes
+            .iter()
+            .rev()
+            .flat_map(|s| s.iter().rev())
+            .find(|(n, _, _)| n == name)
+            .map(|&(_, id, m)| (id, m))
     }
 
     fn visible_value_names(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.local_scopes.iter().flatten().map(|(n, _, _)| n.clone()).collect();
+        let mut v: Vec<String> = self
+            .local_scopes
+            .iter()
+            .flatten()
+            .map(|(n, _, _)| n.clone())
+            .collect();
         if let Some(ui) = &self.ui {
             v.extend(ui.names());
         }
@@ -582,12 +717,22 @@ impl<'a> Checker<'a> {
             None if diverges => Type::Never,
             None => Type::Unit,
         };
-        Ok(TExpr { kind: TK::Block(stmts, tail), ty, span: b.span })
+        Ok(TExpr {
+            kind: TK::Block(stmts, tail),
+            ty,
+            span: b.span,
+        })
     }
 
     pub fn check_stmt(&mut self, s: &Stmt) -> Result<TStmt> {
         Ok(match s {
-            Stmt::Let { name, mutable, ty, value, .. } => {
+            Stmt::Let {
+                name,
+                mutable,
+                ty,
+                value,
+                ..
+            } => {
                 let ann = match ty {
                     Some(t) => Some(self.resolve_type(t)?),
                     None => None,
@@ -604,12 +749,21 @@ impl<'a> Checker<'a> {
                 let id = self.bind(&name.name, ty, *mutable);
                 TStmt::Let(id, v)
             }
-            Stmt::Assign { target, op, value, span } => {
+            Stmt::Assign {
+                target,
+                op,
+                value,
+                span,
+            } => {
                 let (place, ty) = self.check_place(target)?;
                 let v = match op {
                     None => self.check_expr(value, Some(&ty))?,
                     Some(op) => {
-                        let cur = TExpr { kind: place_read(&place), ty: ty.clone(), span: target.span };
+                        let cur = TExpr {
+                            kind: place_read(&place),
+                            ty: ty.clone(),
+                            span: target.span,
+                        };
                         let rhs = self.check_expr(value, Some(&ty))?;
                         self.binary(*op, cur, rhs, *span)?
                     }
@@ -626,7 +780,9 @@ impl<'a> Checker<'a> {
                 self.loops -= 1;
                 TStmt::While(c, b?)
             }
-            Stmt::For { var, iter, body, .. } => {
+            Stmt::For {
+                var, iter, body, ..
+            } => {
                 self.local_scopes.push(Vec::new());
                 let r = (|| {
                     if let ExprKind::Range(a, b) = &iter.kind {
@@ -644,8 +800,11 @@ impl<'a> Checker<'a> {
                     let elem = match self.zonk(&arr.ty) {
                         Type::Array(t) => *t,
                         t => {
-                            return Err(Diag::ty(iter.span, format!("cannot iterate over `{}`", self.show(&t)))
-                                .help("`for` loops accept arrays and ranges like `0..n`"));
+                            return Err(Diag::ty(
+                                iter.span,
+                                format!("cannot iterate over `{}`", self.show(&t)),
+                            )
+                            .help("`for` loops accept arrays and ranges like `0..n`"));
                         }
                     };
                     let id = self.bind(&var.name, elem, false);
@@ -661,7 +820,11 @@ impl<'a> Checker<'a> {
                 if self.loops == 0 {
                     return Err(Diag::ty(*span, "`break`/`continue` outside of a loop"));
                 }
-                if matches!(s, Stmt::Break(_)) { TStmt::Break } else { TStmt::Continue }
+                if matches!(s, Stmt::Break(_)) {
+                    TStmt::Break
+                } else {
+                    TStmt::Continue
+                }
             }
             Stmt::Fetch(f) => self.check_fetch(f)?,
             Stmt::Emit { name, value, span } => self.check_emit(name, value.as_ref(), *span)?,
@@ -694,7 +857,11 @@ impl<'a> Checker<'a> {
     // ----- expressions -----
 
     pub fn check_expr(&mut self, e: &ast::Expr, expected: Option<&Type>) -> Result<TExpr> {
-        let mk = |kind, ty| TExpr { kind, ty, span: e.span };
+        let mk = |kind, ty| TExpr {
+            kind,
+            ty,
+            span: e.span,
+        };
         Ok(match &e.kind {
             ExprKind::Int(n) => mk(TK::Int(*n), Type::Int),
             ExprKind::Float(n) => mk(TK::Float(*n), Type::Float),
@@ -702,9 +869,17 @@ impl<'a> Checker<'a> {
             ExprKind::Unit => mk(TK::Unit, Type::Unit),
             ExprKind::Str(parts) => self.check_interp(parts, e.span)?,
             ExprKind::Dim(n, u) => {
-                return Err(Diag::ty(e.span, format!("`{n}{u}` is a style value and can only be used in `style` blocks")));
+                return Err(Diag::ty(
+                    e.span,
+                    format!("`{n}{u}` is a style value and can only be used in `style` blocks"),
+                ));
             }
-            ExprKind::Color(c) => return Err(Diag::ty(e.span, format!("`#{c}` is a color and can only be used in `style` blocks"))),
+            ExprKind::Color(c) => {
+                return Err(Diag::ty(
+                    e.span,
+                    format!("`#{c}` is a color and can only be used in `style` blocks"),
+                ));
+            }
             ExprKind::Ident(name) => self.check_ident(name, e.span, expected)?,
             ExprKind::Binary(op, a, b) => {
                 let hint = match op {
@@ -723,12 +898,24 @@ impl<'a> Checker<'a> {
                     (UnOp::Neg, Type::Int | Type::Float) => mk(TK::Neg(Box::new(ta)), t),
                     _ => {
                         let sym = if *op == UnOp::Not { "!" } else { "-" };
-                        return Err(Diag::ty(e.span, format!("cannot apply `{sym}` to `{}`", self.show(&t))));
+                        return Err(Diag::ty(
+                            e.span,
+                            format!("cannot apply `{sym}` to `{}`", self.show(&t)),
+                        ));
                     }
                 }
             }
-            ExprKind::Call { callee, type_args, args } => self.check_call(callee, type_args, args, e.span, expected)?,
-            ExprKind::Method { recv, name, type_args, args } => self.check_method(recv, name, type_args, args, e.span, expected)?,
+            ExprKind::Call {
+                callee,
+                type_args,
+                args,
+            } => self.check_call(callee, type_args, args, e.span, expected)?,
+            ExprKind::Method {
+                recv,
+                name,
+                type_args,
+                args,
+            } => self.check_method(recv, name, type_args, args, e.span, expected)?,
             ExprKind::Field(recv, name) => {
                 if let ExprKind::Ident(q) = &recv.kind
                     && let Some(v) = self.qualified_variant(q, &name.name)
@@ -740,18 +927,27 @@ impl<'a> Checker<'a> {
                     Type::Adt(id, targs) if matches!(self.adts[id].kind, AdtKind::Struct(_)) => {
                         let fields = self.adts[id].fields();
                         let Some(i) = fields.iter().position(|(n, _)| *n == name.name) else {
-                            let mut d = Diag::ty(name.span, format!("`{}` has no field `{}`", self.adts[id].name, name.name));
-                            if let Some(s) = suggest(&name.name, fields.iter().map(|(n, _)| n.as_str())) {
+                            let mut d = Diag::ty(
+                                name.span,
+                                format!("`{}` has no field `{}`", self.adts[id].name, name.name),
+                            );
+                            if let Some(s) =
+                                suggest(&name.name, fields.iter().map(|(n, _)| n.as_str()))
+                            {
                                 d = d.help(format!("did you mean `{s}`?"));
                             }
                             return Err(d);
                         };
-                        let map: Vec<(String, Type)> = self.adts[id].generics.iter().cloned().zip(targs).collect();
+                        let map: Vec<(String, Type)> =
+                            self.adts[id].generics.iter().cloned().zip(targs).collect();
                         let ft = fields[i].1.subst(&map);
                         mk(TK::Field(Box::new(r), i), ft)
                     }
                     t => {
-                        let mut d = Diag::ty(name.span, format!("`{}` has no field `{}`", self.show(&t), name.name));
+                        let mut d = Diag::ty(
+                            name.span,
+                            format!("`{}` has no field `{}`", self.show(&t), name.name),
+                        );
                         if matches!(t, Type::Adt(id, _) if id == self.prelude_adt("Option")) {
                             d = d.help("the value is optional; unwrap it with `match` first");
                         }
@@ -765,7 +961,12 @@ impl<'a> Checker<'a> {
                 self.coerce(&ti.ty, &Type::Int, i.span)?;
                 let elem = match self.zonk(&ta.ty) {
                     Type::Array(t) => *t,
-                    t => return Err(Diag::ty(a.span, format!("cannot index into `{}`", self.show(&t)))),
+                    t => {
+                        return Err(Diag::ty(
+                            a.span,
+                            format!("cannot index into `{}`", self.show(&t)),
+                        ));
+                    }
                 };
                 mk(TK::Index(Box::new(ta), Box::new(ti)), elem)
             }
@@ -780,7 +981,11 @@ impl<'a> Checker<'a> {
                     }
                     Some(els) => {
                         let t = self.check_block(then, expected)?;
-                        let hint = if self.zonk(&t.ty) == Type::Never { expected.cloned() } else { Some(t.ty.clone()) };
+                        let hint = if self.zonk(&t.ty) == Type::Never {
+                            expected.cloned()
+                        } else {
+                            Some(t.ty.clone())
+                        };
                         let f = self.check_expr(els, hint.as_ref())?;
                         let ty = self.join(&t, &f, els.span)?;
                         mk(TK::If(Box::new(c), Box::new(t), Some(Box::new(f))), ty)
@@ -807,8 +1012,12 @@ impl<'a> Checker<'a> {
                         None if self.zonk(&b.ty) != Type::Never => ty = Some(b.ty.clone()),
                         Some(t) => {
                             let t = t.clone();
-                            self.coerce(&b.ty, &t, arm.body.span)
-                                .map_err(|d| Diag::ty(d.span, format!("match arms have incompatible types: {}", d.msg)))?;
+                            self.coerce(&b.ty, &t, arm.body.span).map_err(|d| {
+                                Diag::ty(
+                                    d.span,
+                                    format!("match arms have incompatible types: {}", d.msg),
+                                )
+                            })?;
                         }
                         None => {}
                     }
@@ -817,7 +1026,9 @@ impl<'a> Checker<'a> {
                 self.check_exhaustive(&sty, &tarms, e.span)?;
                 mk(TK::Match(Box::new(s), tarms), ty.unwrap_or(Type::Never))
             }
-            ExprKind::StructLit { name, fields, base } => self.check_struct_lit(name, fields, base.as_deref(), e.span, expected)?,
+            ExprKind::StructLit { name, fields, base } => {
+                self.check_struct_lit(name, fields, base.as_deref(), e.span, expected)?
+            }
             ExprKind::Array(items) => {
                 let elem = match expected.map(|t| self.zonk(t)) {
                     Some(Type::Array(t)) => *t,
@@ -826,18 +1037,27 @@ impl<'a> Checker<'a> {
                 let mut out = Vec::new();
                 for it in items {
                     let t = self.check_expr(it, Some(&elem))?;
-                    self.coerce(&t.ty, &elem, it.span)
-                        .map_err(|d| Diag::ty(d.span, format!("array elements must all have the same type: {}", d.msg)))?;
+                    self.coerce(&t.ty, &elem, it.span).map_err(|d| {
+                        Diag::ty(
+                            d.span,
+                            format!("array elements must all have the same type: {}", d.msg),
+                        )
+                    })?;
                     out.push(t);
                 }
                 let ty = Type::Array(Box::new(elem));
                 self.pending.push((e.span, ty.clone()));
                 mk(TK::Array(out), ty)
             }
-            ExprKind::Range(..) => return Err(Diag::ty(e.span, "ranges can only be used in `for` loops")),
+            ExprKind::Range(..) => {
+                return Err(Diag::ty(e.span, "ranges can only be used in `for` loops"));
+            }
             ExprKind::Return(v) => {
                 if self.ctx == Ctx::Render {
-                    return Err(Diag::ty(e.span, "`return` is not allowed in view expressions"));
+                    return Err(Diag::ty(
+                        e.span,
+                        "`return` is not allowed in view expressions",
+                    ));
                 }
                 let ret = self.ret.clone();
                 let tv = match v {
@@ -848,7 +1068,13 @@ impl<'a> Checker<'a> {
                     }
                     None => {
                         if ret != Type::Unit {
-                            return Err(Diag::ty(e.span, format!("this function must return a value of type `{}`", self.show(&ret))));
+                            return Err(Diag::ty(
+                                e.span,
+                                format!(
+                                    "this function must return a value of type `{}`",
+                                    self.show(&ret)
+                                ),
+                            ));
                         }
                         None
                     }
@@ -862,8 +1088,12 @@ impl<'a> Checker<'a> {
         if self.zonk(&a.ty) == Type::Never {
             return Ok(b.ty.clone());
         }
-        self.coerce(&b.ty, &a.ty, span)
-            .map_err(|d| Diag::ty(d.span, format!("`if` and `else` have incompatible types: {}", d.msg)))?;
+        self.coerce(&b.ty, &a.ty, span).map_err(|d| {
+            Diag::ty(
+                d.span,
+                format!("`if` and `else` have incompatible types: {}", d.msg),
+            )
+        })?;
         Ok(a.ty.clone())
     }
 
@@ -871,7 +1101,11 @@ impl<'a> Checker<'a> {
         let mut pieces = Vec::new();
         for p in parts {
             match p {
-                ast::StrPart::Lit(s) => pieces.push(TExpr { kind: TK::Str(s.clone()), ty: Type::Str, span }),
+                ast::StrPart::Lit(s) => pieces.push(TExpr {
+                    kind: TK::Str(s.clone()),
+                    ty: Type::Str,
+                    span,
+                }),
                 ast::StrPart::Expr(e) => {
                     let t = self.check_expr(e, None)?;
                     pieces.push(self.to_string_expr(t)?);
@@ -882,7 +1116,11 @@ impl<'a> Checker<'a> {
         let mut acc = it.next().unwrap();
         for p in it {
             let f = self.prelude_fn("str_concat").expect("prelude str_concat");
-            acc = TExpr { kind: TK::Call(f, vec![], vec![acc, p]), ty: Type::Str, span };
+            acc = TExpr {
+                kind: TK::Call(f, vec![], vec![acc, p]),
+                ty: Type::Str,
+                span,
+            };
         }
         Ok(acc)
     }
@@ -895,18 +1133,35 @@ impl<'a> Checker<'a> {
             Type::Float => "float_to_string",
             Type::Bool => "bool_to_string",
             ty => {
-                return Err(Diag::ty(span, format!("cannot interpolate a value of type `{}`", self.show(&ty)))
-                    .help("only String, Int, Float and Bool can be interpolated; convert the value first"));
+                return Err(Diag::ty(
+                    span,
+                    format!("cannot interpolate a value of type `{}`", self.show(&ty)),
+                )
+                .help(
+                    "only String, Int, Float and Bool can be interpolated; convert the value first",
+                ));
             }
         };
         let f = self.prelude_fn(f).unwrap();
-        Ok(TExpr { kind: TK::Call(f, vec![], vec![t]), ty: Type::Str, span })
+        Ok(TExpr {
+            kind: TK::Call(f, vec![], vec![t]),
+            ty: Type::Str,
+            span,
+        })
     }
 
     pub fn binary(&mut self, op: BinOp, a: TExpr, b: TExpr, span: Span) -> Result<TExpr> {
         let (ta, tb) = (self.zonk(&a.ty), self.zonk(&b.ty));
         let err = |this: &Self, extra: Option<&str>| {
-            let mut d = Diag::ty(span, format!("cannot apply `{}` to `{}` and `{}`", op.symbol(), this.show(&ta), this.show(&tb)));
+            let mut d = Diag::ty(
+                span,
+                format!(
+                    "cannot apply `{}` to `{}` and `{}`",
+                    op.symbol(),
+                    this.show(&ta),
+                    this.show(&tb)
+                ),
+            );
             if let Some(h) = extra {
                 d = d.help(h);
             }
@@ -914,42 +1169,80 @@ impl<'a> Checker<'a> {
         };
         if ta != tb && ta != Type::Never && tb != Type::Never {
             let help = match (&ta, &tb) {
-                (Type::Str, Type::Int | Type::Float | Type::Bool) | (Type::Int | Type::Float | Type::Bool, Type::Str) => {
+                (Type::Str, Type::Int | Type::Float | Type::Bool)
+                | (Type::Int | Type::Float | Type::Bool, Type::Str) => {
                     Some("convert explicitly with `.to_string()`, or use interpolation: \"{a}{b}\"")
                 }
-                (Type::Int, Type::Float) | (Type::Float, Type::Int) => Some("Int and Float do not mix implicitly; use `.to_float()` or `.to_int()`"),
+                (Type::Int, Type::Float) | (Type::Float, Type::Int) => {
+                    Some("Int and Float do not mix implicitly; use `.to_float()` or `.to_int()`")
+                }
                 _ => None,
             };
             return err(self, help);
         }
-        let t = if ta == Type::Never { tb.clone() } else { ta.clone() };
+        let t = if ta == Type::Never {
+            tb.clone()
+        } else {
+            ta.clone()
+        };
         use BinOp::*;
         let ty = match op {
             Add if t == Type::Str => {
                 let f = self.prelude_fn("str_concat").unwrap();
-                return Ok(TExpr { kind: TK::Call(f, vec![], vec![a, b]), ty: Type::Str, span });
+                return Ok(TExpr {
+                    kind: TK::Call(f, vec![], vec![a, b]),
+                    ty: Type::Str,
+                    span,
+                });
             }
             Add | Sub | Mul | Div | Rem if matches!(t, Type::Int | Type::Float) => t.clone(),
             Lt | Le | Gt | Ge if matches!(t, Type::Int | Type::Float) => Type::Bool,
             Eq | Ne if t == Type::Str => {
                 let f = self.prelude_fn("str_eq").unwrap();
-                let call = TExpr { kind: TK::Call(f, vec![], vec![a, b]), ty: Type::Bool, span };
-                return Ok(if op == Ne { TExpr { kind: TK::Not(Box::new(call)), ty: Type::Bool, span } } else { call });
+                let call = TExpr {
+                    kind: TK::Call(f, vec![], vec![a, b]),
+                    ty: Type::Bool,
+                    span,
+                };
+                return Ok(if op == Ne {
+                    TExpr {
+                        kind: TK::Not(Box::new(call)),
+                        ty: Type::Bool,
+                        span,
+                    }
+                } else {
+                    call
+                });
             }
             Eq | Ne if matches!(t, Type::Int | Type::Float | Type::Bool) => Type::Bool,
-            Eq | Ne if matches!(&t, Type::Adt(id, _) if self.adts[*id].variants().iter().all(|v| v.1.is_empty()) && !self.adts[*id].variants().is_empty()) => Type::Bool,
+            Eq | Ne if matches!(&t, Type::Adt(id, _) if self.adts[*id].variants().iter().all(|v| v.1.is_empty()) && !self.adts[*id].variants().is_empty()) => {
+                Type::Bool
+            }
             Eq | Ne => {
-                return err(self, Some("`==` works on Int, Float, Bool, String and enums without payloads; use `match` for other values"));
+                return err(
+                    self,
+                    Some(
+                        "`==` works on Int, Float, Bool, String and enums without payloads; use `match` for other values",
+                    ),
+                );
             }
             And | Or if t == Type::Bool => Type::Bool,
             _ => return err(self, None),
         };
-        Ok(TExpr { kind: TK::Bin(op, Box::new(a), Box::new(b)), ty, span })
+        Ok(TExpr {
+            kind: TK::Bin(op, Box::new(a), Box::new(b)),
+            ty,
+            span,
+        })
     }
 
     fn check_ident(&mut self, name: &str, span: Span, expected: Option<&Type>) -> Result<TExpr> {
         if let Some((id, _)) = self.lookup_local(name) {
-            return Ok(TExpr { kind: TK::Local(id), ty: self.locals[id].ty.clone(), span });
+            return Ok(TExpr {
+                kind: TK::Local(id),
+                ty: self.locals[id].ty.clone(),
+                span,
+            });
         }
         if self.ui.is_some()
             && let Some(t) = self.ui_ident(name, span)?
@@ -963,8 +1256,11 @@ impl<'a> Checker<'a> {
         if self.fetch_hidden.iter().flatten().any(|(n, ..)| n == name) {
             d = d.help("`fetch` arms run after the handler has returned, so they cannot use its local values; store the value in component state first");
         } else if matches!(self.scopes[self.file].get(name), Some(Sym::Fn(_))) {
-            d = d.help(format!("`{name}` is a function; call it with `{name}(...)`"));
-        } else if let Some(s) = suggest(name, self.visible_value_names().iter().map(|s| s.as_str())) {
+            d = d.help(format!(
+                "`{name}` is a function; call it with `{name}(...)`"
+            ));
+        } else if let Some(s) = suggest(name, self.visible_value_names().iter().map(|s| s.as_str()))
+        {
             d = d.help(format!("did you mean `{s}`?"));
         }
         Err(d)
@@ -979,34 +1275,82 @@ impl<'a> Checker<'a> {
         let (Type::Adt(a, targs), Type::Adt(r, rargs)) = (&vt, &ret) else {
             return Err(match vt {
                 Type::Adt(a, _) if a == res || a == opt => self.try_context_error(&vt, &ret, span),
-                _ => Diag::ty(inner.span, format!("`?` applies to `Result` or optional values, not `{}`", self.show(&vt))),
+                _ => Diag::ty(
+                    inner.span,
+                    format!(
+                        "`?` applies to `Result` or optional values, not `{}`",
+                        self.show(&vt)
+                    ),
+                ),
             });
         };
         if a != r || (*a != res && *a != opt) {
             return Err(self.try_context_error(&vt, &ret, span));
         }
         if *a == res && !self.unify(&targs[1], &rargs[1]) {
-            return Err(Diag::ty(span, format!("`?` cannot return error `{}` from a function returning `{}`", self.show(&targs[1]), self.show(&ret)))
-                .help("convert the error with `match` first"));
+            return Err(Diag::ty(
+                span,
+                format!(
+                    "`?` cannot return error `{}` from a function returning `{}`",
+                    self.show(&targs[1]),
+                    self.show(&ret)
+                ),
+            )
+            .help("convert the error with `match` first"));
         }
         let mk = |kind, ty| TExpr { kind, ty, span };
         self.local_scopes.push(Vec::new());
         let ok = self.bind("$ok", targs[0].clone(), false);
-        let fail = if *a == res { vec![self.bind("$err", targs[1].clone(), false)] } else { vec![] };
+        let fail = if *a == res {
+            vec![self.bind("$err", targs[1].clone(), false)]
+        } else {
+            vec![]
+        };
         self.local_scopes.pop();
-        let fail_args = fail.iter().map(|&l| mk(TK::Local(l), self.locals[l].ty.clone())).collect();
-        let early = mk(TK::Return(Some(Box::new(mk(TK::Variant(*a, rargs.clone(), 1, fail_args), ret.clone())))), Type::Never);
+        let fail_args = fail
+            .iter()
+            .map(|&l| mk(TK::Local(l), self.locals[l].ty.clone()))
+            .collect();
+        let early = mk(
+            TK::Return(Some(Box::new(mk(
+                TK::Variant(*a, rargs.clone(), 1, fail_args),
+                ret.clone(),
+            )))),
+            Type::Never,
+        );
         let arms = vec![
-            (TPat::Variant(*a, targs.clone(), 0, vec![TPat::Bind(ok)]), mk(TK::Local(ok), targs[0].clone())),
-            (TPat::Variant(*a, targs.clone(), 1, fail.into_iter().map(TPat::Bind).collect()), early),
+            (
+                TPat::Variant(*a, targs.clone(), 0, vec![TPat::Bind(ok)]),
+                mk(TK::Local(ok), targs[0].clone()),
+            ),
+            (
+                TPat::Variant(
+                    *a,
+                    targs.clone(),
+                    1,
+                    fail.into_iter().map(TPat::Bind).collect(),
+                ),
+                early,
+            ),
         ];
         Ok(mk(TK::Match(Box::new(v), arms), targs[0].clone()))
     }
 
     fn try_context_error(&self, vt: &Type, ret: &Type, span: Span) -> Diag {
-        let want = if matches!(vt, Type::Adt(a, _) if *a == self.prelude_adt("Result")) { "a `Result`" } else { "an optional" };
-        Diag::ty(span, format!("`?` on `{}` needs a function returning {want}, but this one returns `{}`", self.show(vt), self.show(ret)))
-            .help("handle both cases with `match` instead")
+        let want = if matches!(vt, Type::Adt(a, _) if *a == self.prelude_adt("Result")) {
+            "a `Result`"
+        } else {
+            "an optional"
+        };
+        Diag::ty(
+            span,
+            format!(
+                "`?` on `{}` needs a function returning {want}, but this one returns `{}`",
+                self.show(vt),
+                self.show(ret)
+            ),
+        )
+        .help("handle both cases with `match` instead")
     }
 
     fn qualified_variant(&self, enum_name: &str, variant: &str) -> Option<(usize, usize)> {
@@ -1014,7 +1358,11 @@ impl<'a> Checker<'a> {
             return None;
         }
         match self.scopes[self.file].get(enum_name) {
-            Some(Sym::Adt(id)) => self.adts[*id].variants().iter().position(|(n, _)| n == variant).map(|v| (*id, v)),
+            Some(Sym::Adt(id)) => self.adts[*id]
+                .variants()
+                .iter()
+                .position(|(n, _)| n == variant)
+                .map(|v| (*id, v)),
             _ => None,
         }
     }
@@ -1027,7 +1375,10 @@ impl<'a> Checker<'a> {
         let mut found: Vec<(usize, usize)> = Vec::new();
         for sym in self.scopes[self.file].values() {
             if let Sym::Adt(id) = sym
-                && let Some(v) = self.adts[*id].variants().iter().position(|(n, _)| n == name)
+                && let Some(v) = self.adts[*id]
+                    .variants()
+                    .iter()
+                    .position(|(n, _)| n == name)
             {
                 found.push((*id, v));
             }
@@ -1035,21 +1386,47 @@ impl<'a> Checker<'a> {
         match found.len() {
             0 => Ok(None),
             1 => Ok(Some(found[0])),
-            _ => Err(Diag::ty(span, format!("`{name}` is a variant of several enums"))
-                .help(format!("qualify it, e.g. `{}.{name}`", self.adts[found[0].0].name))),
+            _ => Err(
+                Diag::ty(span, format!("`{name}` is a variant of several enums")).help(format!(
+                    "qualify it, e.g. `{}.{name}`",
+                    self.adts[found[0].0].name
+                )),
+            ),
         }
     }
 
-    fn check_variant(&mut self, adt: usize, v: usize, args: &[ast::Arg], span: Span, expected: Option<&Type>) -> Result<TExpr> {
-        let targs: Vec<Type> = (0..self.adts[adt].generics.len()).map(|_| self.fresh()).collect();
+    fn check_variant(
+        &mut self,
+        adt: usize,
+        v: usize,
+        args: &[ast::Arg],
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Result<TExpr> {
+        let targs: Vec<Type> = (0..self.adts[adt].generics.len())
+            .map(|_| self.fresh())
+            .collect();
         let ty = Type::Adt(adt, targs.clone());
         if let Some(exp) = expected {
             let _ = self.unify(&ty, exp);
         }
-        let map: Vec<(String, Type)> = self.adts[adt].generics.iter().cloned().zip(targs.clone()).collect();
+        let map: Vec<(String, Type)> = self.adts[adt]
+            .generics
+            .iter()
+            .cloned()
+            .zip(targs.clone())
+            .collect();
         let (vname, ftys) = self.adts[adt].variants()[v].clone();
         if args.len() != ftys.len() {
-            let what = if ftys.is_empty() { format!("`{vname}` takes no values") } else { format!("`{vname}` takes {} value(s), found {}", ftys.len(), args.len()) };
+            let what = if ftys.is_empty() {
+                format!("`{vname}` takes no values")
+            } else {
+                format!(
+                    "`{vname}` takes {} value(s), found {}",
+                    ftys.len(),
+                    args.len()
+                )
+            };
             return Err(Diag::ty(span, what));
         }
         let mut targs_out = Vec::new();
@@ -1063,21 +1440,49 @@ impl<'a> Checker<'a> {
             targs_out.push(ta);
         }
         self.pending.push((span, ty.clone()));
-        Ok(TExpr { kind: TK::Variant(adt, targs, v, targs_out), ty, span })
+        Ok(TExpr {
+            kind: TK::Variant(adt, targs, v, targs_out),
+            ty,
+            span,
+        })
     }
 
-    fn check_struct_lit(&mut self, name: &ast::Ident, fields: &[(ast::Ident, ast::Expr)], base: Option<&ast::Expr>, span: Span, expected: Option<&Type>) -> Result<TExpr> {
+    fn check_struct_lit(
+        &mut self,
+        name: &ast::Ident,
+        fields: &[(ast::Ident, ast::Expr)],
+        base: Option<&ast::Expr>,
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Result<TExpr> {
         let id = match self.scopes[self.file].get(&name.name) {
             Some(Sym::Adt(id)) if matches!(self.adts[*id].kind, AdtKind::Struct(_)) => *id,
-            Some(Sym::Adt(_)) => return Err(Diag::ty(name.span, format!("`{}` is an enum, not a struct", name.name))),
-            _ => return Err(Diag::ty(name.span, format!("unknown struct `{}`", name.name))),
+            Some(Sym::Adt(_)) => {
+                return Err(Diag::ty(
+                    name.span,
+                    format!("`{}` is an enum, not a struct", name.name),
+                ));
+            }
+            _ => {
+                return Err(Diag::ty(
+                    name.span,
+                    format!("unknown struct `{}`", name.name),
+                ));
+            }
         };
-        let targs: Vec<Type> = (0..self.adts[id].generics.len()).map(|_| self.fresh()).collect();
+        let targs: Vec<Type> = (0..self.adts[id].generics.len())
+            .map(|_| self.fresh())
+            .collect();
         let ty = Type::Adt(id, targs.clone());
         if let Some(exp) = expected {
             let _ = self.unify(&ty, exp);
         }
-        let map: Vec<(String, Type)> = self.adts[id].generics.iter().cloned().zip(targs.clone()).collect();
+        let map: Vec<(String, Type)> = self.adts[id]
+            .generics
+            .iter()
+            .cloned()
+            .zip(targs.clone())
+            .collect();
         let decl = self.adts[id].fields().to_vec();
         let mut given: Vec<Option<TExpr>> = vec![None; decl.len()];
         for (f, e) in fields {
@@ -1098,29 +1503,80 @@ impl<'a> Checker<'a> {
         }
         self.pending.push((span, ty.clone()));
         let Some(base) = base else {
-            let missing: Vec<&str> = decl.iter().zip(&given).filter(|(_, g)| g.is_none()).map(|((n, _), _)| n.as_str()).collect();
+            let missing: Vec<&str> = decl
+                .iter()
+                .zip(&given)
+                .filter(|(_, g)| g.is_none())
+                .map(|((n, _), _)| n.as_str())
+                .collect();
             if !missing.is_empty() {
-                return Err(Diag::ty(span, format!("missing field(s) in `{}`: {}", name.name, missing.join(", "))));
+                return Err(Diag::ty(
+                    span,
+                    format!(
+                        "missing field(s) in `{}`: {}",
+                        name.name,
+                        missing.join(", ")
+                    ),
+                ));
             }
-            return Ok(TExpr { kind: TK::StructNew(id, targs, given.into_iter().map(Option::unwrap).collect()), ty, span });
+            return Ok(TExpr {
+                kind: TK::StructNew(id, targs, given.into_iter().map(Option::unwrap).collect()),
+                ty,
+                span,
+            });
         };
         // `Name { ..base, f: v }` evaluates `base` once into a temporary.
         let tb = self.check_expr(base, Some(&ty))?;
         self.coerce(&tb.ty, &ty, base.span)?;
         let tmp = self.bind("$base", ty.clone(), false);
-        let vals = given.into_iter().enumerate().map(|(i, g)| g.unwrap_or_else(|| {
-            let ft = decl[i].1.subst(&map);
-            TExpr { kind: TK::Field(Box::new(TExpr { kind: TK::Local(tmp), ty: ty.clone(), span }), i), ty: ft, span }
-        })).collect();
-        let new = TExpr { kind: TK::StructNew(id, targs, vals), ty: ty.clone(), span };
-        Ok(TExpr { kind: TK::Block(vec![TStmt::Let(tmp, tb)], Some(Box::new(new))), ty, span })
+        let vals = given
+            .into_iter()
+            .enumerate()
+            .map(|(i, g)| {
+                g.unwrap_or_else(|| {
+                    let ft = decl[i].1.subst(&map);
+                    TExpr {
+                        kind: TK::Field(
+                            Box::new(TExpr {
+                                kind: TK::Local(tmp),
+                                ty: ty.clone(),
+                                span,
+                            }),
+                            i,
+                        ),
+                        ty: ft,
+                        span,
+                    }
+                })
+            })
+            .collect();
+        let new = TExpr {
+            kind: TK::StructNew(id, targs, vals),
+            ty: ty.clone(),
+            span,
+        };
+        Ok(TExpr {
+            kind: TK::Block(vec![TStmt::Let(tmp, tb)], Some(Box::new(new))),
+            ty,
+            span,
+        })
     }
 
-    fn check_call(&mut self, callee: &ast::Ident, type_args: &[ast::TypeExpr], args: &[ast::Arg], span: Span, expected: Option<&Type>) -> Result<TExpr> {
+    fn check_call(
+        &mut self,
+        callee: &ast::Ident,
+        type_args: &[ast::TypeExpr],
+        args: &[ast::Arg],
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Result<TExpr> {
         let name = callee.name.as_str();
         if name.starts_with("__") {
             if self.file != 0 {
-                return Err(Diag::ty(callee.span, format!("`{name}` is an internal standard-library intrinsic")));
+                return Err(Diag::ty(
+                    callee.span,
+                    format!("`{name}` is an internal standard-library intrinsic"),
+                ));
             }
             if let Some(&(iname, params, ret)) = INTRINSICS.iter().find(|i| i.0 == name) {
                 return self.check_intrinsic(iname, params, ret, args, span);
@@ -1128,20 +1584,42 @@ impl<'a> Checker<'a> {
         }
         match name {
             "navigate" if self.ctx != Ctx::Handler => {
-                return Err(Diag::ty(callee.span, "`navigate` can only be called from an event handler"));
+                return Err(Diag::ty(
+                    callee.span,
+                    "`navigate` can only be called from an event handler",
+                ));
             }
             "assert" => {
                 if args.len() != 2 {
-                    return Err(Diag::ty(span, "`assert` takes a Bool condition and a String message"));
+                    return Err(Diag::ty(
+                        span,
+                        "`assert` takes a Bool condition and a String message",
+                    ));
                 }
                 let c = self.check_expr(&args[0].value, Some(&Type::Bool))?;
                 self.coerce(&c.ty, &Type::Bool, args[0].value.span)?;
                 let m = self.check_expr(&args[1].value, Some(&Type::Str))?;
                 self.coerce(&m.ty, &Type::Str, args[1].value.span)?;
-                let panic = TExpr { kind: TK::Intrinsic("__panic", vec![], vec![m]), ty: Type::Never, span };
-                let not = TExpr { kind: TK::Not(Box::new(c)), ty: Type::Bool, span };
-                let then = TExpr { kind: TK::Block(vec![TStmt::Expr(panic)], None), ty: Type::Never, span };
-                return Ok(TExpr { kind: TK::If(Box::new(not), Box::new(then), None), ty: Type::Unit, span });
+                let panic = TExpr {
+                    kind: TK::Intrinsic("__panic", vec![], vec![m]),
+                    ty: Type::Never,
+                    span,
+                };
+                let not = TExpr {
+                    kind: TK::Not(Box::new(c)),
+                    ty: Type::Bool,
+                    span,
+                };
+                let then = TExpr {
+                    kind: TK::Block(vec![TStmt::Expr(panic)], None),
+                    ty: Type::Never,
+                    span,
+                };
+                return Ok(TExpr {
+                    kind: TK::If(Box::new(not), Box::new(then), None),
+                    ty: Type::Unit,
+                    span,
+                });
             }
             "navigate" | "print" => {
                 if args.len() != 1 {
@@ -1149,23 +1627,53 @@ impl<'a> Checker<'a> {
                 }
                 let a = self.check_expr(&args[0].value, Some(&Type::Str))?;
                 self.coerce(&a.ty, &Type::Str, args[0].value.span)?;
-                let iname = if name == "print" { "__print" } else { "__navigate" };
-                return Ok(TExpr { kind: TK::Intrinsic(iname, vec![], vec![a]), ty: Type::Unit, span });
+                let iname = if name == "print" {
+                    "__print"
+                } else {
+                    "__navigate"
+                };
+                return Ok(TExpr {
+                    kind: TK::Intrinsic(iname, vec![], vec![a]),
+                    ty: Type::Unit,
+                    span,
+                });
             }
             _ => {}
         }
         match self.scopes[self.file].get(name).copied() {
-            Some(Sym::Fn(id)) => self.call_fn(id, type_args, args.iter().map(|a| a.value.clone()).collect(), args, span, None),
-            Some(Sym::Comp(_)) => Err(Diag::ty(callee.span, format!("`{name}` is a component and can only be used inside a view"))),
-            Some(Sym::Adt(id)) if matches!(self.adts[id].kind, AdtKind::Struct(_)) => Err(Diag::ty(callee.span, format!("`{name}` is a struct"))
-                .help(format!("construct it with `{name} {{ field: value }}`"))),
+            Some(Sym::Fn(id)) => self.call_fn(
+                id,
+                type_args,
+                args.iter().map(|a| a.value.clone()).collect(),
+                args,
+                span,
+                None,
+            ),
+            Some(Sym::Comp(_)) => Err(Diag::ty(
+                callee.span,
+                format!("`{name}` is a component and can only be used inside a view"),
+            )),
+            Some(Sym::Adt(id)) if matches!(self.adts[id].kind, AdtKind::Struct(_)) => {
+                Err(Diag::ty(callee.span, format!("`{name}` is a struct"))
+                    .help(format!("construct it with `{name} {{ field: value }}`")))
+            }
             _ => {
                 if let Some((adt, v)) = self.unqualified_variant(name, callee.span)? {
                     return self.check_variant(adt, v, args, span, expected);
                 }
-                let cands: Vec<String> = self.scopes[self.file].iter().filter(|(_, s)| matches!(s, Sym::Fn(_))).map(|(n, _)| n.clone()).collect();
+                let cands: Vec<String> = self.scopes[self.file]
+                    .iter()
+                    .filter(|(_, s)| matches!(s, Sym::Fn(_)))
+                    .map(|(n, _)| n.clone())
+                    .collect();
                 let mut d = Diag::ty(callee.span, format!("unknown function `{name}`"));
-                if let Some(s) = suggest(name, cands.iter().map(|s| s.as_str()).chain(["print", "navigate", "assert"])) {
+                if let Some(s) = suggest(
+                    name,
+                    cands
+                        .iter()
+                        .map(|s| s.as_str())
+                        .chain(["print", "navigate", "assert"]),
+                ) {
                     d = d.help(format!("did you mean `{s}`?"));
                 }
                 Err(d)
@@ -1173,7 +1681,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_intrinsic(&mut self, name: &'static str, params: &[&str], ret: &str, args: &[ast::Arg], span: Span) -> Result<TExpr> {
+    fn check_intrinsic(
+        &mut self,
+        name: &'static str,
+        params: &[&str],
+        ret: &str,
+        args: &[ast::Arg],
+        span: Span,
+    ) -> Result<TExpr> {
         let t = self.fresh();
         let parse = |s: &str| match s {
             "Int" => Type::Int,
@@ -1187,7 +1702,10 @@ impl<'a> Checker<'a> {
             _ => unreachable!(),
         };
         if args.len() != params.len() {
-            return Err(Diag::ty(span, format!("`{name}` takes {} arguments", params.len())));
+            return Err(Diag::ty(
+                span,
+                format!("`{name}` takes {} arguments", params.len()),
+            ));
         }
         let mut targs = Vec::new();
         for (a, p) in args.iter().zip(params) {
@@ -1197,11 +1715,23 @@ impl<'a> Checker<'a> {
             targs.push(ta);
         }
         let generic = params.iter().any(|p| p.contains('T')) || ret.contains('T');
-        Ok(TExpr { kind: TK::Intrinsic(name, if generic { vec![t.clone()] } else { vec![] }, targs), ty: parse(ret), span })
+        Ok(TExpr {
+            kind: TK::Intrinsic(name, if generic { vec![t.clone()] } else { vec![] }, targs),
+            ty: parse(ret),
+            span,
+        })
     }
 
     /// Checks a call to function `id`. `recv` is an already-checked first argument (method syntax).
-    fn call_fn(&mut self, id: usize, type_args: &[ast::TypeExpr], args: Vec<ast::Expr>, named: &[ast::Arg], span: Span, recv: Option<TExpr>) -> Result<TExpr> {
+    fn call_fn(
+        &mut self,
+        id: usize,
+        type_args: &[ast::TypeExpr],
+        args: Vec<ast::Expr>,
+        named: &[ast::Arg],
+        span: Span,
+        recv: Option<TExpr>,
+    ) -> Result<TExpr> {
         if let Some(n) = named.iter().find_map(|a| a.name.as_ref()) {
             return Err(Diag::ty(n.span, "function arguments are positional"));
         }
@@ -1210,16 +1740,34 @@ impl<'a> Checker<'a> {
             (0..sig_generics.len()).map(|_| self.fresh()).collect()
         } else {
             if type_args.len() != sig_generics.len() {
-                return Err(Diag::ty(span, format!("`{}` expects {} type argument(s)", self.sigs[id].name, sig_generics.len())));
+                return Err(Diag::ty(
+                    span,
+                    format!(
+                        "`{}` expects {} type argument(s)",
+                        self.sigs[id].name,
+                        sig_generics.len()
+                    ),
+                ));
             }
-            type_args.iter().map(|t| self.resolve_type(t)).collect::<Result<_>>()?
+            type_args
+                .iter()
+                .map(|t| self.resolve_type(t))
+                .collect::<Result<_>>()?
         };
         let map: Vec<(String, Type)> = sig_generics.into_iter().zip(targs.clone()).collect();
         let params: Vec<Type> = self.sigs[id].params.iter().map(|p| p.subst(&map)).collect();
         let ret = self.sigs[id].ret.subst(&map);
         let given = args.len() + recv.is_some() as usize;
         if given != params.len() {
-            return Err(Diag::ty(span, format!("`{}` takes {} argument(s), but {} were given", self.sigs[id].name, params.len(), given)));
+            return Err(Diag::ty(
+                span,
+                format!(
+                    "`{}` takes {} argument(s), but {} were given",
+                    self.sigs[id].name,
+                    params.len(),
+                    given
+                ),
+            ));
         }
         let mut targs_out = Vec::new();
         let mut pit = params.iter();
@@ -1236,10 +1784,22 @@ impl<'a> Checker<'a> {
         for t in &targs {
             self.pending.push((span, t.clone()));
         }
-        Ok(TExpr { kind: TK::Call(id, targs, targs_out), ty: ret, span })
+        Ok(TExpr {
+            kind: TK::Call(id, targs, targs_out),
+            ty: ret,
+            span,
+        })
     }
 
-    fn check_method(&mut self, recv: &ast::Expr, name: &ast::Ident, type_args: &[ast::TypeExpr], args: &[ast::Arg], span: Span, expected: Option<&Type>) -> Result<TExpr> {
+    fn check_method(
+        &mut self,
+        recv: &ast::Expr,
+        name: &ast::Ident,
+        type_args: &[ast::TypeExpr],
+        args: &[ast::Arg],
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Result<TExpr> {
         if let ExprKind::Ident(q) = &recv.kind
             && let Some((adt, v)) = self.qualified_variant(q, &name.name)
         {
@@ -1267,10 +1827,16 @@ impl<'a> Checker<'a> {
         if let Some(Sym::Fn(id)) = self.scopes[self.file].get(&name.name).copied() {
             return self.call_fn(id, type_args, args_e, args, span, Some(r));
         }
-        let mut d = Diag::ty(name.span, format!("no method `{}` on `{}`", name.name, self.show(&rt)));
+        let mut d = Diag::ty(
+            name.span,
+            format!("no method `{}` on `{}`", name.name, self.show(&rt)),
+        );
         if let Some(p) = prefix {
             let pre = format!("{p}_");
-            let methods: Vec<String> = self.scopes[0].keys().filter_map(|k| k.strip_prefix(&pre).map(str::to_string)).collect();
+            let methods: Vec<String> = self.scopes[0]
+                .keys()
+                .filter_map(|k| k.strip_prefix(&pre).map(str::to_string))
+                .collect();
             if let Some(s) = suggest(&name.name, methods.iter().map(|s| s.as_str())) {
                 d = d.help(format!("did you mean `{s}`?"));
             }
@@ -1282,7 +1848,15 @@ impl<'a> Checker<'a> {
 
     pub fn check_pat(&mut self, p: &ast::Pattern, ty: &Type) -> Result<TPat> {
         let ty = self.zonk(ty);
-        let mismatch = |this: &Self, what: &str| Err(Diag::ty(p.span, format!("{what} pattern cannot match a value of type `{}`", this.show(&ty))));
+        let mismatch = |this: &Self, what: &str| {
+            Err(Diag::ty(
+                p.span,
+                format!(
+                    "{what} pattern cannot match a value of type `{}`",
+                    this.show(&ty)
+                ),
+            ))
+        };
         Ok(match &p.kind {
             PatKind::Wild => TPat::Wild,
             PatKind::Bind(n) => TPat::Bind(self.bind(n, ty.clone(), false)),
@@ -1305,25 +1879,61 @@ impl<'a> Checker<'a> {
                 TPat::Bool(*b)
             }
             PatKind::Variant { qual, name, args } => {
-                let Type::Adt(adt, targs) = &ty else { return mismatch(self, &format!("variant `{}`", name.name)) };
+                let Type::Adt(adt, targs) = &ty else {
+                    return mismatch(self, &format!("variant `{}`", name.name));
+                };
                 if let Some(q) = qual
                     && q.name != self.adts[*adt].name
                 {
-                    return Err(Diag::ty(q.span, format!("expected a variant of `{}`, found `{}`", self.show(&ty), q.name)));
+                    return Err(Diag::ty(
+                        q.span,
+                        format!(
+                            "expected a variant of `{}`, found `{}`",
+                            self.show(&ty),
+                            q.name
+                        ),
+                    ));
                 }
-                let Some(v) = self.adts[*adt].variants().iter().position(|(n, _)| *n == name.name) else {
-                    let mut d = Diag::ty(name.span, format!("`{}` is not a variant of `{}`", name.name, self.show(&ty)));
-                    if let Some(s) = suggest(&name.name, self.adts[*adt].variants().iter().map(|(n, _)| n.as_str())) {
+                let Some(v) = self.adts[*adt]
+                    .variants()
+                    .iter()
+                    .position(|(n, _)| *n == name.name)
+                else {
+                    let mut d = Diag::ty(
+                        name.span,
+                        format!("`{}` is not a variant of `{}`", name.name, self.show(&ty)),
+                    );
+                    if let Some(s) = suggest(
+                        &name.name,
+                        self.adts[*adt].variants().iter().map(|(n, _)| n.as_str()),
+                    ) {
                         d = d.help(format!("did you mean `{s}`?"));
                     }
                     return Err(d);
                 };
-                let map: Vec<(String, Type)> = self.adts[*adt].generics.iter().cloned().zip(targs.clone()).collect();
+                let map: Vec<(String, Type)> = self.adts[*adt]
+                    .generics
+                    .iter()
+                    .cloned()
+                    .zip(targs.clone())
+                    .collect();
                 let ftys = self.adts[*adt].variants()[v].1.clone();
                 if ftys.len() != args.len() {
-                    return Err(Diag::ty(p.span, format!("`{}` has {} field(s), but the pattern has {}", name.name, ftys.len(), args.len())));
+                    return Err(Diag::ty(
+                        p.span,
+                        format!(
+                            "`{}` has {} field(s), but the pattern has {}",
+                            name.name,
+                            ftys.len(),
+                            args.len()
+                        ),
+                    ));
                 }
-                let sub = args.iter().zip(&ftys).map(|(a, ft)| self.check_pat(a, &ft.subst(&map))).collect::<Result<Vec<_>>>()?;
+                let sub = args
+                    .iter()
+                    .zip(&ftys)
+                    .map(|(a, ft)| self.check_pat(a, &ft.subst(&map)))
+                    .collect::<Result<Vec<_>>>()?;
                 TPat::Variant(*adt, targs.clone(), v, sub)
             }
         })
@@ -1332,8 +1942,11 @@ impl<'a> Checker<'a> {
     pub fn check_exhaustive(&self, ty: &Type, arms: &[(TPat, TExpr)], span: Span) -> Result<()> {
         let rows: Vec<Vec<&TPat>> = arms.iter().map(|(p, _)| vec![p]).collect();
         if let Some(w) = self.witness(&rows, std::slice::from_ref(ty)) {
-            return Err(Diag::ty(span, format!("non-exhaustive match: `{}` is not covered", w[0]))
-                .help("add an arm for it, or a `_ => ...` arm"));
+            return Err(Diag::ty(
+                span,
+                format!("non-exhaustive match: `{}` is not covered", w[0]),
+            )
+            .help("add an arm for it, or a `_ => ...` arm"));
         }
         Ok(())
     }
@@ -1347,8 +1960,19 @@ impl<'a> Checker<'a> {
         let ctors: Option<Vec<(String, Vec<Type>)>> = match &tys[0] {
             Type::Bool => Some(vec![("true".into(), vec![]), ("false".into(), vec![])]),
             Type::Adt(id, targs) if !self.adts[*id].variants().is_empty() => {
-                let map: Vec<(String, Type)> = self.adts[*id].generics.iter().cloned().zip(targs.clone()).collect();
-                Some(self.adts[*id].variants().iter().map(|(n, f)| (n.clone(), f.iter().map(|t| t.subst(&map)).collect())).collect())
+                let map: Vec<(String, Type)> = self.adts[*id]
+                    .generics
+                    .iter()
+                    .cloned()
+                    .zip(targs.clone())
+                    .collect();
+                Some(
+                    self.adts[*id]
+                        .variants()
+                        .iter()
+                        .map(|(n, f)| (n.clone(), f.iter().map(|t| t.subst(&map)).collect()))
+                        .collect(),
+                )
             }
             _ => None,
         };
@@ -1363,35 +1987,58 @@ impl<'a> Checker<'a> {
             if complete {
                 for (ci, (label, ftys)) in ctors.iter().enumerate() {
                     let wild = TPat::Wild;
-                    let spec: Vec<Vec<&TPat>> = rows.iter().filter_map(|r| {
-                        let mut out: Vec<&TPat> = match r[0] {
-                            TPat::Wild | TPat::Bind(_) => ftys.iter().map(|_| &wild).collect(),
-                            p if head_matches(p, ci, label) => match p {
-                                TPat::Variant(_, _, _, sub) => sub.iter().collect(),
-                                _ => vec![],
-                            },
-                            _ => return None,
-                        };
-                        out.extend_from_slice(&r[1..]);
-                        Some(out)
-                    }).collect();
-                    let tys2: Vec<Type> = ftys.iter().cloned().chain(tys[1..].iter().cloned()).collect();
+                    let spec: Vec<Vec<&TPat>> = rows
+                        .iter()
+                        .filter_map(|r| {
+                            let mut out: Vec<&TPat> = match r[0] {
+                                TPat::Wild | TPat::Bind(_) => ftys.iter().map(|_| &wild).collect(),
+                                p if head_matches(p, ci, label) => match p {
+                                    TPat::Variant(_, _, _, sub) => sub.iter().collect(),
+                                    _ => vec![],
+                                },
+                                _ => return None,
+                            };
+                            out.extend_from_slice(&r[1..]);
+                            Some(out)
+                        })
+                        .collect();
+                    let tys2: Vec<Type> = ftys
+                        .iter()
+                        .cloned()
+                        .chain(tys[1..].iter().cloned())
+                        .collect();
                     if let Some(w) = self.witness(&spec, &tys2) {
                         let (fields, rest) = w.split_at(ftys.len());
-                        let head = if fields.is_empty() { label.clone() } else { format!("{label}({})", fields.join(", ")) };
+                        let head = if fields.is_empty() {
+                            label.clone()
+                        } else {
+                            format!("{label}({})", fields.join(", "))
+                        };
                         return Some(std::iter::once(head).chain(rest.iter().cloned()).collect());
                     }
                 }
                 return None;
             }
         }
-        let default: Vec<Vec<&TPat>> = rows.iter().filter(|r| matches!(r[0], TPat::Wild | TPat::Bind(_))).map(|r| r[1..].to_vec()).collect();
+        let default: Vec<Vec<&TPat>> = rows
+            .iter()
+            .filter(|r| matches!(r[0], TPat::Wild | TPat::Bind(_)))
+            .map(|r| r[1..].to_vec())
+            .collect();
         let w = self.witness(&default, &tys[1..])?;
         let head = match &ctors {
             Some(ctors) => {
-                let (ci, (label, ftys)) = ctors.iter().enumerate().find(|(ci, (l, _))| !rows.iter().any(|r| head_matches(r[0], *ci, l))).unwrap();
+                let (ci, (label, ftys)) = ctors
+                    .iter()
+                    .enumerate()
+                    .find(|(ci, (l, _))| !rows.iter().any(|r| head_matches(r[0], *ci, l)))
+                    .unwrap();
                 let _ = ci;
-                if ftys.is_empty() { label.clone() } else { format!("{label}({})", vec!["_"; ftys.len()].join(", ")) }
+                if ftys.is_empty() {
+                    label.clone()
+                } else {
+                    format!("{label}({})", vec!["_"; ftys.len()].join(", "))
+                }
             }
             None => "_".into(),
         };
@@ -1444,12 +2091,20 @@ pub fn suggest<'b>(name: &str, cands: impl Iterator<Item = &'b str>) -> Option<S
         for (i, ca) in a.chars().enumerate() {
             let mut cur = vec![i + 1];
             for (j, cb) in b.iter().enumerate() {
-                cur.push((prev[j] + (ca != *cb) as usize).min(prev[j + 1] + 1).min(cur[j] + 1));
+                cur.push(
+                    (prev[j] + (ca != *cb) as usize)
+                        .min(prev[j + 1] + 1)
+                        .min(cur[j] + 1),
+                );
             }
             prev = cur;
         }
         prev[b.len()]
     }
-    cands.filter(|c| *c != name).map(|c| (dist(name, c), c)).filter(|(d, c)| *d <= 2.max(c.len() / 3) && *d < name.len().max(2))
-        .min_by_key(|(d, _)| *d).map(|(_, c)| c.to_string())
+    cands
+        .filter(|c| *c != name)
+        .map(|c| (dist(name, c), c))
+        .filter(|(d, c)| *d <= 2.max(c.len() / 3) && *d < name.len().max(2))
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, c)| c.to_string())
 }

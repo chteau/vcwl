@@ -1,6 +1,6 @@
 # 4. DOM access through a command buffer
 
-Status: accepted
+Status: accepted; the commands are applied by the renderer since [ADR 10](0010-canvas-renderer.md)
 
 ## Context
 

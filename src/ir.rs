@@ -22,10 +22,19 @@ pub enum Storage {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TypeDef {
-    Struct { fields: Vec<(Storage, bool)>, sup: Option<u32>, is_final: bool },
-    Array { elem: Storage },
+    Struct {
+        fields: Vec<(Storage, bool)>,
+        sup: Option<u32>,
+        is_final: bool,
+    },
+    Array {
+        elem: Storage,
+    },
     /// A function type inside the GC rec group (for typed function references).
-    Func { params: Vec<VT>, result: Option<VT> },
+    Func {
+        params: Vec<VT>,
+        result: Option<VT>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -38,9 +47,48 @@ pub type Label = u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op {
-    I32Add, I32Sub, I32Mul, I32And, I32Or, I32Xor, I32Shl, I32ShrU, I32Eq, I32Ne, I32LtS, I32LtU, I32GtS, I32LeS, I32GeS, I32GeU,
-    I64Add, I64Sub, I64Mul, I64DivS, I64RemS, I64And, I64Or, I64Shl, I64ShrU, I64Eq, I64Ne, I64LtS, I64LeS, I64GtS, I64GeS, I64GeU,
-    F64Add, F64Sub, F64Mul, F64Div, F64Eq, F64Ne, F64Lt, F64Le, F64Gt, F64Ge,
+    I32Add,
+    I32Sub,
+    I32Mul,
+    I32And,
+    I32Or,
+    I32Xor,
+    I32Shl,
+    I32ShrU,
+    I32Eq,
+    I32Ne,
+    I32LtS,
+    I32LtU,
+    I32GtS,
+    I32LeS,
+    I32GeS,
+    I32GeU,
+    I64Add,
+    I64Sub,
+    I64Mul,
+    I64DivS,
+    I64RemS,
+    I64And,
+    I64Or,
+    I64Shl,
+    I64ShrU,
+    I64Eq,
+    I64Ne,
+    I64LtS,
+    I64LeS,
+    I64GtS,
+    I64GeS,
+    I64GeU,
+    F64Add,
+    F64Sub,
+    F64Mul,
+    F64Div,
+    F64Eq,
+    F64Ne,
+    F64Lt,
+    F64Le,
+    F64Gt,
+    F64Ge,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,7 +221,11 @@ impl Module {
         if let Some(i) = self.imports.iter().position(|im| im.name == name) {
             return FuncRef::Import(i as u32);
         }
-        self.imports.push(Import { name, params, result });
+        self.imports.push(Import {
+            name,
+            params,
+            result,
+        });
         FuncRef::Import(self.imports.len() as u32 - 1)
     }
 }

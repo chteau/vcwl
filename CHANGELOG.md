@@ -4,6 +4,24 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 7 — our own renderer instead of the DOM
+
+- Apps no longer use the browser DOM. `render.wasm`, a dependency-free Rust crate (`render/`),
+  keeps the element tree, parses the app's styles, computes styles with inheritance and built-in
+  element defaults, lays out (block flow, inline text wrapping, flexbox, grid, stacks,
+  absolute/fixed/relative positioning, scroll containers), paints to a `<canvas>` through a display
+  list, and handles input: hit testing, hover/active/focus states, Tab order and visible focus,
+  clicks and double clicks, keyboard activation, text fields with caret, selection, word movement,
+  clipboard copy/cut/paste, checkboxes, select pop-ups, links, wheel/keyboard/touch scrolling.
+- Style, layout and paint are incremental: commands mark changed nodes, unchanged subtrees keep
+  cached layout, off-screen subtrees are not painted (swap of 2 of 1000 rows: 4.6 ms → 1.0 ms).
+- `index.html` contains only metadata and one script; styles and configuration travel in custom
+  sections of `app.wasm`; the CSP drops `style-src`. `app.css` is no longer produced.
+- Browser tests read the renderer's tree (`window.vcwl.tree()`) and use real mouse and keyboard
+  input; 36 native renderer tests.
+- Regression: no accessibility tree, IME, find-in-page or text selection outside fields
+  (see `docs/limitations.md`). `render.wasm` adds 107 KB gzip.
+
 ### Milestone 6 — networking and tooling
 
 - The `?` operator for `Result` and optional values.

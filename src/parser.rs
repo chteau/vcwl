@@ -5,8 +5,26 @@ use crate::diag::{Diag, Result, Span};
 use crate::lexer::{StrPiece, Tok, Token};
 
 const KEYWORDS: &[&str] = &[
-    "fn", "let", "var", "if", "else", "while", "for", "in", "return", "match", "struct", "enum", "true",
-    "false", "import", "export", "app", "component", "break", "continue",
+    "fn",
+    "let",
+    "var",
+    "if",
+    "else",
+    "while",
+    "for",
+    "in",
+    "return",
+    "match",
+    "struct",
+    "enum",
+    "true",
+    "false",
+    "import",
+    "export",
+    "app",
+    "component",
+    "break",
+    "continue",
 ];
 
 pub struct Parser<'a> {
@@ -18,12 +36,20 @@ pub struct Parser<'a> {
 }
 
 pub fn parse_file(path: &str, toks: &[Token], next_id: &mut u32) -> Result<File> {
-    let mut p = Parser { toks, pos: 0, next_id, no_struct: false };
+    let mut p = Parser {
+        toks,
+        pos: 0,
+        next_id,
+        no_struct: false,
+    };
     let mut items = Vec::new();
     while !p.at_eof() {
         items.push(p.item()?);
     }
-    Ok(File { path: path.to_string(), items })
+    Ok(File {
+        path: path.to_string(),
+        items,
+    })
 }
 
 impl<'a> Parser<'a> {
@@ -87,7 +113,10 @@ impl<'a> Parser<'a> {
         }
     }
     fn err<T>(&self, expected: &str) -> Result<T> {
-        Err(Diag::syntax(self.span(), format!("expected {expected}, found {}", self.describe())))
+        Err(Diag::syntax(
+            self.span(),
+            format!("expected {expected}, found {}", self.describe()),
+        ))
     }
     fn expect(&mut self, p: &str) -> Result<Span> {
         if self.is(p) {
@@ -109,21 +138,31 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 Ok(Ident { name, span })
             }
-            Tok::Ident(name) => Err(Diag::syntax(self.span(), format!("`{name}` is a reserved keyword and cannot be used as a name"))),
+            Tok::Ident(name) => Err(Diag::syntax(
+                self.span(),
+                format!("`{name}` is a reserved keyword and cannot be used as a name"),
+            )),
             _ => self.err("a name"),
         }
     }
     fn mk(&mut self, kind: ExprKind, span: Span) -> Expr {
         *self.next_id += 1;
-        Expr { id: *self.next_id, kind, span }
+        Expr {
+            id: *self.next_id,
+            kind,
+            span,
+        }
     }
     /// A statement must end with `;`, a newline, or the closing `}`.
     fn stmt_end(&mut self) -> Result<()> {
         if self.eat(";") || self.is("}") || self.token().nl || self.at_eof() {
             Ok(())
         } else {
-            Err(Diag::syntax(self.span(), format!("expected end of statement, found {}", self.describe()))
-                .help("put each statement on its own line or separate them with `;`"))
+            Err(Diag::syntax(
+                self.span(),
+                format!("expected end of statement, found {}", self.describe()),
+            )
+            .help("put each statement on its own line or separate them with `;`"))
         }
     }
 
@@ -132,13 +171,23 @@ impl<'a> Parser<'a> {
     fn item(&mut self) -> Result<Item> {
         let start = self.span();
         if self.eat_kw("import") {
-            let Tok::Str(pieces) = self.peek().clone() else { return self.err("an import path string") };
+            let Tok::Str(pieces) = self.peek().clone() else {
+                return self.err("an import path string");
+            };
             let path = match pieces.as_slice() {
                 [StrPiece::Lit(s)] => s.clone(),
-                _ => return Err(Diag::syntax(self.span(), "import paths cannot contain interpolation")),
+                _ => {
+                    return Err(Diag::syntax(
+                        self.span(),
+                        "import paths cannot contain interpolation",
+                    ));
+                }
             };
             self.bump();
-            return Ok(Item::Import(Import { path, span: start.to(self.prev_span()) }));
+            return Ok(Item::Import(Import {
+                path,
+                span: start.to(self.prev_span()),
+            }));
         }
         if self.is_kw("app") {
             return self.app().map(Item::App);
@@ -160,7 +209,13 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect("}")?;
-            Ok(Item::Struct(StructDecl { name, exported, generics, fields, span: start.to(self.prev_span()) }))
+            Ok(Item::Struct(StructDecl {
+                name,
+                exported,
+                generics,
+                fields,
+                span: start.to(self.prev_span()),
+            }))
         } else if self.eat_kw("enum") {
             let name = self.ident()?;
             let generics = self.generic_params()?;
@@ -178,23 +233,46 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(")")?;
                 }
-                variants.push(Variant { name: vname, fields });
+                variants.push(Variant {
+                    name: vname,
+                    fields,
+                });
                 if !self.eat(",") && !self.is("}") && !self.token().nl {
                     return self.err("`,` or `}`");
                 }
             }
             self.expect("}")?;
-            Ok(Item::Enum(EnumDecl { name, exported, generics, variants, span: start.to(self.prev_span()) }))
+            Ok(Item::Enum(EnumDecl {
+                name,
+                exported,
+                generics,
+                variants,
+                span: start.to(self.prev_span()),
+            }))
         } else if self.eat_kw("component") {
             let name = self.ident()?;
-            let params = if self.eat("(") { self.params(true)? } else { Vec::new() };
+            let params = if self.eat("(") {
+                self.params(true)?
+            } else {
+                Vec::new()
+            };
             self.expect("{")?;
             let body = self.views()?;
-            Ok(Item::Component(Component { name, exported, params, body, span: start.to(self.prev_span()) }))
+            Ok(Item::Component(Component {
+                name,
+                exported,
+                params,
+                body,
+                span: start.to(self.prev_span()),
+            }))
         } else if self.eat_kw("style") {
             let name = self.ident()?;
             let block = self.style_block()?;
-            Ok(Item::Style(NamedStyle { name, exported, block }))
+            Ok(Item::Style(NamedStyle {
+                name,
+                exported,
+                block,
+            }))
         } else {
             self.err("an item (`fn`, `struct`, `enum`, `component`, `style`, `import` or `app`)")
         }
@@ -208,7 +286,12 @@ impl<'a> Parser<'a> {
                     self.bump();
                     s.clone()
                 }
-                _ => return Err(Diag::syntax(self.span(), "the app title cannot contain interpolation")),
+                _ => {
+                    return Err(Diag::syntax(
+                        self.span(),
+                        "the app title cannot contain interpolation",
+                    ));
+                }
             },
             _ => return self.err("the app title string"),
         };
@@ -216,8 +299,9 @@ impl<'a> Parser<'a> {
         if self.is("{") && !self.token().nl {
             self.bump();
             while !self.eat("}") {
-                self.expect_kw("capabilities")
-                    .map_err(|d| d.help("the app block currently only accepts `capabilities { ... }`"))?;
+                self.expect_kw("capabilities").map_err(|d| {
+                    d.help("the app block currently only accepts `capabilities { ... }`")
+                })?;
                 self.expect("{")?;
                 while !self.eat("}") {
                     let name = self.ident()?;
@@ -227,7 +311,11 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Ok(AppDecl { title, capabilities, span: start.to(self.prev_span()) })
+        Ok(AppDecl {
+            title,
+            capabilities,
+            span: start.to(self.prev_span()),
+        })
     }
 
     fn func(&mut self, exported: bool) -> Result<FnDecl> {
@@ -236,9 +324,21 @@ impl<'a> Parser<'a> {
         let generics = self.generic_params()?;
         self.expect("(")?;
         let params = self.params(false)?;
-        let ret = if self.eat("->") { Some(self.type_expr()?) } else { None };
+        let ret = if self.eat("->") {
+            Some(self.type_expr()?)
+        } else {
+            None
+        };
         let body = self.block()?;
-        Ok(FnDecl { name, exported, generics, params, ret, body, span: start.to(self.prev_span()) })
+        Ok(FnDecl {
+            name,
+            exported,
+            generics,
+            params,
+            ret,
+            body,
+            span: start.to(self.prev_span()),
+        })
     }
 
     fn generic_params(&mut self) -> Result<Vec<Ident>> {
@@ -260,9 +360,14 @@ impl<'a> Parser<'a> {
         let mut out = Vec::new();
         while !self.is(")") {
             let name = self.ident()?;
-            self.expect(":").map_err(|d| d.help("parameters need a type, e.g. `count: Int`"))?;
+            self.expect(":")
+                .map_err(|d| d.help("parameters need a type, e.g. `count: Int`"))?;
             let ty = self.type_expr()?;
-            let default = if defaults && self.eat("=") { Some(self.expr()?) } else { None };
+            let default = if defaults && self.eat("=") {
+                Some(self.expr()?)
+            } else {
+                None
+            };
             out.push(Param { name, ty, default });
             if !self.eat(",") {
                 break;
@@ -277,10 +382,16 @@ impl<'a> Parser<'a> {
         let mut ty = if self.eat("[") {
             let inner = self.type_expr()?;
             self.expect("]")?;
-            TypeExpr { kind: TypeExprKind::Array(Box::new(inner)), span: start.to(self.prev_span()) }
+            TypeExpr {
+                kind: TypeExprKind::Array(Box::new(inner)),
+                span: start.to(self.prev_span()),
+            }
         } else if self.eat("(") {
             self.expect(")")?;
-            TypeExpr { kind: TypeExprKind::Unit, span: start.to(self.prev_span()) }
+            TypeExpr {
+                kind: TypeExprKind::Unit,
+                span: start.to(self.prev_span()),
+            }
         } else {
             let name = self.ident()?;
             let mut args = Vec::new();
@@ -293,11 +404,17 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(">")?;
             }
-            TypeExpr { kind: TypeExprKind::Named(name.name, args), span: start.to(self.prev_span()) }
+            TypeExpr {
+                kind: TypeExprKind::Named(name.name, args),
+                span: start.to(self.prev_span()),
+            }
         };
         while self.is("?") && !self.token().nl {
             self.bump();
-            ty = TypeExpr { span: start.to(self.prev_span()), kind: TypeExprKind::Optional(Box::new(ty)) };
+            ty = TypeExpr {
+                span: start.to(self.prev_span()),
+                kind: TypeExprKind::Optional(Box::new(ty)),
+            };
         }
         Ok(ty)
     }
@@ -318,7 +435,11 @@ impl<'a> Parser<'a> {
             }
         }
         self.bump();
-        Ok(Block { stmts, tail, span: start.to(self.prev_span()) })
+        Ok(Block {
+            stmts,
+            tail,
+            span: start.to(self.prev_span()),
+        })
     }
 
     fn prev_is(&self, p: &str) -> bool {
@@ -330,23 +451,43 @@ impl<'a> Parser<'a> {
         if self.is_kw("let") || self.is_kw("var") {
             let mutable = self.bump().tok == Tok::Ident("var".into());
             let name = self.ident()?;
-            let ty = if self.eat(":") { Some(self.type_expr()?) } else { None };
-            self.expect("=").map_err(|d| d.help("bindings must be initialized, e.g. `let x = 0`"))?;
+            let ty = if self.eat(":") {
+                Some(self.type_expr()?)
+            } else {
+                None
+            };
+            self.expect("=")
+                .map_err(|d| d.help("bindings must be initialized, e.g. `let x = 0`"))?;
             let value = self.expr()?;
             self.stmt_end()?;
-            return Ok(Stmt::Let { name, mutable, ty, value, span: start.to(self.prev_span()) });
+            return Ok(Stmt::Let {
+                name,
+                mutable,
+                ty,
+                value,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.eat_kw("while") {
             let cond = self.expr_no_struct()?;
             let body = self.block()?;
-            return Ok(Stmt::While { cond, body, span: start.to(self.prev_span()) });
+            return Ok(Stmt::While {
+                cond,
+                body,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.eat_kw("for") {
             let var = self.ident()?;
             self.expect_kw("in")?;
             let iter = self.expr_no_struct()?;
             let body = self.block()?;
-            return Ok(Stmt::For { var, iter, body, span: start.to(self.prev_span()) });
+            return Ok(Stmt::For {
+                var,
+                iter,
+                body,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.eat_kw("break") {
             self.stmt_end()?;
@@ -356,7 +497,10 @@ impl<'a> Parser<'a> {
             self.stmt_end()?;
             return Ok(Stmt::Continue(start));
         }
-        if self.is_kw("emit") && matches!(self.peek_at(1), Tok::Ident(_)) && !self.toks[self.pos + 1].nl {
+        if self.is_kw("emit")
+            && matches!(self.peek_at(1), Tok::Ident(_))
+            && !self.toks[self.pos + 1].nl
+        {
             self.bump();
             let name = self.ident()?;
             let value = if self.is("(") && !self.token().nl {
@@ -368,9 +512,16 @@ impl<'a> Parser<'a> {
                 None
             };
             self.stmt_end()?;
-            return Ok(Stmt::Emit { name, value, span: start.to(self.prev_span()) });
+            return Ok(Stmt::Emit {
+                name,
+                value,
+                span: start.to(self.prev_span()),
+            });
         }
-        if self.is_kw("fetch") && matches!(self.peek_at(1), Tok::Ident(_)) && matches!(self.peek_at(2), Tok::Punct("(")) {
+        if self.is_kw("fetch")
+            && matches!(self.peek_at(1), Tok::Ident(_))
+            && matches!(self.peek_at(2), Tok::Punct("("))
+        {
             return self.fetch();
         }
         let e = self.expr()?;
@@ -386,9 +537,17 @@ impl<'a> Parser<'a> {
             self.bump();
             let value = self.expr()?;
             self.stmt_end()?;
-            return Ok(Stmt::Assign { target: e, op, value, span: start.to(self.prev_span()) });
+            return Ok(Stmt::Assign {
+                target: e,
+                op,
+                value,
+                span: start.to(self.prev_span()),
+            });
         }
-        if !matches!(e.kind, ExprKind::If { .. } | ExprKind::Match { .. } | ExprKind::Block(_)) {
+        if !matches!(
+            e.kind,
+            ExprKind::If { .. } | ExprKind::Match { .. } | ExprKind::Block(_)
+        ) {
             self.stmt_end()?;
         }
         Ok(Stmt::Expr(e))
@@ -399,13 +558,26 @@ impl<'a> Parser<'a> {
         let method = self.ident()?;
         self.expect("(")?;
         let url = self.expr()?;
-        let body = if self.eat(",") { Some(self.expr()?) } else { None };
+        let body = if self.eat(",") {
+            Some(self.expr()?)
+        } else {
+            None
+        };
         self.expect(")")?;
-        self.expect_kw("as").map_err(|d| d.help("name the expected response type: `fetch get(url) as [User] { ... }`"))?;
+        self.expect_kw("as").map_err(|d| {
+            d.help("name the expected response type: `fetch get(url) as [User] { ... }`")
+        })?;
         let ty = self.type_expr()?;
         self.expect("{")?;
         let arms = self.arms()?;
-        Ok(Stmt::Fetch(Box::new(Fetch { method, url, body, ty, arms, span: start.to(self.prev_span()) })))
+        Ok(Stmt::Fetch(Box::new(Fetch {
+            method,
+            url,
+            body,
+            ty,
+            arms,
+            span: start.to(self.prev_span()),
+        })))
     }
 
     // ----- expressions -----
@@ -428,7 +600,9 @@ impl<'a> Parser<'a> {
         if self.token().nl {
             return None;
         }
-        let Tok::Punct(p) = self.peek() else { return None };
+        let Tok::Punct(p) = self.peek() else {
+            return None;
+        };
         Some(match *p {
             "||" => (BinOp::Or, 1),
             "&&" => (BinOp::And, 2),
@@ -457,15 +631,19 @@ impl<'a> Parser<'a> {
                 lhs = self.mk(ExprKind::Range(Box::new(lhs), Box::new(rhs)), span);
                 continue;
             }
-            let Some((op, prec)) = self.binop() else { break };
+            let Some((op, prec)) = self.binop() else {
+                break;
+            };
             if prec < min {
                 break;
             }
             let op_span = self.bump().span;
             let rhs = self.binary(prec + 1)?;
             if prec == 3 && self.binop().is_some_and(|(_, p)| p == 3) {
-                return Err(Diag::syntax(self.span(), "comparison operators cannot be chained")
-                    .help("combine comparisons with `&&`, e.g. `a < b && b < c`"));
+                return Err(
+                    Diag::syntax(self.span(), "comparison operators cannot be chained")
+                        .help("combine comparisons with `&&`, e.g. `a < b && b < c`"),
+                );
             }
             let _ = op_span;
             let span = lhs.span.to(rhs.span);
@@ -502,12 +680,31 @@ impl<'a> Parser<'a> {
                     self.bump();
                     let args = self.call_args()?;
                     let span = e.span.to(self.prev_span());
-                    e = self.mk(ExprKind::Method { recv: Box::new(e), name, type_args: Vec::new(), args }, span);
-                } else if self.is("<") && !self.token().nl && let Some(type_args) = self.try_type_args() {
+                    e = self.mk(
+                        ExprKind::Method {
+                            recv: Box::new(e),
+                            name,
+                            type_args: Vec::new(),
+                            args,
+                        },
+                        span,
+                    );
+                } else if self.is("<")
+                    && !self.token().nl
+                    && let Some(type_args) = self.try_type_args()
+                {
                     self.expect("(")?;
                     let args = self.call_args()?;
                     let span = e.span.to(self.prev_span());
-                    e = self.mk(ExprKind::Method { recv: Box::new(e), name, type_args, args }, span);
+                    e = self.mk(
+                        ExprKind::Method {
+                            recv: Box::new(e),
+                            name,
+                            type_args,
+                            args,
+                        },
+                        span,
+                    );
                 } else {
                     let span = e.span.to(name.span);
                     e = self.mk(ExprKind::Field(Box::new(e), name), span);
@@ -552,14 +749,19 @@ impl<'a> Parser<'a> {
     fn call_args(&mut self) -> Result<Vec<Arg>> {
         let mut args = Vec::new();
         while !self.is(")") {
-            let name = if matches!(self.peek(), Tok::Ident(_)) && matches!(self.peek_at(1), Tok::Punct(":")) {
+            let name = if matches!(self.peek(), Tok::Ident(_))
+                && matches!(self.peek_at(1), Tok::Punct(":"))
+            {
                 let n = self.ident()?;
                 self.bump();
                 Some(n)
             } else {
                 None
             };
-            args.push(Arg { name, value: self.expr()? });
+            args.push(Arg {
+                name,
+                value: self.expr()?,
+            });
             if !self.eat(",") {
                 break;
             }
@@ -595,10 +797,18 @@ impl<'a> Parser<'a> {
                     match piece {
                         StrPiece::Lit(s) => parts.push(StrPart::Lit(s)),
                         StrPiece::Expr(toks, ispan) => {
-                            let mut sub = Parser { toks: &toks, pos: 0, next_id: self.next_id, no_struct: false };
+                            let mut sub = Parser {
+                                toks: &toks,
+                                pos: 0,
+                                next_id: self.next_id,
+                                no_struct: false,
+                            };
                             let e = sub.expr()?;
                             if !sub.at_eof() {
-                                return Err(Diag::syntax(sub.span(), format!("unexpected {} in interpolation", sub.describe())));
+                                return Err(Diag::syntax(
+                                    sub.span(),
+                                    format!("unexpected {} in interpolation", sub.describe()),
+                                ));
                             }
                             let _ = ispan;
                             parts.push(StrPart::Expr(e));
@@ -654,19 +864,42 @@ impl<'a> Parser<'a> {
                 let scrut = self.expr_no_struct()?;
                 self.expect("{")?;
                 let arms = self.arms()?;
-                Ok(self.mk(ExprKind::Match { scrut: Box::new(scrut), arms }, span.to(self.prev_span())))
+                Ok(self.mk(
+                    ExprKind::Match {
+                        scrut: Box::new(scrut),
+                        arms,
+                    },
+                    span.to(self.prev_span()),
+                ))
             }
             Tok::Ident(_) => {
                 let name = self.ident()?;
                 if self.is("(") && !self.token().nl {
                     self.bump();
                     let args = self.call_args()?;
-                    return Ok(self.mk(ExprKind::Call { callee: name, type_args: Vec::new(), args }, span.to(self.prev_span())));
+                    return Ok(self.mk(
+                        ExprKind::Call {
+                            callee: name,
+                            type_args: Vec::new(),
+                            args,
+                        },
+                        span.to(self.prev_span()),
+                    ));
                 }
-                if self.is("<") && !self.token().nl && let Some(type_args) = self.try_type_args() {
+                if self.is("<")
+                    && !self.token().nl
+                    && let Some(type_args) = self.try_type_args()
+                {
                     self.expect("(")?;
                     let args = self.call_args()?;
-                    return Ok(self.mk(ExprKind::Call { callee: name, type_args, args }, span.to(self.prev_span())));
+                    return Ok(self.mk(
+                        ExprKind::Call {
+                            callee: name,
+                            type_args,
+                            args,
+                        },
+                        span.to(self.prev_span()),
+                    ));
                 }
                 if self.is("{") && !self.no_struct && name.name.starts_with(char::is_uppercase) {
                     return self.struct_lit(name);
@@ -718,7 +951,14 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        Ok(self.mk(ExprKind::If { cond: Box::new(cond), then, els }, start.to(self.prev_span())))
+        Ok(self.mk(
+            ExprKind::If {
+                cond: Box::new(cond),
+                then,
+                els,
+            },
+            start.to(self.prev_span()),
+        ))
     }
 
     /// Match arms after `{`; consumes the closing `}`.
@@ -745,14 +985,21 @@ impl<'a> Parser<'a> {
             }
             Tok::Punct("-") if matches!(self.peek_at(1), Tok::Int(_)) => {
                 self.bump();
-                let Tok::Int(n) = self.bump().tok else { unreachable!() };
+                let Tok::Int(n) = self.bump().tok else {
+                    unreachable!()
+                };
                 PatKind::Int(-n)
             }
             Tok::Str(p) => {
                 self.bump();
                 match p.as_slice() {
                     [StrPiece::Lit(s)] => PatKind::Str(s.clone()),
-                    _ => return Err(Diag::syntax(start, "string patterns cannot contain interpolation")),
+                    _ => {
+                        return Err(Diag::syntax(
+                            start,
+                            "string patterns cannot contain interpolation",
+                        ));
+                    }
                 }
             }
             Tok::Ident(s) if s == "_" => {
@@ -765,7 +1012,11 @@ impl<'a> Parser<'a> {
             }
             Tok::Ident(_) => {
                 let first = self.ident()?;
-                let (qual, name) = if self.eat(".") { (Some(first), self.ident()?) } else { (None, first) };
+                let (qual, name) = if self.eat(".") {
+                    (Some(first), self.ident()?)
+                } else {
+                    (None, first)
+                };
                 if qual.is_none() && !name.name.starts_with(char::is_uppercase) && !self.is("(") {
                     PatKind::Bind(name.name)
                 } else {
@@ -784,7 +1035,10 @@ impl<'a> Parser<'a> {
             }
             _ => return self.err("a pattern"),
         };
-        Ok(Pattern { kind, span: start.to(self.prev_span()) })
+        Ok(Pattern {
+            kind,
+            span: start.to(self.prev_span()),
+        })
     }
 
     // ----- views -----
@@ -806,36 +1060,72 @@ impl<'a> Parser<'a> {
         let start = self.span();
         if self.eat_kw("state") {
             let name = self.ident()?;
-            let ty = if self.eat(":") { Some(self.type_expr()?) } else { None };
-            self.expect("=").map_err(|d| d.help("state needs an initial value, e.g. `state count: Int = 0`"))?;
+            let ty = if self.eat(":") {
+                Some(self.type_expr()?)
+            } else {
+                None
+            };
+            self.expect("=")
+                .map_err(|d| d.help("state needs an initial value, e.g. `state count: Int = 0`"))?;
             let init = self.expr()?;
             self.stmt_end()?;
-            return Ok(View::State { name, ty, init, span: start.to(self.prev_span()) });
+            return Ok(View::State {
+                name,
+                ty,
+                init,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.eat_kw("let") {
             let name = self.ident()?;
-            let ty = if self.eat(":") { Some(self.type_expr()?) } else { None };
+            let ty = if self.eat(":") {
+                Some(self.type_expr()?)
+            } else {
+                None
+            };
             self.expect("=")?;
             let value = self.expr()?;
             self.stmt_end()?;
-            return Ok(View::Let { name, ty, value, span: start.to(self.prev_span()) });
+            return Ok(View::Let {
+                name,
+                ty,
+                value,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.is_kw("var") {
-            return Err(Diag::syntax(start, "`var` is not allowed in a component body")
-                .help("use `state name: Type = value` for mutable component data"));
+            return Err(
+                Diag::syntax(start, "`var` is not allowed in a component body")
+                    .help("use `state name: Type = value` for mutable component data"),
+            );
         }
         if self.is_kw("if") {
             return self.view_if();
         }
         if self.eat_kw("for") {
             let var = self.ident()?;
-            let index = if self.eat(",") { Some(self.ident()?) } else { None };
+            let index = if self.eat(",") {
+                Some(self.ident()?)
+            } else {
+                None
+            };
             self.expect_kw("in")?;
             let iter = self.expr_no_struct()?;
-            let key = if self.eat_kw("key") { Some(self.expr_no_struct()?) } else { None };
+            let key = if self.eat_kw("key") {
+                Some(self.expr_no_struct()?)
+            } else {
+                None
+            };
             self.expect("{")?;
             let body = self.views()?;
-            return Ok(View::For { var, index, iter, key, body, span: start.to(self.prev_span()) });
+            return Ok(View::For {
+                var,
+                index,
+                iter,
+                key,
+                body,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.eat_kw("match") {
             let scrut = self.expr_no_struct()?;
@@ -847,7 +1137,11 @@ impl<'a> Parser<'a> {
                 arms.push((pat, self.view_arm_body()?));
                 self.eat(",");
             }
-            return Ok(View::Match { scrut, arms, span: start.to(self.prev_span()) });
+            return Ok(View::Match {
+                scrut,
+                arms,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.is_kw("event") && matches!(self.peek_at(1), Tok::Ident(_)) {
             self.bump();
@@ -860,7 +1154,11 @@ impl<'a> Parser<'a> {
                 None
             };
             self.stmt_end()?;
-            return Ok(View::Event { name, ty, span: start.to(self.prev_span()) });
+            return Ok(View::Event {
+                name,
+                ty,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.is_kw("on") && matches!(self.peek_at(1), Tok::Ident(_)) {
             self.bump();
@@ -873,14 +1171,23 @@ impl<'a> Parser<'a> {
                 None
             };
             let body = self.block()?;
-            return Ok(View::On { event, param, body, span: start.to(self.prev_span()) });
+            return Ok(View::On {
+                event,
+                param,
+                body,
+                span: start.to(self.prev_span()),
+            });
         }
         if self.is_kw("style") && !matches!(self.peek_at(1), Tok::Punct("(")) {
             self.bump();
             if self.eat_kw("if") {
                 let cond = self.expr_no_struct()?;
                 let block = self.style_block()?;
-                return Ok(View::StyleIf { cond, block, span: start.to(self.prev_span()) });
+                return Ok(View::StyleIf {
+                    cond,
+                    block,
+                    span: start.to(self.prev_span()),
+                });
             }
             if self.is("{") {
                 return Ok(View::Style(self.style_block()?));
@@ -899,7 +1206,12 @@ impl<'a> Parser<'a> {
                             self.bump();
                             Some(s.clone())
                         }
-                        _ => return Err(Diag::syntax(aspan, "route paths cannot contain interpolation")),
+                        _ => {
+                            return Err(Diag::syntax(
+                                aspan,
+                                "route paths cannot contain interpolation",
+                            ));
+                        }
                     },
                     Tok::Ident(s) if s == "_" => {
                         self.bump();
@@ -911,13 +1223,20 @@ impl<'a> Parser<'a> {
                 arms.push((path, aspan, self.view_arm_body()?));
                 self.eat(",");
             }
-            return Ok(View::Routes { arms, span: start.to(self.prev_span()) });
+            return Ok(View::Routes {
+                arms,
+                span: start.to(self.prev_span()),
+            });
         }
         self.element().map(View::Element)
     }
 
     fn view_arm_body(&mut self) -> Result<Vec<View>> {
-        if self.eat("{") { self.views() } else { Ok(vec![self.view()?]) }
+        if self.eat("{") {
+            self.views()
+        } else {
+            Ok(vec![self.view()?])
+        }
     }
 
     fn view_if(&mut self) -> Result<View> {
@@ -935,7 +1254,12 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        Ok(View::If { cond, then, els, span: start.to(self.prev_span()) })
+        Ok(View::If {
+            cond,
+            then,
+            els,
+            span: start.to(self.prev_span()),
+        })
     }
 
     fn element(&mut self) -> Result<Element> {
@@ -951,7 +1275,8 @@ impl<'a> Parser<'a> {
         if self.is("(") && !self.token().nl {
             self.bump();
             while !self.is(")") {
-                if let (Tok::Ident(n), Tok::Punct(":")) = (self.peek().clone(), self.peek_at(1).clone())
+                if let (Tok::Ident(n), Tok::Punct(":")) =
+                    (self.peek().clone(), self.peek_at(1).clone())
                     && crate::style::is_style_arg(&n)
                 {
                     let id = self.ident()?;
@@ -959,14 +1284,19 @@ impl<'a> Parser<'a> {
                     let (toks, span) = self.raw_until_comma()?;
                     args.push(ElemArg::Style(id, toks, span));
                 } else {
-                    let name = if matches!(self.peek(), Tok::Ident(_)) && matches!(self.peek_at(1), Tok::Punct(":")) {
+                    let name = if matches!(self.peek(), Tok::Ident(_))
+                        && matches!(self.peek_at(1), Tok::Punct(":"))
+                    {
                         let n = self.ident()?;
                         self.bump();
                         Some(n)
                     } else {
                         None
                     };
-                    args.push(ElemArg::Expr(Arg { name, value: self.expr()? }));
+                    args.push(ElemArg::Expr(Arg {
+                        name,
+                        value: self.expr()?,
+                    }));
                 }
                 if !self.eat(",") {
                     break;
@@ -980,7 +1310,12 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        Ok(Element { span: name.span.to(self.prev_span()), name, args, children })
+        Ok(Element {
+            span: name.span.to(self.prev_span()),
+            name,
+            args,
+            children,
+        })
     }
 
     /// Raw tokens up to a top-level `,` or `)` (not consumed).
@@ -1061,8 +1396,16 @@ impl<'a> Parser<'a> {
             }
             self.expect(":")?;
             let (value, vspan) = self.raw_value()?;
-            decls.push(StyleDecl { span: prop.span.to(vspan), prop, value });
+            decls.push(StyleDecl {
+                span: prop.span.to(vspan),
+                prop,
+                value,
+            });
         }
-        Ok(StyleBlock { decls, conds, span: start.to(self.prev_span()) })
+        Ok(StyleBlock {
+            decls,
+            conds,
+            span: start.to(self.prev_span()),
+        })
     }
 }

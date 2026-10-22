@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import puppeteer from "puppeteer-core";
-import { repo } from "./harness.mjs";
+import { repo, chrome } from "./harness.mjs";
 
 const APP = 'app "Dev"\n\ncomponent App {\n    paragraph("one")\n}\n';
 
@@ -17,7 +17,7 @@ test("vcwl dev reloads on change and shows compile errors", async (t) => {
   const main = path.join(dir, "src/main.vcwl");
   fs.writeFileSync(main, APP);
   const server = spawn(path.join(repo, "target/debug/vcwl"), ["dev", "--port", "0"], { cwd: dir, stdio: ["ignore", "pipe", "ignore"] });
-  const browser = await puppeteer.launch({ executablePath: process.env.CHROME ?? "/usr/bin/google-chrome", headless: true });
+  const browser = await puppeteer.launch({ executablePath: chrome, headless: true });
   t.after(async () => {
     await browser.close();
     server.kill();
@@ -32,15 +32,16 @@ test("vcwl dev reloads on change and shows compile errors", async (t) => {
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  const paragraph = () => window.vcwl?.tree?.().find((n) => n.text !== undefined)?.text;
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector("p")?.textContent === "one");
+  await page.waitForFunction("(" + paragraph + ")() === 'one'");
 
   fs.writeFileSync(main, APP.replace('"one"', "1 +"));
-  await page.waitForSelector("[role=alert]", { timeout: 5000 });
-  assert.match(await page.$eval("[role=alert]", (e) => e.textContent), /compile error:[\s\S]*main\.vcwl:4/);
+  await page.waitForFunction(() => window.vcwl.error, { timeout: 5000 });
+  assert.match(await page.evaluate(() => window.vcwl.error), /compile error:[\s\S]*main\.vcwl:4/);
 
   fs.writeFileSync(main, APP.replace('"one"', '"two"'));
-  await page.waitForFunction(() => document.querySelector("p")?.textContent === "two", { timeout: 5000 });
-  assert.equal(await page.$("[role=alert]"), null);
+  await page.waitForFunction("(" + paragraph + ")() === 'two'", { timeout: 5000 });
+  assert.equal(await page.evaluate(() => window.vcwl.error ?? null), null);
   assert.deepEqual(errors, []);
 });

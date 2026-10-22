@@ -3,6 +3,9 @@ name = "vcwl"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["render"]
+
 [dependencies]
 wasm-encoder = "0.262.0"
 wasmparser = "0.262.0"

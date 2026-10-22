@@ -14,22 +14,11 @@ use crate::lexer::{Tok, Token};
 
 /// Element arguments that take style values rather than expressions, e.g. `column(gap: 20px)`.
 pub fn is_style_arg(name: &str) -> bool {
-    matches!(name, "gap" | "align" | "justify" | "padding" | "wrap" | "columns" | "width" | "height" | "grow")
+    matches!(
+        name,
+        "gap" | "align" | "justify" | "padding" | "wrap" | "columns" | "width" | "height" | "grow"
+    )
 }
-
-pub const BASE_CSS: &str = "*,*::before,*::after{box-sizing:border-box}\
-body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;line-height:1.5}\
-.v-col{display:flex;flex-direction:column}\
-.v-row{display:flex;flex-direction:row}\
-.v-stack{display:grid}.v-stack>*{grid-area:1/1}\
-.v-grid{display:grid}\
-.v-scroll{overflow:auto}\
-.v-list{margin:0;padding-left:1.25em}\
-.v-check{display:inline-flex;gap:.5em;align-items:center;cursor:pointer}\
-.v-input{font:inherit}\
-button{font:inherit;cursor:pointer}\
-:focus-visible{outline:2px solid #4c9ffe;outline-offset:2px}\
-@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}\n";
 
 #[derive(Default)]
 pub struct Sheet {
@@ -84,12 +73,29 @@ enum PropKind {
 
 const LEN_AUTO: &[&str] = &["auto"];
 const LEN_SIZE: &[&str] = &["auto", "min-content", "max-content", "fit-content"];
-const ALIGN: &[(&str, &str)] = &[("start", "flex-start"), ("center", "center"), ("end", "flex-end"), ("stretch", "stretch"), ("baseline", "baseline")];
-const JUSTIFY: &[(&str, &str)] = &[
-    ("start", "flex-start"), ("center", "center"), ("end", "flex-end"), ("between", "space-between"), ("around", "space-around"),
-    ("evenly", "space-evenly"), ("stretch", "stretch"),
+const ALIGN: &[(&str, &str)] = &[
+    ("start", "flex-start"),
+    ("center", "center"),
+    ("end", "flex-end"),
+    ("stretch", "stretch"),
+    ("baseline", "baseline"),
 ];
-const OVERFLOW: &[(&str, &str)] = &[("visible", "visible"), ("hidden", "hidden"), ("auto", "auto"), ("scroll", "scroll"), ("clip", "clip")];
+const JUSTIFY: &[(&str, &str)] = &[
+    ("start", "flex-start"),
+    ("center", "center"),
+    ("end", "flex-end"),
+    ("between", "space-between"),
+    ("around", "space-around"),
+    ("evenly", "space-evenly"),
+    ("stretch", "stretch"),
+];
+const OVERFLOW: &[(&str, &str)] = &[
+    ("visible", "visible"),
+    ("hidden", "hidden"),
+    ("auto", "auto"),
+    ("scroll", "scroll"),
+    ("clip", "clip"),
+];
 
 fn prop(name: &str) -> Option<Prop> {
     use PropKind::*;
@@ -131,27 +137,97 @@ fn prop(name: &str) -> Option<Prop> {
         "weight" => p(&["font-weight"], Weight),
         "line-height" => p(&["line-height"], LineHeight),
         "letter-spacing" => p(&["letter-spacing"], Lengths(1, &["normal"])),
-        "italic" => p(&["font-style"], Keyword(&[("yes", "italic"), ("no", "normal")])),
-        "text-align" => p(&["text-align"], Keyword(&[("left", "left"), ("center", "center"), ("right", "right"), ("justify", "justify"), ("start", "start"), ("end", "end")])),
-        "decoration" => p(&["text-decoration"], Keyword(&[("none", "none"), ("underline", "underline"), ("line-through", "line-through")])),
-        "case" => p(&["text-transform"], Keyword(&[("upper", "uppercase"), ("lower", "lowercase"), ("capitalize", "capitalize"), ("none", "none")])),
-        "white-space" => p(&["white-space"], Keyword(&[("normal", "normal"), ("nowrap", "nowrap"), ("pre", "pre"), ("pre-wrap", "pre-wrap")])),
-        "direction" => p(&["flex-direction"], Keyword(&[("row", "row"), ("column", "column"), ("row-reverse", "row-reverse"), ("column-reverse", "column-reverse")])),
+        "italic" => p(
+            &["font-style"],
+            Keyword(&[("yes", "italic"), ("no", "normal")]),
+        ),
+        "text-align" => p(
+            &["text-align"],
+            Keyword(&[
+                ("left", "left"),
+                ("center", "center"),
+                ("right", "right"),
+                ("justify", "justify"),
+                ("start", "start"),
+                ("end", "end"),
+            ]),
+        ),
+        "decoration" => p(
+            &["text-decoration"],
+            Keyword(&[
+                ("none", "none"),
+                ("underline", "underline"),
+                ("line-through", "line-through"),
+            ]),
+        ),
+        "case" => p(
+            &["text-transform"],
+            Keyword(&[
+                ("upper", "uppercase"),
+                ("lower", "lowercase"),
+                ("capitalize", "capitalize"),
+                ("none", "none"),
+            ]),
+        ),
+        "white-space" => p(
+            &["white-space"],
+            Keyword(&[
+                ("normal", "normal"),
+                ("nowrap", "nowrap"),
+                ("pre", "pre"),
+                ("pre-wrap", "pre-wrap"),
+            ]),
+        ),
+        "direction" => p(
+            &["flex-direction"],
+            Keyword(&[
+                ("row", "row"),
+                ("column", "column"),
+                ("row-reverse", "row-reverse"),
+                ("column-reverse", "column-reverse"),
+            ]),
+        ),
         "align" => p(&["align-items"], Keyword(ALIGN)),
         "align-self" => p(&["align-self"], Keyword(ALIGN)),
         "justify" => p(&["justify-content"], Keyword(JUSTIFY)),
-        "wrap" => p(&["flex-wrap"], Keyword(&[("yes", "wrap"), ("no", "nowrap"), ("wrap", "wrap"), ("nowrap", "nowrap")])),
+        "wrap" => p(
+            &["flex-wrap"],
+            Keyword(&[
+                ("yes", "wrap"),
+                ("no", "nowrap"),
+                ("wrap", "wrap"),
+                ("nowrap", "nowrap"),
+            ]),
+        ),
         "grow" => p(&["flex-grow"], Number(0.0, 1e6)),
         "shrink" => p(&["flex-shrink"], Number(0.0, 1e6)),
         "basis" => p(&["flex-basis"], Lengths(1, LEN_AUTO)),
-        "display" => p(&["display"], Keyword(&[
-            ("flex", "flex"), ("grid", "grid"), ("block", "block"), ("inline", "inline"), ("inline-block", "inline-block"),
-            ("inline-flex", "inline-flex"), ("none", "none"), ("contents", "contents"),
-        ])),
+        "display" => p(
+            &["display"],
+            Keyword(&[
+                ("flex", "flex"),
+                ("grid", "grid"),
+                ("block", "block"),
+                ("inline", "inline"),
+                ("inline-block", "inline-block"),
+                ("inline-flex", "inline-flex"),
+                ("none", "none"),
+                ("contents", "contents"),
+            ]),
+        ),
         "columns" => p(&["grid-template-columns"], Tracks),
         "rows" => p(&["grid-template-rows"], Tracks),
         "span" => p(&["grid-column"], Integer(1, 1000)),
-        "position" => p(&["position"], Keyword(&[("static", "static"), ("relative", "relative"), ("absolute", "absolute"), ("fixed", "fixed"), ("sticky", "sticky")])),
+        "position" => p(
+            &["position"],
+            Keyword(&[
+                ("static", "static"),
+                ("relative", "relative"),
+                ("absolute", "absolute"),
+                ("fixed", "fixed"),
+                ("sticky", "sticky"),
+            ]),
+        ),
         "top" => p(&["top"], Lengths(1, LEN_AUTO)),
         "right" => p(&["right"], Lengths(1, LEN_AUTO)),
         "bottom" => p(&["bottom"], Lengths(1, LEN_AUTO)),
@@ -164,30 +240,132 @@ fn prop(name: &str) -> Option<Prop> {
         "opacity" => p(&["opacity"], Number(0.0, 1.0)),
         "transform" => p(&["transform"], Transform),
         "transition" => p(&["transition"], Transition),
-        "cursor" => p(&["cursor"], Keyword(&[("pointer", "pointer"), ("default", "default"), ("text", "text"), ("not-allowed", "not-allowed"), ("grab", "grab"), ("move", "move")])),
+        "cursor" => p(
+            &["cursor"],
+            Keyword(&[
+                ("pointer", "pointer"),
+                ("default", "default"),
+                ("text", "text"),
+                ("not-allowed", "not-allowed"),
+                ("grab", "grab"),
+                ("move", "move"),
+            ]),
+        ),
         "shadow" => p(&["box-shadow"], Shadow),
-        "fit" => p(&["object-fit"], Keyword(&[("cover", "cover"), ("contain", "contain"), ("fill", "fill"), ("none", "none")])),
-        "container" => p(&["container-type"], Keyword(&[("inline", "inline-size"), ("size", "size"), ("none", "normal")])),
-        "list-style" => p(&["list-style"], Keyword(&[("none", "none"), ("disc", "disc"), ("decimal", "decimal"), ("square", "square"), ("circle", "circle")])),
-        "user-select" => p(&["user-select"], Keyword(&[("none", "none"), ("text", "text"), ("all", "all"), ("auto", "auto")])),
+        "fit" => p(
+            &["object-fit"],
+            Keyword(&[
+                ("cover", "cover"),
+                ("contain", "contain"),
+                ("fill", "fill"),
+                ("none", "none"),
+            ]),
+        ),
+        "container" => p(
+            &["container-type"],
+            Keyword(&[
+                ("inline", "inline-size"),
+                ("size", "size"),
+                ("none", "normal"),
+            ]),
+        ),
+        "list-style" => p(
+            &["list-style"],
+            Keyword(&[
+                ("none", "none"),
+                ("disc", "disc"),
+                ("decimal", "decimal"),
+                ("square", "square"),
+                ("circle", "circle"),
+            ]),
+        ),
+        "user-select" => p(
+            &["user-select"],
+            Keyword(&[
+                ("none", "none"),
+                ("text", "text"),
+                ("all", "all"),
+                ("auto", "auto"),
+            ]),
+        ),
         _ => None,
     }
 }
 
 const PROPS: &[&str] = &[
-    "color", "background", "width", "height", "min-width", "max-width", "min-height", "max-height", "padding", "padding-x", "padding-y",
-    "margin", "margin-x", "margin-y", "gap", "row-gap", "column-gap", "border", "radius", "font", "size", "weight", "line-height",
-    "letter-spacing", "italic", "text-align", "decoration", "case", "white-space", "direction", "align", "align-self", "justify",
-    "wrap", "grow", "shrink", "basis", "display", "columns", "rows", "span", "position", "top", "right", "bottom", "left", "inset",
-    "z", "overflow", "overflow-x", "overflow-y", "opacity", "transform", "transition", "cursor", "shadow", "fit", "container",
-    "user-select", "list-style",
+    "color",
+    "background",
+    "width",
+    "height",
+    "min-width",
+    "max-width",
+    "min-height",
+    "max-height",
+    "padding",
+    "padding-x",
+    "padding-y",
+    "margin",
+    "margin-x",
+    "margin-y",
+    "gap",
+    "row-gap",
+    "column-gap",
+    "border",
+    "radius",
+    "font",
+    "size",
+    "weight",
+    "line-height",
+    "letter-spacing",
+    "italic",
+    "text-align",
+    "decoration",
+    "case",
+    "white-space",
+    "direction",
+    "align",
+    "align-self",
+    "justify",
+    "wrap",
+    "grow",
+    "shrink",
+    "basis",
+    "display",
+    "columns",
+    "rows",
+    "span",
+    "position",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "inset",
+    "z",
+    "overflow",
+    "overflow-x",
+    "overflow-y",
+    "opacity",
+    "transform",
+    "transition",
+    "cursor",
+    "shadow",
+    "fit",
+    "container",
+    "user-select",
+    "list-style",
 ];
 
 const NAMED_COLORS: &[&str] = &["transparent", "currentcolor", "white", "black", "inherit"];
-const LENGTH_UNITS: &[&str] = &["px", "rem", "em", "%", "vh", "vw", "vmin", "vmax", "ch", "dvh", "svh", "fr"];
+const LENGTH_UNITS: &[&str] = &[
+    "px", "rem", "em", "%", "vh", "vw", "vmin", "vmax", "ch", "dvh", "svh", "fr",
+];
 
 fn num(n: f64) -> String {
-    if n == n.trunc() && n.abs() < 1e15 { format!("{}", n as i64) } else { format!("{n}") }
+    if n == n.trunc() && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
 }
 
 impl Val {
@@ -225,7 +403,9 @@ impl Val {
             Val::Num(n) if *n == 0.0 => Some(VTy::Length),
             Val::Num(_) => Some(VTy::Number),
             Val::Color(_) => Some(VTy::Color),
-            Val::Func(f, _) if matches!(f.as_str(), "rgb" | "rgba" | "hsl" | "hsla") => Some(VTy::Color),
+            Val::Func(f, _) if matches!(f.as_str(), "rgb" | "rgba" | "hsl" | "hsla") => {
+                Some(VTy::Color)
+            }
             Val::Kw(_) => Some(VTy::Keyword),
             _ => None,
         }
@@ -253,14 +433,24 @@ fn parse_vals(toks: &[Token]) -> Result<Vec<(Val, Span)>> {
         let span = t.span;
         let v = match &t.tok {
             Tok::Dim(n, u) => {
-                if !LENGTH_UNITS.contains(&u.as_str()) && !matches!(u.as_str(), "ms" | "s" | "deg" | "turn") {
-                    return Err(Diag::ty(span, format!("unknown unit `{u}`")).help(format!("supported units: {}, ms, s, deg", LENGTH_UNITS.join(", "))));
+                if !LENGTH_UNITS.contains(&u.as_str())
+                    && !matches!(u.as_str(), "ms" | "s" | "deg" | "turn")
+                {
+                    return Err(Diag::ty(span, format!("unknown unit `{u}`")).help(format!(
+                        "supported units: {}, ms, s, deg",
+                        LENGTH_UNITS.join(", ")
+                    )));
                 }
                 Val::Len(*n, u.clone())
             }
             Tok::Int(n) => Val::Num(*n as f64),
             Tok::Float(n) => Val::Num(*n),
-            Tok::Punct("-") if matches!(toks.get(i + 1).map(|t| &t.tok), Some(Tok::Dim(..) | Tok::Int(_) | Tok::Float(_))) => {
+            Tok::Punct("-")
+                if matches!(
+                    toks.get(i + 1).map(|t| &t.tok),
+                    Some(Tok::Dim(..) | Tok::Int(_) | Tok::Float(_))
+                ) =>
+            {
                 i += 1;
                 match &toks[i].tok {
                     Tok::Dim(n, u) => Val::Len(-n, u.clone()),
@@ -309,7 +499,10 @@ fn parse_vals(toks: &[Token]) -> Result<Vec<(Val, Span)>> {
                     if j >= toks.len() {
                         return Err(Diag::ty(span, format!("unclosed `{name}(`")));
                     }
-                    let args = parse_vals(&toks[start..j])?.into_iter().map(|(v, _)| v).collect();
+                    let args = parse_vals(&toks[start..j])?
+                        .into_iter()
+                        .map(|(v, _)| v)
+                        .collect();
                     i = j;
                     Val::Func(name, args)
                 } else if NAMED_COLORS.contains(&name.to_ascii_lowercase().as_str()) {
@@ -368,11 +561,21 @@ impl Sheet {
         name
     }
 
-    fn block_into(&mut self, b: &StyleBlock, body: &mut String, extra: &mut Vec<(Vec<String>, String, String)>, media: &[String], pseudo: &str) -> Result<()> {
+    fn block_into(
+        &mut self,
+        b: &StyleBlock,
+        body: &mut String,
+        extra: &mut Vec<(Vec<String>, String, String)>,
+        media: &[String],
+        pseudo: &str,
+    ) -> Result<()> {
         let mut seen: Vec<&str> = Vec::new();
         for d in &b.decls {
             if seen.contains(&d.prop.name.as_str()) {
-                return Err(Diag::ty(d.prop.span, format!("`{}` is set twice in this block", d.prop.name)));
+                return Err(Diag::ty(
+                    d.prop.span,
+                    format!("`{}` is set twice in this block", d.prop.name),
+                ));
             }
             seen.push(&d.prop.name);
             body.push_str(&decl(&d.prop, &d.value, d.span)?);
@@ -392,7 +595,11 @@ impl Sheet {
     }
 
     /// Compiles layout arguments such as `column(gap: 20px, align: center)` into a class.
-    pub fn layout_args(&mut self, elem: &str, args: &[(Ident, Vec<Token>, Span)]) -> Result<String> {
+    pub fn layout_args(
+        &mut self,
+        elem: &str,
+        args: &[(Ident, Vec<Token>, Span)],
+    ) -> Result<String> {
         let mut body = String::new();
         for (id, toks, span) in args {
             if id.name == "columns" && elem != "grid" {
@@ -402,26 +609,42 @@ impl Sheet {
         }
         Ok(self.class(body, vec![]))
     }
-
-    pub fn output(&self) -> String {
-        format!("{BASE_CSS}{}", self.css)
-    }
 }
 
 fn condition(toks: &[Token], span: Span) -> Result<(Vec<String>, String)> {
     // `viewport < 600px` / `container >= 30rem`
-    if let [Token { tok: Tok::Ident(target), .. }, Token { tok: Tok::Punct(op), .. }, rest @ ..] = toks
+    if let [
+        Token {
+            tok: Tok::Ident(target),
+            ..
+        },
+        Token {
+            tok: Tok::Punct(op),
+            ..
+        },
+        rest @ ..,
+    ] = toks
         && matches!(target.as_str(), "viewport" | "container")
         && matches!(*op, "<" | "<=" | ">" | ">=")
     {
         let vals = parse_vals(rest)?;
         let [(Val::Len(n, u), _)] = vals.as_slice() else {
-            return Err(Diag::ty(span, format!("`{target}` must be compared with a length, e.g. `{target} < 600px`")));
+            return Err(Diag::ty(
+                span,
+                format!("`{target}` must be compared with a length, e.g. `{target} < 600px`"),
+            ));
         };
         if matches!(u.as_str(), "%" | "fr" | "ms" | "s" | "deg" | "turn") {
-            return Err(Diag::ty(span, format!("`{target}` must be compared with px, rem or em")));
+            return Err(Diag::ty(
+                span,
+                format!("`{target}` must be compared with px, rem or em"),
+            ));
         }
-        let at = if target == "viewport" { "@media" } else { "@container" };
+        let at = if target == "viewport" {
+            "@media"
+        } else {
+            "@container"
+        };
         let eps = if u == "px" { 0.02 } else { 0.001 };
         let q = match *op {
             "<" => format!("(max-width:{}{u})", num(n - eps)),
@@ -440,9 +663,18 @@ fn condition(toks: &[Token], span: Span) -> Result<(Vec<String>, String)> {
             "active" => (vec![], ":active".into()),
             "disabled" => (vec![], ":disabled".into()),
             "checked" => (vec![], ":checked".into()),
-            "reduced-motion" => (vec!["@media (prefers-reduced-motion:reduce)".into()], String::new()),
-            "dark" => (vec!["@media (prefers-color-scheme:dark)".into()], String::new()),
-            "light" => (vec!["@media (prefers-color-scheme:light)".into()], String::new()),
+            "reduced-motion" => (
+                vec!["@media (prefers-reduced-motion:reduce)".into()],
+                String::new(),
+            ),
+            "dark" => (
+                vec!["@media (prefers-color-scheme:dark)".into()],
+                String::new(),
+            ),
+            "light" => (
+                vec!["@media (prefers-color-scheme:light)".into()],
+                String::new(),
+            ),
             "print" => (vec!["@media print".into()], String::new()),
             _ => return Err(cond_err(span)),
         });
@@ -469,7 +701,10 @@ fn decl(p: &Ident, toks: &[Token], span: Span) -> Result<String> {
 }
 
 fn expect_err(prop: &str, want: &str, got: &(Val, Span)) -> Diag {
-    let mut d = Diag::ty(got.1, format!("`{prop}` expects {want}, found {}", got.0.describe()));
+    let mut d = Diag::ty(
+        got.1,
+        format!("`{prop}` expects {want}, found {}", got.0.describe()),
+    );
     if let Val::Str(_) = got.0 {
         d = d.help("style values are typed; write `12px` or `#ff0000` without quotes");
     }
@@ -481,22 +716,38 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
     if vals.is_empty() {
         return Err(Diag::ty(span, format!("`{name}` needs a value")));
     }
-    let join = |vs: &[(Val, Span)]| vs.iter().map(|(v, _)| v.css()).collect::<Vec<_>>().join(" ");
+    let join = |vs: &[(Val, Span)]| {
+        vs.iter()
+            .map(|(v, _)| v.css())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
     let single = |want: &str| -> Result<&(Val, Span)> {
         if vals.len() != 1 {
-            return Err(Diag::ty(vals[1].1, format!("`{name}` takes a single {want}")));
+            return Err(Diag::ty(
+                vals[1].1,
+                format!("`{name}` takes a single {want}"),
+            ));
         }
         Ok(&vals[0])
     };
     match kind {
         Lengths(max, kws) => {
             if vals.len() > *max {
-                return Err(Diag::ty(vals[*max].1, format!("`{name}` takes at most {max} length(s)")));
+                return Err(Diag::ty(
+                    vals[*max].1,
+                    format!("`{name}` takes at most {max} length(s)"),
+                ));
             }
             for v in vals {
-                let ok = v.0.ty() == Some(VTy::Length) || matches!(&v.0, Val::Kw(k) if kws.contains(&k.as_str()));
+                let ok = v.0.ty() == Some(VTy::Length)
+                    || matches!(&v.0, Val::Kw(k) if kws.contains(&k.as_str()));
                 if !ok {
-                    let want = if kws.is_empty() { "a length (e.g. `12px`, `1.5rem`, `50%`)".to_string() } else { format!("a length or {}", kws.join("/")) };
+                    let want = if kws.is_empty() {
+                        "a length (e.g. `12px`, `1.5rem`, `50%`)".to_string()
+                    } else {
+                        format!("a length or {}", kws.join("/"))
+                    };
                     return Err(expect_err(name, &want, v));
                 }
             }
@@ -505,13 +756,18 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
         Color => {
             let v = single("color")?;
             if v.0.ty() != Some(VTy::Color) {
-                return Err(expect_err(name, "a color (e.g. `#1e90ff`, `transparent`, `rgb(0, 0, 0)`)", v));
+                return Err(expect_err(
+                    name,
+                    "a color (e.g. `#1e90ff`, `transparent`, `rgb(0, 0, 0)`)",
+                    v,
+                ));
             }
             Ok(v.0.css())
         }
         Background => {
             let v = single("color or gradient")?;
-            let ok = v.0.ty() == Some(VTy::Color) || matches!(&v.0, Val::Func(f, _) if f == "linear-gradient" || f == "radial-gradient");
+            let ok = v.0.ty() == Some(VTy::Color)
+                || matches!(&v.0, Val::Func(f, _) if f == "linear-gradient" || f == "radial-gradient");
             if !ok {
                 return Err(expect_err(name, "a color or `linear-gradient(...)`", v));
             }
@@ -521,7 +777,15 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
             let v = single("number")?;
             match v.0 {
                 Val::Num(n) if n >= *lo && n <= *hi => Ok(num(n)),
-                Val::Num(n) => Err(Diag::ty(v.1, format!("`{name}` must be between {} and {}, found {}", num(*lo), num(*hi), num(n)))),
+                Val::Num(n) => Err(Diag::ty(
+                    v.1,
+                    format!(
+                        "`{name}` must be between {} and {}, found {}",
+                        num(*lo),
+                        num(*hi),
+                        num(n)
+                    ),
+                )),
                 _ => Err(expect_err(name, "a number", v)),
             }
         }
@@ -529,9 +793,17 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
             let v = single("integer")?;
             match v.0 {
                 Val::Num(n) if n == n.trunc() && n >= *lo as f64 && n <= *hi as f64 => {
-                    Ok(if name == "span" { format!("span {}", num(n)) } else { num(n) })
+                    Ok(if name == "span" {
+                        format!("span {}", num(n))
+                    } else {
+                        num(n)
+                    })
                 }
-                _ => Err(expect_err(name, &format!("an integer from {lo} to {hi}"), v)),
+                _ => Err(expect_err(
+                    name,
+                    &format!("an integer from {lo} to {hi}"),
+                    v,
+                )),
             }
         }
         Weight => {
@@ -539,7 +811,11 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
             match &v.0 {
                 Val::Num(n) if (1.0..=1000.0).contains(n) => Ok(num(*n)),
                 Val::Kw(k) if k == "normal" || k == "bold" => Ok(k.clone()),
-                _ => Err(expect_err(name, "a font weight (100–900, `normal` or `bold`)", v)),
+                _ => Err(expect_err(
+                    name,
+                    "a font weight (100–900, `normal` or `bold`)",
+                    v,
+                )),
             }
         }
         LineHeight => {
@@ -553,13 +829,23 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
         Keyword(opts) => {
             let v = single("keyword")?;
             let Val::Kw(k) = &v.0 else {
-                return Err(expect_err(name, &format!("one of: {}", opts.iter().map(|o| o.0).collect::<Vec<_>>().join(", ")), v));
+                return Err(expect_err(
+                    name,
+                    &format!(
+                        "one of: {}",
+                        opts.iter().map(|o| o.0).collect::<Vec<_>>().join(", ")
+                    ),
+                    v,
+                ));
             };
             match opts.iter().find(|o| o.0 == k) {
                 Some((_, css)) => Ok(css.to_string()),
                 None => {
                     let mut d = Diag::ty(v.1, format!("`{name}` does not accept `{k}`"));
-                    d = d.help(format!("expected one of: {}", opts.iter().map(|o| o.0).collect::<Vec<_>>().join(", ")));
+                    d = d.help(format!(
+                        "expected one of: {}",
+                        opts.iter().map(|o| o.0).collect::<Vec<_>>().join(", ")
+                    ));
                     Err(d)
                 }
             }
@@ -576,7 +862,9 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
                     }
                     Val::Str(_) => out.push_str(&v.css()),
                     Val::Comma => out.push(','),
-                    other => return Err(expect_err(name, "font family names", &(other.clone(), *s))),
+                    other => {
+                        return Err(expect_err(name, "font family names", &(other.clone(), *s)));
+                    }
                 }
             }
             Ok(out)
@@ -591,12 +879,27 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
             for v in vals {
                 match &v.0 {
                     x if x.ty() == Some(VTy::Length) && w.is_none() => w = Some(x.css()),
-                    Val::Kw(k) if ["solid", "dashed", "dotted", "double"].contains(&k.as_str()) && st.is_none() => st = Some(k.clone()),
+                    Val::Kw(k)
+                        if ["solid", "dashed", "dotted", "double"].contains(&k.as_str())
+                            && st.is_none() =>
+                    {
+                        st = Some(k.clone())
+                    }
                     x if x.ty() == Some(VTy::Color) && c.is_none() => c = Some(x.css()),
-                    _ => return Err(expect_err(name, "`<width> <solid|dashed|dotted|double> <color>`", v)),
+                    _ => {
+                        return Err(expect_err(
+                            name,
+                            "`<width> <solid|dashed|dotted|double> <color>`",
+                            v,
+                        ));
+                    }
                 }
             }
-            Ok([w.or(Some("1px".into())), st.or(Some("solid".into())), c].into_iter().flatten().collect::<Vec<_>>().join(" "))
+            Ok([w.or(Some("1px".into())), st.or(Some("solid".into())), c]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" "))
         }
         Shadow => {
             if let [(Val::Kw(k), _)] = vals
@@ -606,11 +909,26 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
             }
             let mut parts = Vec::new();
             for group in vals.split(|v| v.0 == Val::Comma) {
-                let lens: Vec<_> = group.iter().filter(|v| v.0.ty() == Some(VTy::Length)).collect();
-                let colors: Vec<_> = group.iter().filter(|v| v.0.ty() == Some(VTy::Color)).collect();
+                let lens: Vec<_> = group
+                    .iter()
+                    .filter(|v| v.0.ty() == Some(VTy::Length))
+                    .collect();
+                let colors: Vec<_> = group
+                    .iter()
+                    .filter(|v| v.0.ty() == Some(VTy::Color))
+                    .collect();
                 let inset = group.iter().any(|v| v.0 == Val::Kw("inset".into()));
-                if lens.len() < 2 || lens.len() > 4 || colors.len() > 1 || lens.len() + colors.len() + inset as usize != group.len() {
-                    return Err(Diag::ty(span, format!("`{name}` expects `<x> <y> [blur] [spread] [color]`, e.g. `0 2px 8px #0003`")));
+                if lens.len() < 2
+                    || lens.len() > 4
+                    || colors.len() > 1
+                    || lens.len() + colors.len() + inset as usize != group.len()
+                {
+                    return Err(Diag::ty(
+                        span,
+                        format!(
+                            "`{name}` expects `<x> <y> [blur] [spread] [color]`, e.g. `0 2px 8px #0003`"
+                        ),
+                    ));
                 }
                 parts.push(join(group));
             }
@@ -618,11 +936,19 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
         }
         Transform => {
             for v in vals {
-                let Val::Func(f, args) = &v.0 else { return Err(expect_err(name, "transform functions like `scale(1.1)`", v)) };
+                let Val::Func(f, args) = &v.0 else {
+                    return Err(expect_err(name, "transform functions like `scale(1.1)`", v));
+                };
                 let ok = match f.as_str() {
-                    "scale" | "scaleX" | "scaleY" => args.iter().all(|a| matches!(a, Val::Num(_) | Val::Comma)),
-                    "rotate" => matches!(args.as_slice(), [Val::Len(_, u)] if u == "deg" || u == "turn"),
-                    "translate" | "translateX" | "translateY" => args.iter().all(|a| *a == Val::Comma || a.ty() == Some(VTy::Length)),
+                    "scale" | "scaleX" | "scaleY" => {
+                        args.iter().all(|a| matches!(a, Val::Num(_) | Val::Comma))
+                    }
+                    "rotate" => {
+                        matches!(args.as_slice(), [Val::Len(_, u)] if u == "deg" || u == "turn")
+                    }
+                    "translate" | "translateX" | "translateY" => args
+                        .iter()
+                        .all(|a| *a == Val::Comma || a.ty() == Some(VTy::Length)),
                     _ => false,
                 };
                 if !ok {
@@ -638,12 +964,19 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
                 let mut out = Vec::new();
                 for (i, v) in group.iter().enumerate() {
                     let ok = match (&v.0, i) {
-                        (Val::Kw(k), 0) => prop(k).map(|p| p.css[0].to_string()).or(if k == "all" { Some("all".into()) } else { None }).map(|c| out.push(c)).is_some(),
+                        (Val::Kw(k), 0) => prop(k)
+                            .map(|p| p.css[0].to_string())
+                            .or(if k == "all" { Some("all".into()) } else { None })
+                            .map(|c| out.push(c))
+                            .is_some(),
                         (Val::Len(_, u), 1 | 3) if u == "ms" || u == "s" => {
                             out.push(v.0.css());
                             true
                         }
-                        (Val::Kw(k), 2) if ["ease", "linear", "ease-in", "ease-out", "ease-in-out"].contains(&k.as_str()) => {
+                        (Val::Kw(k), 2)
+                            if ["ease", "linear", "ease-in", "ease-out", "ease-in-out"]
+                                .contains(&k.as_str()) =>
+                        {
                             out.push(k.clone());
                             true
                         }
@@ -655,7 +988,10 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
                     }
                 }
                 if out.len() < 2 {
-                    return Err(Diag::ty(span, "a transition needs a property and a duration, e.g. `opacity 200ms`"));
+                    return Err(Diag::ty(
+                        span,
+                        "a transition needs a property and a duration, e.g. `opacity 200ms`",
+                    ));
                 }
                 parts.push(out.join(" "));
             }
@@ -664,7 +1000,10 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
         Tracks => {
             if let [(Val::Num(n), s)] = vals {
                 if *n < 1.0 || *n > 100.0 || *n != n.trunc() {
-                    return Err(Diag::ty(*s, "the number of grid tracks must be an integer from 1 to 100"));
+                    return Err(Diag::ty(
+                        *s,
+                        "the number of grid tracks must be an integer from 1 to 100",
+                    ));
                 }
                 return Ok(format!("repeat({},minmax(0,1fr))", num(*n)));
             }
@@ -672,14 +1011,24 @@ fn check_value(name: &str, kind: &PropKind, vals: &[(Val, Span)], span: Span) ->
                 && f == "fill"
             {
                 let [Val::Len(n, u)] = args.as_slice() else {
-                    return Err(Diag::ty(*s, "`fill(...)` takes a minimum track width, e.g. `fill(220px)`"));
+                    return Err(Diag::ty(
+                        *s,
+                        "`fill(...)` takes a minimum track width, e.g. `fill(220px)`",
+                    ));
                 };
-                return Ok(format!("repeat(auto-fill,minmax(min({}{u},100%),1fr))", num(*n)));
+                return Ok(format!(
+                    "repeat(auto-fill,minmax(min({}{u},100%),1fr))",
+                    num(*n)
+                ));
             }
             for v in vals {
                 let ok = matches!(&v.0, Val::Len(..)) || matches!(&v.0, Val::Kw(k) if k == "auto");
                 if !ok {
-                    return Err(expect_err(name, "a track count, `fill(<min>)` or a list of lengths (`1fr 2fr 200px`)", v));
+                    return Err(expect_err(
+                        name,
+                        "a track count, `fill(<min>)` or a list of lengths (`1fr 2fr 200px`)",
+                        v,
+                    ));
                 }
             }
             Ok(join(vals))

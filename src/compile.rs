@@ -21,7 +21,10 @@ pub struct Failure {
 }
 
 /// Loads `entry` and everything it imports. File 0 is always the prelude.
-pub fn load(entry: &Path, sm: &mut SourceMap) -> Result<(Vec<ast::File>, Vec<Vec<usize>>), Vec<Diag>> {
+pub fn load(
+    entry: &Path,
+    sm: &mut SourceMap,
+) -> Result<(Vec<ast::File>, Vec<Vec<usize>>), Vec<Diag>> {
     let mut files = Vec::new();
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut imports: Vec<Vec<usize>> = Vec::new();
@@ -64,8 +67,10 @@ pub fn load(entry: &Path, sm: &mut SourceMap) -> Result<(Vec<ast::File>, Vec<Vec
         for item in &file.items {
             if let ast::Item::Import(im) = item {
                 if !im.path.ends_with(".vcwl") {
-                    return Err(vec![Diag::compile(im.span, "import paths must name a `.vcwl` file")
-                        .help("e.g. `import \"./components/card.vcwl\"`")]);
+                    return Err(vec![
+                        Diag::compile(im.span, "import paths must name a `.vcwl` file")
+                            .help("e.g. `import \"./components/card.vcwl\"`"),
+                    ]);
                 }
                 queue.push((dir.join(&im.path), Some((idx, im.span))));
             }
@@ -86,12 +91,16 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
     let mut ck = Checker::new(&files);
     ck.declare(&imports);
     if !ck.diags.is_empty() {
-        return Err(Failure { diags: std::mem::take(&mut ck.diags) });
+        return Err(Failure {
+            diags: std::mem::take(&mut ck.diags),
+        });
     }
     ck.check_fns();
     let app = crate::app::check_app(&mut ck);
     if !ck.diags.is_empty() {
-        return Err(Failure { diags: std::mem::take(&mut ck.diags) });
+        return Err(Failure {
+            diags: std::mem::take(&mut ck.diags),
+        });
     }
     let fns: Vec<_> = ck.fns.iter().map(|f| f.clone().unwrap()).collect();
     let mut lw = lower::Lower::new(&ck.adts, &fns);
@@ -99,14 +108,18 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
     // `main` in the entry file is exported; so are `test_*` functions in test files.
     for (id, sig) in ck.sigs.iter().enumerate() {
         let entry_file = sig.file == 1;
-        let is_test = sig.name.starts_with("test_") && sig.params.is_empty() && sig.generics.is_empty();
-        if sig.file != 0 && entry_file && (sig.name == "main" && sig.generics.is_empty() || is_test) {
+        let is_test =
+            sig.name.starts_with("test_") && sig.params.is_empty() && sig.generics.is_empty();
+        if sig.file != 0 && entry_file && (sig.name == "main" && sig.generics.is_empty() || is_test)
+        {
             lw.export_fn(id, &sig.name);
             exports.push(sig.name.clone());
         }
     }
     let app_out = match app {
-        Some(a) => Some(crate::app::lower_app(&mut lw, sm, a, opts).map_err(|d| Failure { diags: vec![d] })?),
+        Some(a) => Some(
+            crate::app::lower_app(&mut lw, sm, a, opts).map_err(|d| Failure { diags: vec![d] })?,
+        ),
         None => None,
     };
     lw.drain();
@@ -117,7 +130,16 @@ pub fn compile(entry: &Path, sm: &mut SourceMap, opts: &Options) -> Result<Outpu
         let _ = std::fs::write(path, &wasm);
     }
     if let Err(e) = codegen::validate(&wasm) {
-        return Err(Failure { diags: vec![Diag::compile(Span::default(), format!("internal compiler error: generated module is invalid: {e}"))] });
+        return Err(Failure {
+            diags: vec![Diag::compile(
+                Span::default(),
+                format!("internal compiler error: generated module is invalid: {e}"),
+            )],
+        });
     }
-    Ok(Output { wasm, exports, app: app_out })
+    Ok(Output {
+        wasm,
+        exports,
+        app: app_out,
+    })
 }

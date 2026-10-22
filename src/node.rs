@@ -16,14 +16,19 @@ pub struct RunResult {
 }
 
 fn runtime_url() -> String {
-    format!("data:text/javascript;base64,{}", base64(RUNTIME_JS.as_bytes()))
+    format!(
+        "data:text/javascript;base64,{}",
+        base64(RUNTIME_JS.as_bytes())
+    )
 }
 
 pub fn base64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
     for c in data.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
         for i in 0..4 {
             if i <= c.len() {
                 out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);

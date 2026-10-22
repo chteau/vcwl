@@ -2,12 +2,14 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::compile::{compile, Options, Output};
+use crate::compile::{Options, Output, compile};
 use crate::diag::SourceMap;
 
 pub const VCWL_JS: &str = include_str!("../runtime/vcwl.js");
 pub const BOOT_JS: &str = include_str!("../runtime/boot.js");
 pub const DEV_JS: &str = include_str!("../runtime/dev.js");
+/// The renderer, built from `render/` by `build.rs`.
+pub const RENDER_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/render.wasm"));
 
 pub struct Project {
     pub root: PathBuf,
@@ -18,19 +20,30 @@ pub struct Project {
 impl Project {
     /// Finds `vcwl.toml` in `start` or its ancestors.
     pub fn find(start: &Path) -> Result<Project, String> {
-        let start = start.canonicalize().map_err(|e| format!("{}: {e}", start.display()))?;
+        let start = start
+            .canonicalize()
+            .map_err(|e| format!("{}: {e}", start.display()))?;
         let mut dir = Some(start.as_path());
         while let Some(d) = dir {
             let manifest = d.join("vcwl.toml");
             if manifest.is_file() {
-                let text = std::fs::read_to_string(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
-                let entry = manifest_value(&text, "entry").unwrap_or_else(|| "src/main.vcwl".into());
+                let text = std::fs::read_to_string(&manifest)
+                    .map_err(|e| format!("{}: {e}", manifest.display()))?;
+                let entry =
+                    manifest_value(&text, "entry").unwrap_or_else(|| "src/main.vcwl".into());
                 let out = manifest_value(&text, "out").unwrap_or_else(|| "dist".into());
-                return Ok(Project { root: d.to_path_buf(), entry: d.join(entry), out: d.join(out) });
+                return Ok(Project {
+                    root: d.to_path_buf(),
+                    entry: d.join(entry),
+                    out: d.join(out),
+                });
             }
             dir = d.parent();
         }
-        Err(format!("no vcwl.toml found in {} or its parents (create a project with `vcwl new <name>`)", start.display()))
+        Err(format!(
+            "no vcwl.toml found in {} or its parents (create a project with `vcwl new <name>`)",
+            start.display()
+        ))
     }
 }
 
@@ -51,7 +64,10 @@ pub fn compile_entry(entry: &Path, dev: bool) -> Result<(Output, SourceMap), Str
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// Content-Security-Policy derived from the app's capabilities.
@@ -65,40 +81,81 @@ pub fn csp(caps: &crate::app::Capabilities, dev: bool) -> String {
     }
     let _ = dev;
     let connect = connect.join(" ");
-    // 'self' is always allowed for scripts and the module fetch of app.wasm.
+    // 'self' is always allowed for scripts and the module fetch of app.wasm. Rendering uses a
+    // canvas, so no style sheets are loaded.
     format!(
-        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' https: data:; \
+        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' https: data:; \
          connect-src {connect}; base-uri 'none'; form-action 'none'"
     )
 }
 
+/// The page: metadata and one script. The app's configuration and styles travel inside
+/// `app.wasm`; the renderer creates the only element, a canvas.
 pub fn index_html(title: &str, caps: &crate::app::Capabilities, dev: bool) -> String {
-    let config = format!("{{\"caps\":{},\"dev\":{dev}}}", caps.to_json());
-    let dev_script = if dev { "\n<script type=\"module\" src=\"dev.js\"></script>" } else { "" };
+    let dev_script = if dev {
+        "\n<script type=\"module\" src=\"dev.js\"></script>"
+    } else {
+        ""
+    };
     format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+        "<!doctype html>\n<html lang=\"en\">\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n\
 <meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n\
-<title>{title}</title>\n<link rel=\"icon\" href=\"data:,\">\n<link rel=\"stylesheet\" href=\"app.css\">\n\
-<script type=\"application/json\" id=\"vcwl-config\">{config}</script>\n\
-<script type=\"module\" src=\"boot.js\"></script>{dev_script}\n</head>\n\
-<body>\n<noscript>This application needs JavaScript and WebAssembly enabled.</noscript>\n</body>\n</html>\n",
+<title>{title}</title>\n<link rel=\"icon\" href=\"data:,\">\n\
+<script type=\"module\" src=\"boot.js\"></script>{dev_script}\n\
+<noscript>This application needs JavaScript and WebAssembly enabled.</noscript>\n",
         csp = html_escape(&csp(caps, dev)),
         title = html_escape(title),
     )
+}
+
+/// Appends a custom section to a WebAssembly module.
+fn custom_section(wasm: &mut Vec<u8>, name: &str, data: &[u8]) {
+    fn leb(out: &mut Vec<u8>, mut v: usize) {
+        loop {
+            let b = (v & 0x7f) as u8;
+            v >>= 7;
+            out.push(if v == 0 { b } else { b | 0x80 });
+            if v == 0 {
+                break;
+            }
+        }
+    }
+    let mut body = Vec::new();
+    leb(&mut body, name.len());
+    body.extend(name.as_bytes());
+    body.extend(data);
+    wasm.push(0);
+    leb(wasm, body.len());
+    wasm.extend(body);
+}
+
+/// `app.wasm` with the app's styles and configuration attached.
+pub fn app_wasm(wasm: &[u8], app: &crate::app::AppOutput, dev: bool) -> Vec<u8> {
+    let mut out = wasm.to_vec();
+    custom_section(&mut out, "vcwl.styles", app.css.as_bytes());
+    let config = format!("{{\"caps\":{},\"dev\":{dev}}}", app.caps.to_json());
+    custom_section(&mut out, "vcwl.config", config.as_bytes());
+    out
 }
 
 /// Compiles the project and writes static artifacts to `out`. Returns the artifact sizes.
 pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>, String> {
     let (o, _) = compile_entry(entry, dev)?;
     let Some(app) = &o.app else {
-        return Err(format!("{}: no `app` declaration; nothing to build (use `vcwl run` for programs with `main`)", entry.display()));
+        return Err(format!(
+            "{}: no `app` declaration; nothing to build (use `vcwl run` for programs with `main`)",
+            entry.display()
+        ));
     };
     std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let mut files: Vec<(&str, Vec<u8>)> = vec![
-        ("index.html", index_html(&app.title, &app.caps, dev).into_bytes()),
-        ("app.wasm", o.wasm.clone()),
-        ("app.css", app.css.clone().into_bytes()),
+        (
+            "index.html",
+            index_html(&app.title, &app.caps, dev).into_bytes(),
+        ),
+        ("app.wasm", app_wasm(&o.wasm, app, dev)),
+        ("render.wasm", RENDER_WASM.to_vec()),
         ("vcwl.js", VCWL_JS.as_bytes().to_vec()),
         ("boot.js", BOOT_JS.as_bytes().to_vec()),
         // GitHub Pages: serve files as-is (no Jekyll processing).
@@ -109,9 +166,12 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
     } else {
         let _ = std::fs::remove_file(out.join("dev.js"));
     }
+    // Left over from builds before the canvas renderer.
+    let _ = std::fs::remove_file(out.join("app.css"));
     let mut sizes = Vec::new();
     for (name, data) in files {
-        std::fs::write(out.join(name), &data).map_err(|e| format!("{}: {e}", out.join(name).display()))?;
+        std::fs::write(out.join(name), &data)
+            .map_err(|e| format!("{}: {e}", out.join(name).display()))?;
         if !name.starts_with('.') {
             sizes.push((name.to_string(), data.len()));
         }
@@ -126,19 +186,36 @@ pub fn clean(p: &Project) -> Result<bool, String> {
     // Only remove the configured output directory, and only if it is inside the project.
     let out = p.out.canonicalize().map_err(|e| e.to_string())?;
     if !out.starts_with(&p.root) || out == p.root || out.join("vcwl.toml").exists() {
-        return Err(format!("refusing to delete {}: not a build directory inside the project", out.display()));
+        return Err(format!(
+            "refusing to delete {}: not a build directory inside the project",
+            out.display()
+        ));
     }
     std::fs::remove_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
     Ok(true)
 }
 
 pub fn new_project(dir: &Path) -> Result<(), String> {
-    if dir.exists() && dir.read_dir().map(|mut d| d.next().is_some()).unwrap_or(true) {
+    if dir.exists()
+        && dir
+            .read_dir()
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(true)
+    {
         return Err(format!("{} already exists and is not empty", dir.display()));
     }
-    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("app").to_string();
+    let name = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("app")
+        .to_string();
     let files = [
-        ("vcwl.toml", format!("# VCWL project\nname = \"{name}\"\nentry = \"src/main.vcwl\"\nout = \"dist\"\n")),
+        (
+            "vcwl.toml",
+            format!(
+                "# VCWL project\nname = \"{name}\"\nentry = \"src/main.vcwl\"\nout = \"dist\"\n"
+            ),
+        ),
         ("src/main.vcwl", STARTER.replace("{{name}}", &name)),
         ("src/components/counter.vcwl", STARTER_COUNTER.to_string()),
         ("tests/main_test.vcwl", STARTER_TEST.to_string()),
@@ -215,7 +292,9 @@ pub fn vcwl_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     let mut entries: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
     entries.sort();
     for p in entries {
-        let hidden = p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.') || n == "node_modules" || n == "target");
+        let hidden = p.file_name().is_some_and(|n| {
+            n.to_string_lossy().starts_with('.') || n == "node_modules" || n == "target"
+        });
         if p.is_dir() {
             if !hidden {
                 vcwl_files(&p, out)?;

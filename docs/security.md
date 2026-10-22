@@ -7,14 +7,14 @@ enforce.
 
 ## Enforced
 
-- **No HTML injection from application code.** The module cannot create markup from strings. Text
-  is inserted with `createTextNode`/`data`, attributes with `setAttribute`.
-- **No script URLs.** The host rewrites `javascript:` and other script-capable URLs in `href`,
-  `src`, `action` and `formaction` to `about:invalid`.
-- **No event-handler attributes.** The host refuses attributes starting with `on` and properties
-  other than `value`.
+- **No markup at all.** The element tree lives in the renderer; nothing the application produces
+  reaches the browser DOM, which contains only the canvas. Text is painted, never parsed.
+- **No script URLs.** Links are followed by the host after rewriting `javascript:` and other
+  script-capable URLs to `about:invalid`; image sources are sanitized the same way.
+- **No event-handler attributes.** The renderer refuses attributes starting with `on` and properties
+  other than `value`, and rejects malformed command buffers (unknown nodes, cycles).
 - **Capabilities.** An app declares the hosts it may contact. The build emits a
-  Content-Security-Policy meta tag: `default-src 'none'`, scripts and styles from `'self'` only,
+  Content-Security-Policy meta tag: `default-src 'none'`, scripts from `'self'` only, no styles,
   `wasm-unsafe-eval` for the module, `connect-src` limited to `'self'` plus the declared hosts
   (HTTPS only). The host also refuses `fetch` URLs outside the capability before any request is
   made, and `fetch` without a network capability is a compile error.
@@ -22,11 +22,13 @@ enforce.
   generated decoders check every value and report the path of the first mismatch.
 - **Bounds and arithmetic checks.** Array indexing is bounds-checked; division by zero traps. A trap
   stops the application (no further handlers run) and dev builds show the error.
-- **No re-entrancy.** Events raised while the host applies DOM commands are queued until the current
-  call into the module returns.
+- **No re-entrancy.** The renderer queues events and the host delivers them one at a time, between
+  calls into the application; events for elements removed in the meantime are dropped.
 
 ## Not enforced or not yet implemented
 
+- The canvas renderer exposes nothing to assistive technology; see
+  [limitations](limitations.md).
 - A meta-tag CSP cannot set `frame-ancestors`, reporting or sandboxing; configure HTTP headers on
   the server when possible.
 - `storage` capabilities are parsed but there is no storage API yet.

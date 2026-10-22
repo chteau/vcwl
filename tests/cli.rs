@@ -18,7 +18,12 @@ fn stdout(o: &Output) -> String {
 #[test]
 fn test_command_runs_project_tests() {
     let o = vcwl("examples/todo", &["test"]);
-    assert!(o.status.success(), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+    assert!(
+        o.status.success(),
+        "{}{}",
+        stdout(&o),
+        String::from_utf8_lossy(&o.stderr)
+    );
     assert!(stdout(&o).contains("4 passed, 0 failed"), "{}", stdout(&o));
 }
 
@@ -28,7 +33,10 @@ fn test_command_reports_failures() {
     let out = stdout(&o);
     assert!(!o.status.success());
     assert!(out.contains("ok   test_passes"), "{out}");
-    assert!(out.contains("FAIL test_fails\n       context line\n       panic: deliberate failure"), "{out}");
+    assert!(
+        out.contains("FAIL test_fails\n       context line\n       panic: deliberate failure"),
+        "{out}"
+    );
     assert!(out.contains("1 passed, 1 failed"), "{out}");
 }
 
@@ -58,7 +66,11 @@ fn dev_server_serves_and_rebuilds() {
     let dir = std::env::temp_dir().join(format!("vcwl-dev-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("src")).unwrap();
-    std::fs::write(dir.join("vcwl.toml"), "entry = \"src/main.vcwl\"\nout = \"dist\"\n").unwrap();
+    std::fs::write(
+        dir.join("vcwl.toml"),
+        "entry = \"src/main.vcwl\"\nout = \"dist\"\n",
+    )
+    .unwrap();
     let main = dir.join("src/main.vcwl");
     let app = "app \"Dev\"\n\ncomponent App {\n    paragraph(\"one\")\n}\n";
     std::fs::write(&main, app).unwrap();
@@ -70,13 +82,21 @@ fn dev_server_serves_and_rebuilds() {
         .spawn()
         .unwrap();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-    let serving = lines.by_ref().map(Result::unwrap).find(|l| l.contains("http://"));
+    let serving = lines
+        .by_ref()
+        .map(Result::unwrap)
+        .find(|l| l.contains("http://"));
     // Keep draining the server's output so its writes never block.
     std::thread::spawn(move || lines.for_each(drop));
 
     let result = std::panic::catch_unwind(|| {
         let serving = serving.expect("dev server did not start");
-        let addr = serving.split("http://").nth(1).and_then(|a| a.split('/').next()).unwrap().to_string();
+        let addr = serving
+            .split("http://")
+            .nth(1)
+            .and_then(|a| a.split('/').next())
+            .unwrap()
+            .to_string();
         assert!(http_get(&addr, "/").contains("src=\"dev.js\""));
         assert!(http_get(&addr, "/app.wasm").contains("content-type: application/wasm"));
         assert!(http_get(&addr, "/__vcwl/status").ends_with("\r\n\r\n1\n"));
@@ -85,7 +105,10 @@ fn dev_server_serves_and_rebuilds() {
 
         std::fs::write(&main, app.replace("\"one\"", "1 + ")).unwrap();
         let r = wait_for(&addr, "/__vcwl/status", |r| r.contains("main.vcwl:"));
-        assert!(r.contains("\r\n\r\n1\n"), "a failed build keeps the version: {r}");
+        assert!(
+            r.contains("\r\n\r\n1\n"),
+            "a failed build keeps the version: {r}"
+        );
 
         std::fs::write(&main, app.replace("\"one\"", "\"two\"")).unwrap();
         wait_for(&addr, "/__vcwl/status", |r| r.ends_with("\r\n\r\n2\n"));
@@ -98,6 +121,22 @@ fn dev_server_serves_and_rebuilds() {
 
 #[test]
 fn repository_sources_are_formatted() {
-    let o = vcwl(".", &["fmt", "--check", "src", "examples", "tests/programs", "tests/cli", "tests/browser/fixtures"]);
-    assert!(o.status.success(), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+    let o = vcwl(
+        ".",
+        &[
+            "fmt",
+            "--check",
+            "src",
+            "examples",
+            "tests/programs",
+            "tests/cli",
+            "tests/browser/fixtures",
+        ],
+    );
+    assert!(
+        o.status.success(),
+        "{}{}",
+        stdout(&o),
+        String::from_utf8_lossy(&o.stderr)
+    );
 }

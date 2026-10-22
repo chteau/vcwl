@@ -1,7 +1,7 @@
 //! `vcwl test [paths...]`: compiles each test file and runs its `test_*` functions in Node.
 //! A test passes unless it panics or traps. Without paths, runs `tests/**/*.vcwl` of the project.
 use crate::node::{self, TEST_MARK};
-use crate::project::{self, compile_entry, Project};
+use crate::project::{self, Project, compile_entry};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -31,18 +31,27 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 continue;
             }
         };
-        let names: Vec<&str> = out.exports.iter().map(String::as_str).filter(|n| n.starts_with("test_")).collect();
+        let names: Vec<&str> = out
+            .exports
+            .iter()
+            .map(String::as_str)
+            .filter(|n| n.starts_with("test_"))
+            .collect();
         if names.is_empty() {
             println!("  (no test_* functions)");
             continue;
         }
-        let r = node::run_tests(&out.wasm, &names).map_err(|e| format!("cannot start node: {e}"))?;
+        let r =
+            node::run_tests(&out.wasm, &names).map_err(|e| format!("cannot start node: {e}"))?;
         let mut pending = Vec::new();
         let mut reported = 0;
         for line in r.stdout.lines() {
             match line.strip_prefix(TEST_MARK) {
                 Some(m) => {
-                    let (ok, name) = m.split_once(' ').map(|(s, n)| (s == "PASS", n)).unwrap_or((false, m));
+                    let (ok, name) = m
+                        .split_once(' ')
+                        .map(|(s, n)| (s == "PASS", n))
+                        .unwrap_or((false, m));
                     println!("  {} {name}", if ok { "ok  " } else { "FAIL" });
                     if ok {
                         passed += 1;
@@ -67,6 +76,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    println!("\n{passed} passed, {failed} failed in {:.0?}", start.elapsed());
-    if failed == 0 { Ok(()) } else { Err(String::new()) }
+    println!(
+        "\n{passed} passed, {failed} failed in {:.0?}",
+        start.elapsed()
+    );
+    if failed == 0 {
+        Ok(())
+    } else {
+        Err(String::new())
+    }
 }

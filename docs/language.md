@@ -229,7 +229,10 @@ Property values are checked at compile time (units, colors, keywords). Propertie
 `when` conditions: `viewport < | <= | > | >= length`, `container ...`, `hover`, `focus`,
 `focus-within`, `active`, `disabled`, `checked`, `dark`, `light`, `reduced-motion`, `print`.
 
-Each style block becomes a CSS class named after a hash of its contents.
+Each style block becomes a class named after a hash of its contents. The renderer supports the
+properties above with these exceptions: `transition` has no effect (changes apply immediately),
+`position: sticky` behaves as `relative`, and `display: inline` elements take no padding, border or
+background.
 
 ### Fetch
 

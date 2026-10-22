@@ -1,6 +1,6 @@
 # Deploying to GitHub Pages
 
-`vcwl build` writes a static site to `dist/` (`index.html`, `app.wasm`, `app.css`, `vcwl.js`,
+`vcwl build` writes a static site to `dist/` (`index.html`, `app.wasm`, `render.wasm`, `vcwl.js`,
 `boot.js`, `.nojekyll`). All paths are relative and routing uses the URL hash, so the site works
 from any sub-path such as `https://user.github.io/repo/`.
 
