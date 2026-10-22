@@ -1,0 +1,4 @@
+name = "vibes"
+version = "0.1.0"
+description = "Components with no purpose except emotional support. Ships compliments to prod."
+registry = "../.."
