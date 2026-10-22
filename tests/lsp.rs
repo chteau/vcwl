@@ -62,7 +62,12 @@ fn language_server_reports_errors_lints_and_formats() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("prog.vcwl");
     std::fs::write(&file, "fn main() {\n}\n").unwrap();
-    let uri = format!("file://{}", file.display());
+    // `file:///C:/...` on Windows.
+    let path = file.to_string_lossy().replace('\\', "/");
+    let uri = format!(
+        "file://{}{path}",
+        if path.starts_with('/') { "" } else { "/" }
+    );
     let mut child = Command::new(env!("CARGO_BIN_EXE_vcwl"))
         .arg("lsp")
         .stdin(Stdio::piped())

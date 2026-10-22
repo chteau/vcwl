@@ -189,12 +189,22 @@ fn path_of(uri: &str) -> PathBuf {
             i += 1;
         }
     }
-    PathBuf::from(String::from_utf8_lossy(&out).into_owned())
+    let path = String::from_utf8_lossy(&out).into_owned();
+    // `file:///C:/dir/file.vcwl` on Windows.
+    match path.strip_prefix('/') {
+        Some(rest) if cfg!(windows) && rest.get(1..2) == Some(":") => PathBuf::from(rest),
+        _ => PathBuf::from(path),
+    }
 }
 
 fn uri_of(path: &Path) -> String {
-    let mut s = String::from("file://");
-    for c in path.to_string_lossy().chars() {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let mut s = String::from(if path.starts_with('/') {
+        "file://"
+    } else {
+        "file:///"
+    });
+    for c in path.chars() {
         match c {
             'a'..='z' | 'A'..='Z' | '0'..='9' | '/' | '-' | '_' | '.' | '~' => s.push(c),
             _ => {
