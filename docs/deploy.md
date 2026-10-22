@@ -2,8 +2,22 @@
 
 `vcwl build` writes a static site to `dist/` (`index.html`, `app.wasm`, `render.wasm`, `vcwl.js`,
 `boot.js`, `.nojekyll`), and copies the project's `public/` folder (images, data, icons) into it
-as is. All paths are relative and routing uses the URL hash, so the site works
+as is. All paths are relative and routing uses the URL hash by default, so the site works
 from any sub-path such as `https://user.github.io/repo/`.
+
+## Real URLs (`routing = "path"`)
+
+```toml
+routing = "path"
+url = "https://user.github.io/repo/"   # needed for 404.html under a sub-path; adds a sitemap
+```
+
+Routes then have real URLs (`/repo/docs/intro/` instead of `/repo/#/docs/intro`). The build writes
+one page per route (`docs/intro/index.html`), so static hosts serve every route directly, and a
+`404.html` that GitHub Pages and most static hosts return for unknown paths; it starts the app on
+its fallback route (`_ =>`). Links use the History API, the back button works, and old `#/` links
+are moved to their path. With `url` set, each page gets a canonical link and `sitemap.xml` lists
+them. Combined with `prerender = true`, every page holds its own prerendered HTML.
 
 GitHub Pages serves `.wasm` files as `application/wasm`, which lets the browser compile the module
 while it downloads. Other hosts should do the same; the host falls back to a non-streaming

@@ -1,0 +1,51 @@
+// Browser-test fixture: path routing (one page per route) under a sub-path, prerendered.
+app "Paths" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+struct Data {
+    name: String,
+}
+
+component Nav {
+    row(gap: 12px) {
+        link("Home", to: "/", current: route == "/")
+        link("About", to: "/about", current: route == "/about")
+        link("Intro", to: "/docs/intro", current: route == "/docs/intro")
+        link("Missing", to: "/nope")
+    }
+}
+
+component Intro {
+    state name: String = "loading"
+
+    on mount {
+        fetch get("data.json") as Data {
+            Ok(d) => {
+                name = d.name
+            }
+            Err(e) => {
+                name = e.message()
+            }
+        }
+    }
+
+    column {
+        heading("Intro", level: 1)
+        paragraph(name)
+    }
+}
+
+component App {
+    column(gap: 16px) {
+        Nav()
+        routes {
+            "/" => heading("Home page", level: 1)
+            "/about" => heading("About page", level: 1)
+            "/docs/intro" => Intro()
+            _ => heading("Not found", level: 1)
+        }
+    }
+}

@@ -93,7 +93,7 @@ dependencies). Its only import is `host.measure(font, spacing, text) -> width`.
 
 The host (`runtime/vcwl.js`) forwards browser events to the renderer, delivers events to the app,
 replays display lists on the canvas each animation frame, and performs effects the renderer asks
-for: title, hash navigation, opening links, `fetch`, image loading, cursor, clipboard writes.
+for: title, navigation (URL hash, or the History API with `routing = "path"`), opening links, `fetch`, image loading, cursor, clipboard writes.
 
 
 ### Accessibility mirror
@@ -113,6 +113,8 @@ With `prerender = true`, `vcwl build` runs `runtime/prerender.mjs` in Node: it i
 and for each route calls the renderer's `prerender()` export, which serializes the tree as escaped
 HTML plus the CSS for bound styles (`render/src/engine/html.rs`). The build wraps each route in a
 section switched by `:target`, adds the CSS hash to the CSP and writes it into `index.html`.
+With path routing each route is prerendered into its own page, and route links become relative
+URLs (`../about/`; absolute under the site's base path in `404.html`).
 In the browser the canvas stays hidden until its first frame; before that frame the host calls
 `take_over(scrollY)`, so the renderer scrolls to the same place and shows `when appear` elements
 in view without their intro transition. Then the static markup is removed.

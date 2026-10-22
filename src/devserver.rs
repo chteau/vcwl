@@ -126,6 +126,7 @@ fn serve(conn: TcpStream, out: &Path, status: &Shared) -> std::io::Result<()> {
     let mut parts = request.split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
     let path = target.split(['?', '#']).next().unwrap_or("/");
+    let mut location = String::new();
     let (code, ctype, body): (&str, &str, Vec<u8>) = if method != "GET" && method != "HEAD" {
         (
             "405 Method Not Allowed",
@@ -142,8 +143,18 @@ fn serve(conn: TcpStream, out: &Path, status: &Shared) -> std::io::Result<()> {
     } else {
         match resolve(out, path) {
             None => ("400 Bad Request", "text/plain", b"bad path".to_vec()),
+            // Like static hosts: `/about` → `/about/`, unknown paths get 404.html (path routing).
+            Some(file) if file.is_dir() => {
+                location = format!("location: {path}/\r\n");
+                ("301 Moved Permanently", "text/plain", Vec::new())
+            }
             Some(file) => match std::fs::read(&file) {
                 Ok(data) => ("200 OK", content_type(&file), data),
+                Err(_) if out.join("404.html").is_file() && path != "/" => (
+                    "404 Not Found",
+                    "text/html; charset=utf-8",
+                    std::fs::read(out.join("404.html"))?,
+                ),
                 // Before the first successful build, still serve a page that reports the errors.
                 Err(_) => match path {
                     "/" | "/index.html" => (
@@ -161,7 +172,7 @@ fn serve(conn: TcpStream, out: &Path, status: &Shared) -> std::io::Result<()> {
     let mut w = &conn;
     write!(
         w,
-        "HTTP/1.1 {code}\r\ncontent-type: {ctype}\r\ncontent-length: {}\r\ncache-control: no-store\r\nconnection: close\r\n\r\n",
+        "HTTP/1.1 {code}\r\n{location}content-type: {ctype}\r\ncontent-length: {}\r\ncache-control: no-store\r\nconnection: close\r\n\r\n",
         body.len()
     )?;
     if method != "HEAD" {

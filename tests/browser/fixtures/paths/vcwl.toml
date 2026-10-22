@@ -1,0 +1,5 @@
+entry = "src/main.vcwl"
+out = "dist"
+routing = "path"
+prerender = true
+url = "https://example.com/site/"

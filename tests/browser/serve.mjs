@@ -21,9 +21,14 @@ export function serve(root, base = "/", api = null) {
       res.writeHead(403).end();
       return;
     }
+    // Like static hosts: `/about` → `/about/`, unknown paths get 404.html if there is one.
+    if (fs.statSync(file, { throwIfNoEntry: false })?.isDirectory()) {
+      res.writeHead(301, { location: url.pathname + "/" }).end();
+      return;
+    }
     fs.readFile(file, (err, data) => {
       if (err) {
-        res.writeHead(404).end();
+        fs.readFile(path.join(root, "404.html"), (err2, page) => (err2 ? res.writeHead(404).end() : res.writeHead(404, { "content-type": "text/html" }).end(page)));
         return;
       }
       res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(data);

@@ -192,3 +192,48 @@ fn build_checks_fonts_and_allows_the_prerendered_style_by_hash() {
     assert!(html.contains(">&lt;hi&gt;<"), "escaped text: {html}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn path_routing_writes_a_page_per_route_and_rejects_unsafe_routes() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("path-project");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    let write = |routing: &str, route: &str| {
+        std::fs::write(
+            dir.join("vcwl.toml"),
+            format!("entry = \"src/main.vcwl\"\nout = \"dist\"\nrouting = \"{routing}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/main.vcwl"),
+            format!(
+                "app \"T\"\n\ncomponent App {{\n    routes {{\n        \"{route}\" => text(\"a\")\n        _ => text(\"b\")\n    }}\n}}\n"
+            ),
+        )
+        .unwrap();
+        Command::new(env!("CARGO_BIN_EXE_vcwl"))
+            .arg("build")
+            .current_dir(&dir)
+            .output()
+            .unwrap()
+    };
+    let o = write("pushstate", "/a");
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        !o.status.success() && err.contains("routing = \"pushstate\""),
+        "{err}"
+    );
+    let o = write("path", "/a/../b");
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        !o.status.success() && err.contains("cannot be a page"),
+        "{err}"
+    );
+    let o = write("path", "/docs/a");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let page = std::fs::read_to_string(dir.join("dist/docs/a/index.html")).unwrap();
+    assert!(page.contains("src=\"../../boot.js\""), "{page}");
+    let missing = std::fs::read_to_string(dir.join("dist/404.html")).unwrap();
+    assert!(missing.contains("src=\"/boot.js\""), "{missing}");
+    assert!(!dir.join("dist/sitemap.xml").exists(), "no url, no sitemap");
+}

@@ -249,10 +249,12 @@ mod wasm {
         with(|e| e.choose_index(id, i as usize));
     }
 
-    /// Style rules, a NUL byte, then the tree as HTML (prerendering).
+    /// Style rules, a NUL byte, then the tree as HTML (prerendering). The input buffer holds
+    /// the page's way to the site root for path routing, or nothing for hash routing.
     #[unsafe(no_mangle)]
-    pub extern "C" fn prerender() -> usize {
-        let (html, css) = with(|e| e.html());
+    pub extern "C" fn prerender(len: usize) -> usize {
+        let root = input(len);
+        let (html, css) = with(|e| e.html((!root.is_empty()).then_some(root.as_str())));
         output(format!("{css}\0{html}").into_bytes())
     }
 

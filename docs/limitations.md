@@ -19,7 +19,10 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 - A single command string is limited to 60,000 bytes (text content, attribute values, fetch bodies).
 - Keyed list matching tries the same position first, then scans: matching is O(n·m) in the worst
   case (n new, m old items) when many items change position.
-- Routing uses the URL hash; there is no history-API routing or route parameters yet.
+- No route parameters (`/post/:id`) yet; every route is a literal path.
+- With `routing = "path"`, route paths must be letters, digits, `-`, `_`, `.` and `~` between
+  slashes (each becomes a directory of `dist/`), and `404.html` needs `url` in vcwl.toml when the
+  site is served from a sub-path.
 
 ## Rendering (canvas, see [ADR 10](adr/0010-canvas-renderer.md))
 

@@ -36,7 +36,7 @@ Working end to end, tested in Node.js and headless Chrome:
 - language: structs, enums with payloads, generics (monomorphized), pattern matching with
   exhaustiveness checking, immutable values with `var` locals, string interpolation, modules;
 - components with props, state, derived values, typed events, conditional and keyed list
-  rendering, hash routing and forms with native HTML elements;
+  rendering, routing (URL hash or real paths) and forms with native HTML elements;
 - typed styles with responsive (`when viewport < 600px`) and state (`when hover`) variants;
 - a renderer of its own ([ADR 10](docs/adr/0010-canvas-renderer.md)): CSS cascade and
   inheritance, block/inline/flex/grid layout, text wrapping, painting to canvas, focus and keyboard

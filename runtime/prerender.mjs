@@ -1,6 +1,7 @@
 // Prerenders a built application (`vcwl build` with `prerender = true`): runs app.wasm with
-// render.wasm in Node.js for each route and writes, per route, the route, the extra style
-// rules and the HTML, each followed by a NUL character. Same-origin GET requests are served
+// render.wasm in Node.js for each [route, way to the site root] pair and writes, per pair, the
+// extra style rules and the HTML, each followed by a NUL character. The root (path routing)
+// turns route links into real URLs; it is empty for hash routing. Same-origin GET requests are served
 // from the output directory; other requests fail as if offline.
 import fs from "node:fs";
 import path from "node:path";
@@ -15,7 +16,7 @@ const render = await WebAssembly.compile(fs.readFileSync(path.join(dist, "render
 const styles = new Uint8Array(WebAssembly.Module.customSections(app, "vcwl.styles")[0] ?? new ArrayBuffer(0));
 const decoder = new TextDecoder();
 
-async function page(route) {
+async function page(route, root) {
   const host = createHost({ print: () => {} });
   let pending = 0, x;
   // Layout is the browser's job here; widths only need to be plausible.
@@ -103,11 +104,8 @@ async function page(route) {
   call((x) => x.set_route(host.writeIO(route)));
   call((x) => x.start());
   for (let i = 0; pending && i < 100; i++) await new Promise((r) => setImmediate(r));
-  const n = r.prerender();
+  const n = r.prerender(put(new TextEncoder().encode(root)));
   return decoder.decode(new Uint8Array(r.memory.buffer, r.out_ptr(), n));
 }
 
-for (const route of JSON.parse(routesJson)) {
-  const [css, html] = (await page(route)).split("\0");
-  process.stdout.write(`${route}\0${css}\0${html}\0`);
-}
+for (const [route, root] of JSON.parse(routesJson)) process.stdout.write(`${await page(route, root)}\0`);

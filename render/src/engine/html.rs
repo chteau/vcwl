@@ -66,18 +66,30 @@ fn is_name(s: &str, extra: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || extra.contains(c))
 }
 
+/// The URL of route `path` (`/docs/intro`) for path routing, from a page whose way to the site
+/// root is `root` (`./`, `../../` or an absolute base such as `/repo/`): one directory per route.
+pub fn route_url(root: &str, path: &str) -> String {
+    let rel = path.trim_matches('/');
+    if rel.is_empty() {
+        root.to_string()
+    } else {
+        format!("{root}{rel}/")
+    }
+}
+
 impl Engine {
     /// The tree below the root as HTML, and the style rules it needs beyond the application's
-    /// sheet (bound styles become generated classes, so no inline styles are needed).
-    pub fn html(&self) -> (String, String) {
+    /// sheet (bound styles become generated classes, so no inline styles are needed). With
+    /// `root` (path routing, see [`route_url`]), route links `#/path` become real URLs.
+    pub fn html(&self, root: Option<&str>) -> (String, String) {
         let (mut out, mut css) = (String::new(), String::new());
         for &c in &self.tree.n(0).children {
-            self.node_html(c, &mut out, &mut css);
+            self.node_html(c, root, &mut out, &mut css);
         }
         (out, css)
     }
 
-    fn node_html(&self, id: Id, out: &mut String, css: &mut String) {
+    fn node_html(&self, id: Id, root: Option<&str>, out: &mut String, css: &mut String) {
         let n = self.tree.n(id);
         match n.kind {
             Kind::Comment => return,
@@ -109,8 +121,12 @@ impl Engine {
             } else {
                 v
             };
+            let link = match (k.as_str(), root, v.strip_prefix('#')) {
+                ("href", Some(root), Some(path)) if path.starts_with('/') => route_url(root, path),
+                _ => v.to_string(),
+            };
             out.push_str(&format!(" {k}=\""));
-            escape(out, v, true);
+            escape(out, &link, true);
             out.push('"');
         }
         if !bound.is_empty() {
@@ -151,7 +167,7 @@ impl Engine {
             escape(out, &n.value, false);
         } else {
             for &c in &n.children {
-                self.node_html(c, out, css);
+                self.node_html(c, root, out, css);
             }
         }
         out.push_str("</");
@@ -184,7 +200,7 @@ mod tests {
             .insert(1, 5, 0);
         let mut e = Engine::new("", 800.0, 600.0);
         e.apply(&b.0).unwrap();
-        let (html, css) = e.html();
+        let (html, css) = e.html(None);
         assert!(
             !html.contains("javascript") && !html.contains("data-x"),
             "{html}"
@@ -195,6 +211,18 @@ mod tests {
         assert!(css.contains("{width:42.5%;}"), "{css}");
         assert_eq!(safe_url(" HTTPS://x.y/"), "HTTPS://x.y/");
         assert_eq!(safe_url("#/docs"), "#/docs");
+        assert_eq!(route_url("../", "/docs/intro"), "../docs/intro/");
+        assert_eq!(route_url("./", "/"), "./");
+        let mut b = Buf::default();
+        b.create(1, "a").attr(1, "href", "#/docs").insert(0, 1, 0);
+        b.create(2, "a").attr(2, "href", "#top").insert(0, 2, 0);
+        let mut e = Engine::new("", 800.0, 600.0);
+        e.apply(&b.0).unwrap();
+        let (html, _) = e.html(Some("/repo/"));
+        assert!(
+            html.contains("href=\"/repo/docs/\"") && html.contains("href=\"#top\""),
+            "{html}"
+        );
         assert_eq!(safe_url("docs/a:b"), "docs/a:b");
         assert_eq!(safe_url("data:text/html,x"), "about:invalid#vcwl-blocked");
     }

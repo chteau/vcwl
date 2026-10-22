@@ -224,7 +224,9 @@ another component's content. Passing content to a component without a slot is a 
 - Control flow: `if cond { ... } else { ... }`, `match value { pattern => view }`,
   `for item in items key item.id { ... }` (keys must be unique; dev builds warn on duplicates).
 - Routing: `routes { "/" => Home() "/about" => About() _ => NotFound() }` uses the URL hash
-  (`#/about`), so it works on static hosts. `route` is the current path.
+  (`#/about`) by default, or real paths with `routing = "path"` in vcwl.toml
+  ([deploy](deploy.md#real-urls-routing--path)). `route` is the current path; `link(to: "/about")`
+  links to a route in either mode.
 
 Events: `on click`, `on input(v)`, `on change(v)`, `on submit`, `on focus`, `on blur`,
 `on dblclick`, and `on mount` in a component body.

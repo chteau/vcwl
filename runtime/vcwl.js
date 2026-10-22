@@ -183,6 +183,29 @@ function addShape(ctx, x, y, w, h, r) {
 export async function createCanvasHost(canvas, app, render, opts = {}) {
   const doc = canvas.ownerDocument, win = doc.defaultView;
   const host = createHost(opts);
+  // Relative URLs are the app's files: with path routing, pages live in subdirectories.
+  const root = opts.root ?? doc.baseURI, routing = opts.routing ?? "hash";
+  const resolve = (url) => {
+    try {
+      return new URL(url, root).href;
+    } catch {
+      return url;
+    }
+  };
+  /** Where a link's `href` leads: `#/path` is a route, `#name` an anchor on this page. */
+  const linkUrl = (v) => {
+    v = sanitizeUrl(v);
+    if (v.startsWith("#/")) return routing === "path" ? routeUrl(root, v.slice(1)) : v;
+    return v.startsWith("#") ? v : resolve(v);
+  };
+  const navigate = (path) => {
+    if (opts.navigate) opts.navigate(path);
+    else if (routing === "path") {
+      const url = routeUrl(root, path);
+      if (url !== win.location.href) win.history.pushState(null, "", url);
+      host.setRoute(path);
+    } else win.location.hash = "#" + path;
+  };
   const report = opts.onError ?? ((msg) => console.error(msg));
   const images = [];
   const fonts = [];
@@ -281,11 +304,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     if (err) throw new Error(new TextDecoder().decode(new Uint8Array(r.memory.buffer, r.out_ptr(), err)));
   };
 
-  host.imports.navigate = (len) => {
-    const path = host.readIO(len);
-    if (opts.navigate) opts.navigate(path);
-    else win.location.hash = "#" + path;
-  };
+  host.imports.navigate = (len) => navigate(host.readIO(len));
   host.imports.copy = (len) => win.navigator.clipboard?.writeText(host.readIO(len)).catch(() => {});
 
   function drain() {
@@ -303,14 +322,11 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
           case OUT.TITLE:
             doc.title = b.str();
             break;
-          case OUT.NAVIGATE: {
-            const path = b.str();
-            if (opts.navigate) opts.navigate(path);
-            else win.location.hash = "#" + path;
+          case OUT.NAVIGATE:
+            navigate(b.str());
             break;
-          }
           case OUT.OPEN: {
-            const url = sanitizeUrl(b.str()), newTab = b.int();
+            const url = linkUrl(b.str()), newTab = b.int();
             if (newTab) win.open(url, "_blank", "noopener");
             else win.location.assign(url);
             break;
@@ -330,7 +346,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
               images[id] = img;
               input(() => r.image_ready(id, img.naturalWidth, img.naturalHeight));
             };
-            img.src = sanitizeUrl(b.str());
+            img.src = resolve(sanitizeUrl(b.str()));
             break;
           }
           case OUT.CURSOR:
@@ -595,7 +611,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   function allowedUrl(raw) {
     let url;
     try {
-      url = new URL(raw, doc.baseURI);
+      url = new URL(raw, root);
     } catch {
       return [null, `invalid URL "${raw}"`];
     }
@@ -719,7 +735,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
           else if (el.value !== v) el.value = v;
           break;
         case "href":
-          el.setAttribute("href", sanitizeUrl(v));
+          el.setAttribute("href", linkUrl(v));
           break;
         case "alt":
           el.setAttribute("aria-label", v);
@@ -1015,9 +1031,19 @@ export function showError(doc, msg) {
   if (msg) drawError(ctx, canvas.width, canvas.height, "VCWL " + msg);
 }
 
-function routeFromLocation(loc) {
+/** The URL of route `path` with path routing: one directory per route below the app's root. */
+export function routeUrl(root, path) {
+  const rel = path.replace(/^\/+|\/+$/g, "");
+  return new URL(rel ? encodeURI(rel) + "/" : "", root).href;
+}
+
+/** The route a URL shows: its hash (`#/about`), or with path routing its path below `root`. */
+export function routeFromLocation(loc, routing = "hash", root = loc.href) {
   const h = decodeURIComponent(loc.hash.replace(/^#/, ""));
-  return h.startsWith("/") ? h : "/";
+  if (routing !== "path" || h.startsWith("/")) return h.startsWith("/") ? h : "/";
+  const base = new URL(root).pathname;
+  const rel = loc.pathname.startsWith(base) ? loc.pathname.slice(base.length) : "";
+  return "/" + decodeURIComponent(rel).replace(/(^|\/)index\.html$/, "").replace(/\/+$/, "");
 }
 
 async function compile(url) {
@@ -1032,10 +1058,10 @@ async function compile(url) {
  * `FONT_WAIT_MS`: the first frame then uses them instead of being laid out twice.
  */
 const FONT_WAIT_MS = 3000;
-async function loadFonts(doc, fonts) {
+async function loadFonts(doc, fonts, root) {
   if (!fonts.length || typeof FontFace === "undefined") return;
   const loads = fonts.map((f) => {
-    const face = new FontFace(f.family, `url("${new URL(f.src, doc.baseURI)}")`, { weight: f.weight, style: f.style });
+    const face = new FontFace(f.family, `url("${new URL(f.src, root)}")`, { weight: f.weight, style: f.style });
     doc.fonts.add(face);
     return face.load().catch((e) => console.warn(`[vcwl] font "${f.family}" failed to load: ${e.message ?? e}`));
   });
@@ -1045,6 +1071,7 @@ async function loadFonts(doc, fonts) {
 /** Loads `app.wasm` and `render.wasm` next to this script and starts the application. */
 export async function boot(doc = document) {
   const win = doc.defaultView;
+  const root = new URL(".", import.meta.url).href;
   let cfg = {};
   const report = (msg) => {
     console.error("[vcwl] " + msg);
@@ -1062,8 +1089,8 @@ export async function boot(doc = document) {
     win.performance.mark?.("vcwl:compiled");
     const config = WebAssembly.Module.customSections(app, "vcwl.config")[0];
     if (config) cfg = JSON.parse(decoder.decode(config));
-    await loadFonts(doc, cfg.fonts ?? []);
-    host = await createCanvasHost(canvas, app, render, { onError: report, caps: cfg.caps, prerendered });
+    await loadFonts(doc, cfg.fonts ?? [], root);
+    host = await createCanvasHost(canvas, app, render, { onError: report, caps: cfg.caps, prerendered, routing: cfg.routing, root });
   } catch (e) {
     const unsupported = typeof WebAssembly === "undefined" || e instanceof WebAssembly.CompileError;
     console.error(e);
@@ -1072,9 +1099,12 @@ export async function boot(doc = document) {
   }
   win.vcwl = host;
   win.performance.mark?.("vcwl:started");
-  host.call((x) => x.set_route(host.writeIO(routeFromLocation(win.location))));
+  const route = () => routeFromLocation(win.location, cfg.routing, root);
+  // Old `#/about` links keep working after switching to path routing.
+  if (cfg.routing === "path" && win.location.hash.startsWith("#/")) win.history.replaceState(null, "", routeUrl(root, route()));
+  host.call((x) => x.set_route(host.writeIO(route())));
   host.call((x) => x.start());
-  win.addEventListener("hashchange", () => host.setRoute(routeFromLocation(win.location)));
+  win.addEventListener(cfg.routing === "path" ? "popstate" : "hashchange", () => host.setRoute(route()));
   host.focus();
   return host;
 }

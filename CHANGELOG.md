@@ -4,6 +4,16 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 10 — real URLs
+
+- `routing = "path"` ([ADR 13](docs/adr/0013-path-routing.md)): History API navigation, one page
+  per route (`about/index.html`) and a `404.html` with the fallback route, relative asset URLs so
+  the site works under any sub-path, canonical links and `sitemap.xml` when `url` is set, old
+  `#/` links redirected. Prerendering writes each route into its own page.
+- Relative URLs in apps (fetch, images, fonts) resolve against the app's root.
+- `vcwl dev` behaves like a static host: `/about` redirects to `/about/`, unknown paths get
+  `404.html`.
+
 ### Milestone 9 — fonts, slots, prerendering and speed
 
 - Web fonts: `font "Family" from "fonts/file.woff2" [weight N[..M]] [italic]`. The build checks

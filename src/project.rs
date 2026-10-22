@@ -113,17 +113,121 @@ fn font_descriptors(f: &crate::ast::FontDecl) -> (String, &'static str) {
     (weight, if f.italic { "italic" } else { "normal" })
 }
 
-fn font_face_css(fonts: &[crate::ast::FontDecl]) -> String {
+fn font_face_css(fonts: &[crate::ast::FontDecl], root: &str) -> String {
     fonts
         .iter()
         .map(|f| {
             let (weight, style) = font_descriptors(f);
             format!(
-                "@font-face{{font-family:\"{}\";src:url(\"{}\");font-weight:{weight};font-style:{style};font-display:swap}}",
+                "@font-face{{font-family:\"{}\";src:url(\"{root}{}\");font-weight:{weight};font-style:{style};font-display:swap}}",
                 f.family, f.src
             )
         })
         .collect()
+}
+
+/// How routes appear in URLs (`routing` in vcwl.toml).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Routing {
+    /// `#/about`: one page, works on any static host.
+    Hash,
+    /// `/about/`: one page per route (`about/index.html`) and a `404.html` for the others.
+    Path,
+}
+
+/// One HTML file of the build.
+struct Page {
+    /// Path of the file in the output directory.
+    file: String,
+    /// The way from the page to the site root, prefixed to the page's own links (`""` with hash
+    /// routing, `./`, `../`, or the absolute base for `404.html`).
+    root: String,
+    /// The route it shows (path routing; with hash routing the page holds every route).
+    route: Option<String>,
+    /// Absolute URL of the page, when `url` is set in vcwl.toml (path routing).
+    canonical: Option<String>,
+}
+
+/// Checks that a route can name a directory of the output (path routing).
+fn route_dir(route: &str) -> Result<String, String> {
+    let rel = route.trim_matches('/');
+    let ok = rel.split('/').all(|seg| {
+        !seg.is_empty()
+            && seg != "."
+            && seg != ".."
+            && seg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.~".contains(c))
+    });
+    if rel.is_empty() || ok {
+        Ok(rel.to_string())
+    } else {
+        Err(format!(
+            "route \"{route}\" cannot be a page with `routing = \"path\"`: use letters, digits, `-`, `_`, `.` and `~` between slashes"
+        ))
+    }
+}
+
+/// The site's base path from its `url` (`https://user.github.io/repo/` gives `/repo/`).
+fn base_path(url: Option<&str>) -> String {
+    let path = url
+        .and_then(|u| u.split_once("://"))
+        .and_then(|(_, rest)| rest.find('/').map(|i| &rest[i..]))
+        .unwrap_or("/");
+    let path = path.split(['?', '#']).next().unwrap_or("/");
+    if path.ends_with('/') {
+        path.to_string()
+    } else {
+        format!("{path}/")
+    }
+}
+
+/// The pages to write: one with hash routing, one per route and `404.html` with path routing.
+fn pages(routing: Routing, routes: &[String], meta: &Meta) -> Result<Vec<Page>, String> {
+    if routing == Routing::Hash {
+        return Ok(vec![Page {
+            file: "index.html".into(),
+            root: String::new(),
+            route: None,
+            canonical: None,
+        }]);
+    }
+    let site = meta
+        .url
+        .as_ref()
+        .map(|u| format!("{}/", u.trim_end_matches('/')));
+    let mut list = vec!["/".to_string()];
+    list.extend(routes.iter().filter(|r| r.trim_matches('/') != "").cloned());
+    let mut out = Vec::new();
+    for route in list {
+        let rel = route_dir(&route)?;
+        let depth = rel.split('/').filter(|s| !s.is_empty()).count();
+        let file = if rel.is_empty() {
+            "index.html".to_string()
+        } else {
+            format!("{rel}/index.html")
+        };
+        out.push(Page {
+            file,
+            root: if depth == 0 {
+                "./".into()
+            } else {
+                "../".repeat(depth)
+            },
+            canonical: site
+                .as_ref()
+                .map(|s| vcwl_render::engine::html::route_url(s, &route)),
+            route: Some(route),
+        });
+    }
+    // Static hosts serve 404.html for any unknown path, so its links are absolute.
+    out.push(Page {
+        file: "404.html".into(),
+        root: base_path(meta.url.as_deref()),
+        route: Some("/404".into()),
+        canonical: None,
+    });
+    Ok(out)
 }
 
 /// Prerendered pages: an inline style sheet and the markup shown until the canvas takes over.
@@ -136,11 +240,9 @@ pub struct Prerendered {
 const ROUTE_CSS: &str = ".vcwl-route{display:none}\
 #vcwl-pre>:target,#vcwl-pre:not(:has(>:target))>.vcwl-home{display:block}";
 
-/// Runs the built application in Node.js for each route (`prerender = true` in vcwl.toml).
-fn prerender(out: &Path, app: &crate::app::AppOutput) -> Result<Prerendered, String> {
-    let routes = &app.routes;
-    let mut list = vec!["/".to_string()];
-    list.extend(routes.iter().filter(|r| *r != "/").cloned());
+/// Runs the built application in Node.js for each (route, way to the site root) pair
+/// (`prerender = true` in vcwl.toml) and returns the extra style rules and HTML of each.
+fn run_prerender(out: &Path, jobs: &[(String, String)]) -> Result<Vec<(String, String)>, String> {
     let quote = |r: &String| {
         let mut q = String::from('"');
         for c in r.chars() {
@@ -155,7 +257,13 @@ fn prerender(out: &Path, app: &crate::app::AppOutput) -> Result<Prerendered, Str
         }
         q + "\""
     };
-    let json = format!("[{}]", list.iter().map(quote).collect::<Vec<_>>().join(","));
+    let json = format!(
+        "[{}]",
+        jobs.iter()
+            .map(|(route, root)| format!("[{},{}]", quote(route), quote(root)))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     let res = std::process::Command::new("node")
         .args(["--input-type=module", "-e", PRERENDER_JS])
         .arg(out)
@@ -170,32 +278,49 @@ fn prerender(out: &Path, app: &crate::app::AppOutput) -> Result<Prerendered, Str
     }
     let stdout = String::from_utf8_lossy(&res.stdout);
     let parts: Vec<&str> = stdout.split('\0').collect();
+    Ok(parts
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[css, html]| (css.to_string(), html.to_string()))
+        .collect())
+}
+
+/// The style sheet and markup of a page showing `routes` (route, extra rules, HTML); several
+/// routes are switched with `:target` (hash routing).
+fn assemble(app: &crate::app::AppOutput, root: &str, routes: &[(&str, &str, &str)]) -> Prerendered {
     let (mut rules, mut body) = (Vec::new(), String::from("<div id=\"vcwl-pre\">"));
-    for (i, [route, css, html]) in parts.as_chunks::<3>().0.iter().enumerate() {
+    let switched = routes.len() > 1;
+    for (i, (route, css, html)) in routes.iter().enumerate() {
         for rule in css.split_inclusive('}') {
             if !rules.contains(&rule) {
                 rules.push(rule);
             }
         }
-        let home = if i == 0 { " vcwl-home" } else { "" };
-        body.push_str(&format!(
-            "<div class=\"vcwl-route{home}\" id=\"{}\">{html}</div>",
-            html_escape(route)
-        ));
+        if switched {
+            let home = if i == 0 { " vcwl-home" } else { "" };
+            body.push_str(&format!(
+                "<div class=\"vcwl-route{home}\" id=\"{}\">{html}</div>",
+                html_escape(route)
+            ));
+        } else {
+            body.push_str(html);
+        }
     }
     body.push_str("</div>");
     let style = format!(
-        "{}{}{ROUTE_CSS}{}{}",
-        font_face_css(&app.fonts),
+        "{}{}{}{}{}",
+        font_face_css(&app.fonts, root),
         vcwl_render::engine::html::BASE_CSS,
+        if switched { ROUTE_CSS } else { "" },
         app.css,
         rules.concat()
     );
-    Ok(Prerendered {
+    Prerendered {
         // Nothing in a style sheet may end the element early.
         style: style.replace("</", "<\\/"),
         body,
-    })
+    }
 }
 
 /// The page: metadata and one script. The app's configuration and styles travel inside
@@ -222,7 +347,7 @@ impl Meta {
         }
     }
 
-    fn html(&self, title: &str) -> String {
+    fn html(&self, title: &str, canonical: Option<&str>) -> String {
         let mut s = String::new();
         let mut tag = |attr: &str, name: &str, content: &str| {
             s.push_str(&format!(
@@ -236,7 +361,7 @@ impl Meta {
         }
         tag("property", "og:title", title);
         tag("property", "og:type", "website");
-        if let Some(u) = &self.url {
+        if let Some(u) = canonical.or(self.url.as_deref()) {
             tag("property", "og:url", u);
         }
         if let Some(i) = &self.image {
@@ -251,13 +376,15 @@ impl Meta {
     }
 }
 
-pub fn index_html(
+fn index_html(
     app: &crate::app::AppOutput,
     dev: bool,
     meta: &Meta,
     pre: Option<&Prerendered>,
+    page: &Page,
 ) -> String {
     let title = &app.title;
+    let root = html_escape(&page.root);
     // Fonts download with the modules instead of after them.
     let fonts: String = app
         .fonts
@@ -265,25 +392,32 @@ pub fn index_html(
         .map(|f| {
             let ext = f.src.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
             format!(
-                "<link rel=\"preload\" href=\"{}\" as=\"font\" type=\"font/{ext}\" crossorigin>\n",
+                "<link rel=\"preload\" href=\"{root}{}\" as=\"font\" type=\"font/{ext}\" crossorigin>\n",
                 html_escape(&f.src)
             )
         })
         .collect();
     let dev_script = if dev {
-        "\n<script type=\"module\" src=\"dev.js\"></script>"
+        format!("\n<script type=\"module\" src=\"{root}dev.js\"></script>")
     } else {
-        ""
+        String::new()
+    };
+    let canonical = page.canonical.as_ref().map_or(String::new(), |c| {
+        format!("<link rel=\"canonical\" href=\"{}\">\n", html_escape(c))
+    });
+    let icon = match &meta.icon {
+        Some(i) => format!("{root}{}", html_escape(i)),
+        None => "data:,".into(),
     };
     format!(
         "<!doctype html>\n<html lang=\"en\">\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n\
 <meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n\
-<title>{title}</title>\n{meta}<link rel=\"icon\" href=\"{icon}\">\n\
-<link rel=\"modulepreload\" href=\"vcwl.js\">\n\
-<link rel=\"preload\" href=\"render.wasm\" as=\"fetch\" crossorigin>\n\
-<link rel=\"preload\" href=\"app.wasm\" as=\"fetch\" crossorigin>\n\
-{fonts}<script type=\"module\" src=\"boot.js\"></script>{dev_script}\n{content}\n",
+<title>{title}</title>\n{meta}{canonical}<link rel=\"icon\" href=\"{icon}\">\n\
+<link rel=\"modulepreload\" href=\"{root}vcwl.js\">\n\
+<link rel=\"preload\" href=\"{root}render.wasm\" as=\"fetch\" crossorigin>\n\
+<link rel=\"preload\" href=\"{root}app.wasm\" as=\"fetch\" crossorigin>\n\
+{fonts}<script type=\"module\" src=\"{root}boot.js\"></script>{dev_script}\n{content}\n",
         content = match pre {
             Some(p) => format!("<style>{}</style>\n{}", p.style, p.body),
             None =>
@@ -292,8 +426,20 @@ pub fn index_html(
         },
         csp = html_escape(&csp(app, pre)),
         title = html_escape(title),
-        meta = meta.html(title),
-        icon = html_escape(meta.icon.as_deref().unwrap_or("data:,")),
+        meta = meta.html(title, page.canonical.as_deref()),
+    )
+}
+
+/// `sitemap.xml` listing every page (path routing with `url` set).
+fn sitemap(pages: &[Page]) -> String {
+    let urls: String = pages
+        .iter()
+        .filter_map(|p| p.canonical.as_ref())
+        .map(|u| format!("<url><loc>{}</loc></url>", html_escape(u)))
+        .collect();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">{urls}</urlset>\n"
     )
 }
 
@@ -319,7 +465,7 @@ fn custom_section(wasm: &mut Vec<u8>, name: &str, data: &[u8]) {
 }
 
 /// `app.wasm` with the app's styles and configuration attached.
-pub fn app_wasm(wasm: &[u8], app: &crate::app::AppOutput, dev: bool) -> Vec<u8> {
+pub fn app_wasm(wasm: &[u8], app: &crate::app::AppOutput, dev: bool, routing: Routing) -> Vec<u8> {
     let mut out = wasm.to_vec();
     custom_section(&mut out, "vcwl.styles", app.css.as_bytes());
     // Font names and paths are checked to contain no quotes or backslashes.
@@ -335,8 +481,13 @@ pub fn app_wasm(wasm: &[u8], app: &crate::app::AppOutput, dev: bool) -> Vec<u8> 
         })
         .collect();
     let config = format!(
-        "{{\"caps\":{},\"dev\":{dev},\"fonts\":[{}]}}",
+        "{{\"caps\":{},\"dev\":{dev},\"routing\":\"{}\",\"fonts\":[{}]}}",
         app.caps.to_json(),
+        if routing == Routing::Path {
+            "path"
+        } else {
+            "hash"
+        },
         fonts.join(",")
     );
     custom_section(&mut out, "vcwl.config", config.as_bytes());
@@ -358,8 +509,23 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
         .as_ref()
         .map(|p| Meta::from_manifest(&p.manifest))
         .unwrap_or_default();
+    let setting = |k| {
+        project
+            .as_ref()
+            .and_then(|p| manifest_value(&p.manifest, k))
+    };
+    let routing = match setting("routing").as_deref() {
+        None | Some("hash") => Routing::Hash,
+        Some("path") => Routing::Path,
+        Some(other) => {
+            return Err(format!(
+                "vcwl.toml: routing = \"{other}\" is not supported (use \"hash\" or \"path\")"
+            ));
+        }
+    };
+    let pages = pages(routing, &app.routes, &meta)?;
     let mut files: Vec<(&str, Vec<u8>)> = vec![
-        ("app.wasm", app_wasm(&o.wasm, app, dev)),
+        ("app.wasm", app_wasm(&o.wasm, app, dev, routing)),
         ("render.wasm", RENDER_WASM.to_vec()),
         ("vcwl.js", VCWL_JS.as_bytes().to_vec()),
         ("boot.js", BOOT_JS.as_bytes().to_vec()),
@@ -385,7 +551,8 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
     if let Some(p) = &project {
         let public = p.root.join("public");
         if public.is_dir() {
-            copy_dir(&public, out, &public)?;
+            let generated: Vec<&str> = pages.iter().map(|p| p.file.as_str()).collect();
+            copy_dir(&public, out, &public, &generated)?;
         }
     }
     for f in &app.fonts {
@@ -396,22 +563,54 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
             ));
         }
     }
-    // The page comes last: prerendering runs the files written above.
-    let wants_pre = project
-        .as_ref()
-        .is_some_and(|p| manifest_value(&p.manifest, "prerender").as_deref() == Some("true"));
-    let pre = match wants_pre && !dev {
-        true => Some(prerender(out, app)?),
-        false => None,
+    // The pages come last: prerendering runs the files written above.
+    let pre = if setting("prerender").as_deref() == Some("true") && !dev {
+        let jobs: Vec<(String, String)> = match routing {
+            Routing::Hash => {
+                let mut routes = vec!["/".to_string()];
+                routes.extend(app.routes.iter().filter(|r| *r != "/").cloned());
+                routes.into_iter().map(|r| (r, String::new())).collect()
+            }
+            Routing::Path => pages
+                .iter()
+                .map(|p| (p.route.clone().unwrap(), p.root.clone()))
+                .collect(),
+        };
+        let done = run_prerender(out, &jobs)?;
+        let all: Vec<(&str, &str, &str)> = jobs
+            .iter()
+            .zip(&done)
+            .map(|((route, _), (css, html))| (route.as_str(), css.as_str(), html.as_str()))
+            .collect();
+        match routing {
+            Routing::Hash => vec![Some(assemble(app, "", &all))],
+            Routing::Path => pages
+                .iter()
+                .zip(&all)
+                .map(|(p, r)| Some(assemble(app, &p.root, std::slice::from_ref(r))))
+                .collect(),
+        }
+    } else {
+        pages.iter().map(|_| None).collect()
     };
-    let html = index_html(app, dev, &meta, pre.as_ref());
-    std::fs::write(out.join("index.html"), &html)
-        .map_err(|e| format!("{}: {e}", out.join("index.html").display()))?;
-    sizes.insert(0, ("index.html".to_string(), html.len()));
+    for (page, pre) in pages.iter().zip(&pre) {
+        let html = index_html(app, dev, &meta, pre.as_ref(), page);
+        let file = out.join(&page.file);
+        std::fs::create_dir_all(file.parent().unwrap())
+            .and_then(|_| std::fs::write(&file, &html))
+            .map_err(|e| format!("{}: {e}", file.display()))?;
+        if page.route.as_deref().is_none_or(|r| r == "/") {
+            sizes.insert(0, ("index.html".to_string(), html.len()));
+        }
+    }
+    if pages.iter().any(|p| p.canonical.is_some()) {
+        std::fs::write(out.join("sitemap.xml"), sitemap(&pages))
+            .map_err(|e| format!("{}: {e}", out.join("sitemap.xml").display()))?;
+    }
     Ok(sizes)
 }
 
-fn copy_dir(dir: &Path, out: &Path, base: &Path) -> Result<(), String> {
+fn copy_dir(dir: &Path, out: &Path, base: &Path, generated: &[&str]) -> Result<(), String> {
     let err = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
     for e in std::fs::read_dir(dir).map_err(|e| err(dir, e))? {
         let path = e.map_err(|e| err(dir, e))?.path();
@@ -419,18 +618,11 @@ fn copy_dir(dir: &Path, out: &Path, base: &Path) -> Result<(), String> {
         let dest = out.join(rel);
         if path.is_dir() {
             std::fs::create_dir_all(&dest).map_err(|e| err(&dest, e))?;
-            copy_dir(&path, out, base)?;
+            copy_dir(&path, out, base, generated)?;
         } else {
-            if rel.parent() == Some(Path::new(""))
-                && [
-                    "index.html",
-                    "app.wasm",
-                    "render.wasm",
-                    "vcwl.js",
-                    "boot.js",
-                    "dev.js",
-                ]
-                .contains(&rel.to_str().unwrap_or(""))
+            let rel_str = rel.to_str().unwrap_or("");
+            if ["app.wasm", "render.wasm", "vcwl.js", "boot.js", "dev.js"].contains(&rel_str)
+                || generated.contains(&rel_str)
             {
                 return Err(format!(
                     "{}: conflicts with a generated file",
