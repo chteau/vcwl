@@ -106,6 +106,17 @@ a longest-increasing-subsequence pass. Keyboard focus lives on mirror elements; 
 edited natively and report value and selection back with `field_input`. See
 [ADR 11](adr/0011-accessibility-mirror.md).
 
+### Prerendering and take-over
+
+With `prerender = true`, `vcwl build` runs `runtime/prerender.mjs` in Node: it instantiates
+`app.wasm` and `render.wasm` with a stub text measurer, serves same-origin fetches from `dist/`,
+and for each route calls the renderer's `prerender()` export, which serializes the tree as escaped
+HTML plus the CSS for bound styles (`render/src/engine/html.rs`). The build wraps each route in a
+section switched by `:target`, adds the CSS hash to the CSP and writes it into `index.html`.
+In the browser the canvas stays hidden until its first frame; before that frame the host calls
+`take_over(scrollY)`, so the renderer scrolls to the same place and shows `when appear` elements
+in view without their intro transition. Then the static markup is removed.
+
 ### Transitions
 
 `render/src/anim.rs`: when a restyle changes `opacity`, `transform`, `color` or a background color

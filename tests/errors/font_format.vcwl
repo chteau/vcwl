@@ -1,0 +1,8 @@
+// error: font files must be .woff2, .woff, .ttf or .otf
+app "T"
+
+font "Inter" from "fonts/Inter.svg"
+
+component App {
+    text("x")
+}

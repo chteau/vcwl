@@ -485,7 +485,10 @@ impl Sheet {
         let n = t.n(id);
         match n.kind {
             Kind::Element => {
+                // `em` font sizes are relative to the parent's size, not the default for the tag.
+                let font = s.font_size;
                 defaults(n, &mut s);
+                let (default_font, default_margin) = (s.font_size, s.margin);
                 let checked = n.checked
                     || (n.has_class("v-check")
                         && n.children.first().is_some_and(|&c| t.n(c).checked));
@@ -502,7 +505,6 @@ impl Sheet {
                 }
                 matched.sort();
                 matched.dedup();
-                let font = s.font_size;
                 for pass in 0..2 {
                     for &(_, i) in &matched {
                         for (prop, v) in &self.rules[i].decls {
@@ -519,7 +521,24 @@ impl Sheet {
                         k.strip_prefix("style:").and_then(|r| r.split_once(':'))
                     {
                         let toks = crate::css::tokens(&format!("{v}{unit}"));
-                        apply(&mut s, prop, &toks, font, media);
+                        let own = s.font_size;
+                        apply(&mut s, prop, &toks, own, media);
+                    }
+                }
+                // Default margins are in `em` of the element's own (possibly restyled) size.
+                if s.font_size != default_font && s.margin == default_margin {
+                    let em = match n.tag.as_str() {
+                        "p" | "ul" | "ol" | "h3" => 1.0,
+                        "h1" => 0.67,
+                        "h2" => 0.83,
+                        "h4" => 1.33,
+                        "h5" => 1.67,
+                        "h6" => 2.33,
+                        _ => 0.0,
+                    };
+                    if em > 0.0 {
+                        let m = px(em * s.font_size);
+                        s.margin = [m, px(0.0), m, px(0.0)];
                     }
                 }
                 s.font = s.font_shorthand().into();
@@ -617,6 +636,7 @@ fn defaults(n: &Node, s: &mut Style) {
         "code" => {
             s.font_family = MONO.into();
             s.font_size = fs * 0.8125;
+            s.line_height *= 0.8125;
             Inline
         }
         "a" => {
@@ -1343,6 +1363,13 @@ mod tests {
         assert_eq!(t.n(2).style.color, 0x00ff00ff);
         assert_eq!(t.n(2).style.margin[0], Len::Px(32.0));
         assert_eq!(t.n(3).style.display, Display::Inline);
+        // ... also when a class changes that size; `em` sizes are relative to the parent.
+        let mut b = Buf::default();
+        b.create(1, "p").class(1, "small").insert(0, 1, 0);
+        b.create(2, "h1").class(2, "half").insert(0, 2, 0);
+        let t = styled(".small{font-size:12px}.half{font-size:.5em}", &b, &media());
+        assert_eq!(t.n(1).style.margin[0], Len::Px(12.0));
+        assert_eq!(t.n(2).style.font_size, 8.0);
     }
 
     #[test]

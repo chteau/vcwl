@@ -26,7 +26,7 @@ fn main() {
             "--config",
             "profile.release.lto=true",
             "--config",
-            "profile.release.opt-level=\"z\"",
+            "profile.release.opt-level=\"s\"",
         ])
         .args([
             "--config",

@@ -4,6 +4,26 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 9 — fonts, slots, prerendering and speed
+
+- Web fonts: `font "Family" from "fonts/file.woff2" [weight N[..M]] [italic]`. The build checks
+  the file, preloads it and allows it in the CSP (`font-src 'self'`); the host loads it before the
+  first frame (at most 3 s) and re-measures text when a font arrives later.
+- Component slots: one `slot` in a component's view receives the content given at the use site.
+  The content is compiled as part of the parent (its state, its handlers) and mounted inside the
+  child.
+- Prerendering (`prerender = true`, [ADR 12](docs/adr/0012-prerendering.md)): every route is
+  rendered at build time to escaped static HTML with a CSP-hashed style sheet, switched by
+  `:target`; the canvas takes over after its first frame at the same scroll position.
+- Renderer: inset box shadows, `em` font sizes against the parent font, default margins that
+  follow a class's font size, text placed on the font's alphabetic baseline like CSS.
+- Speed (measured, see [benchmarks](docs/benchmarks.md)): accessibility mirror synced after the
+  frame with prototype cloning, a shared constructed style sheet and text carried in attributes;
+  per-font measuring contexts; paint state caching; offscreen list markers culled; preload hints;
+  `render.wasm` built with `opt-level = "s"`. Rows benchmark frame time for create 38.1 → 24.7 ms,
+  update 18.8 → 5.9 ms; first contentful paint of the tokenforge site on a slow link 64–92 ms.
+- `examples/tokenforge` uses a `Section` component with a slot and is prerendered.
+
 ### Milestone 8 — accessibility, motion and a real website
 
 - Accessibility mirror ([ADR 11](docs/adr/0011-accessibility-mirror.md)): invisible DOM elements

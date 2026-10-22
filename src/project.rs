@@ -8,6 +8,7 @@ use crate::diag::SourceMap;
 pub const VCWL_JS: &str = include_str!("../runtime/vcwl.js");
 pub const BOOT_JS: &str = include_str!("../runtime/boot.js");
 pub const DEV_JS: &str = include_str!("../runtime/dev.js");
+const PRERENDER_JS: &str = include_str!("../runtime/prerender.mjs");
 /// The renderer, built from `render/` by `build.rs`.
 pub const RENDER_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/render.wasm"));
 
@@ -74,7 +75,8 @@ fn html_escape(s: &str) -> String {
 }
 
 /// Content-Security-Policy derived from the app's capabilities.
-pub fn csp(caps: &crate::app::Capabilities, dev: bool) -> String {
+pub fn csp(app: &crate::app::AppOutput, pre: Option<&Prerendered>) -> String {
+    let caps = &app.caps;
     // The app's own files (app.wasm) are always fetched from 'self'.
     let mut connect: Vec<String> = vec!["'self'".into()];
     for h in &caps.network {
@@ -82,14 +84,118 @@ pub fn csp(caps: &crate::app::Capabilities, dev: bool) -> String {
             connect.push(format!("https://{h}"));
         }
     }
-    let _ = dev;
     let connect = connect.join(" ");
     // 'self' is always allowed for scripts and the module fetch of app.wasm. Rendering uses a
     // canvas, so no style sheets are loaded.
+    // A prerendered page carries one inline style sheet, allowed by its hash.
+    let style = pre.map_or(String::new(), |p| {
+        let hash = crate::node::base64(&crate::sha256::digest(p.style.as_bytes()));
+        format!(" style-src 'sha256-{hash}';")
+    });
+    let font = if app.fonts.is_empty() {
+        ""
+    } else {
+        " font-src 'self';"
+    };
     format!(
-        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' https: data:; \
+        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval';{style}{font} img-src 'self' https: data:; \
          connect-src {connect}; base-uri 'none'; form-action 'none'"
     )
+}
+
+/// CSS `font-weight` and `font-style` descriptors of a declared font.
+fn font_descriptors(f: &crate::ast::FontDecl) -> (String, &'static str) {
+    let weight = match f.weight {
+        Some((lo, hi)) if lo == hi => lo.to_string(),
+        Some((lo, hi)) => format!("{lo} {hi}"),
+        None => "normal".into(),
+    };
+    (weight, if f.italic { "italic" } else { "normal" })
+}
+
+fn font_face_css(fonts: &[crate::ast::FontDecl]) -> String {
+    fonts
+        .iter()
+        .map(|f| {
+            let (weight, style) = font_descriptors(f);
+            format!(
+                "@font-face{{font-family:\"{}\";src:url(\"{}\");font-weight:{weight};font-style:{style};font-display:swap}}",
+                f.family, f.src
+            )
+        })
+        .collect()
+}
+
+/// Prerendered pages: an inline style sheet and the markup shown until the canvas takes over.
+pub struct Prerendered {
+    pub style: String,
+    pub body: String,
+}
+
+/// Shows the page whose route is the URL's hash (`:target`), or the home page.
+const ROUTE_CSS: &str = ".vcwl-route{display:none}\
+#vcwl-pre>:target,#vcwl-pre:not(:has(>:target))>.vcwl-home{display:block}";
+
+/// Runs the built application in Node.js for each route (`prerender = true` in vcwl.toml).
+fn prerender(out: &Path, app: &crate::app::AppOutput) -> Result<Prerendered, String> {
+    let routes = &app.routes;
+    let mut list = vec!["/".to_string()];
+    list.extend(routes.iter().filter(|r| *r != "/").cloned());
+    let quote = |r: &String| {
+        let mut q = String::from('"');
+        for c in r.chars() {
+            match c {
+                '"' | '\\' => {
+                    q.push('\\');
+                    q.push(c);
+                }
+                c if c.is_control() => q.push_str(&format!("\\u{:04x}", c as u32)),
+                c => q.push(c),
+            }
+        }
+        q + "\""
+    };
+    let json = format!("[{}]", list.iter().map(quote).collect::<Vec<_>>().join(","));
+    let res = std::process::Command::new("node")
+        .args(["--input-type=module", "-e", PRERENDER_JS])
+        .arg(out)
+        .arg(&json)
+        .output()
+        .map_err(|e| format!("prerendering (`prerender = true`) needs Node.js: {e}"))?;
+    if !res.status.success() {
+        return Err(format!(
+            "prerendering failed:\n{}",
+            String::from_utf8_lossy(&res.stderr).trim_end()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&res.stdout);
+    let parts: Vec<&str> = stdout.split('\0').collect();
+    let (mut rules, mut body) = (Vec::new(), String::from("<div id=\"vcwl-pre\">"));
+    for (i, [route, css, html]) in parts.as_chunks::<3>().0.iter().enumerate() {
+        for rule in css.split_inclusive('}') {
+            if !rules.contains(&rule) {
+                rules.push(rule);
+            }
+        }
+        let home = if i == 0 { " vcwl-home" } else { "" };
+        body.push_str(&format!(
+            "<div class=\"vcwl-route{home}\" id=\"{}\">{html}</div>",
+            html_escape(route)
+        ));
+    }
+    body.push_str("</div>");
+    let style = format!(
+        "{}{}{ROUTE_CSS}{}{}",
+        font_face_css(&app.fonts),
+        vcwl_render::engine::html::BASE_CSS,
+        app.css,
+        rules.concat()
+    );
+    Ok(Prerendered {
+        // Nothing in a style sheet may end the element early.
+        style: style.replace("</", "<\\/"),
+        body,
+    })
 }
 
 /// The page: metadata and one script. The app's configuration and styles travel inside
@@ -145,7 +251,25 @@ impl Meta {
     }
 }
 
-pub fn index_html(title: &str, caps: &crate::app::Capabilities, dev: bool, meta: &Meta) -> String {
+pub fn index_html(
+    app: &crate::app::AppOutput,
+    dev: bool,
+    meta: &Meta,
+    pre: Option<&Prerendered>,
+) -> String {
+    let title = &app.title;
+    // Fonts download with the modules instead of after them.
+    let fonts: String = app
+        .fonts
+        .iter()
+        .map(|f| {
+            let ext = f.src.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+            format!(
+                "<link rel=\"preload\" href=\"{}\" as=\"font\" type=\"font/{ext}\" crossorigin>\n",
+                html_escape(&f.src)
+            )
+        })
+        .collect();
     let dev_script = if dev {
         "\n<script type=\"module\" src=\"dev.js\"></script>"
     } else {
@@ -156,9 +280,17 @@ pub fn index_html(title: &str, caps: &crate::app::Capabilities, dev: bool, meta:
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n\
 <meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n\
 <title>{title}</title>\n{meta}<link rel=\"icon\" href=\"{icon}\">\n\
-<script type=\"module\" src=\"boot.js\"></script>{dev_script}\n\
-<noscript>This application needs JavaScript and WebAssembly enabled.</noscript>\n",
-        csp = html_escape(&csp(caps, dev)),
+<link rel=\"modulepreload\" href=\"vcwl.js\">\n\
+<link rel=\"preload\" href=\"render.wasm\" as=\"fetch\" crossorigin>\n\
+<link rel=\"preload\" href=\"app.wasm\" as=\"fetch\" crossorigin>\n\
+{fonts}<script type=\"module\" src=\"boot.js\"></script>{dev_script}\n{content}\n",
+        content = match pre {
+            Some(p) => format!("<style>{}</style>\n{}", p.style, p.body),
+            None =>
+                "<noscript>This application needs JavaScript and WebAssembly enabled.</noscript>"
+                    .into(),
+        },
+        csp = html_escape(&csp(app, pre)),
         title = html_escape(title),
         meta = meta.html(title),
         icon = html_escape(meta.icon.as_deref().unwrap_or("data:,")),
@@ -190,7 +322,23 @@ fn custom_section(wasm: &mut Vec<u8>, name: &str, data: &[u8]) {
 pub fn app_wasm(wasm: &[u8], app: &crate::app::AppOutput, dev: bool) -> Vec<u8> {
     let mut out = wasm.to_vec();
     custom_section(&mut out, "vcwl.styles", app.css.as_bytes());
-    let config = format!("{{\"caps\":{},\"dev\":{dev}}}", app.caps.to_json());
+    // Font names and paths are checked to contain no quotes or backslashes.
+    let fonts: Vec<String> = app
+        .fonts
+        .iter()
+        .map(|f| {
+            let (weight, style) = font_descriptors(f);
+            format!(
+                "{{\"family\":\"{}\",\"src\":\"{}\",\"weight\":\"{weight}\",\"style\":\"{style}\"}}",
+                f.family, f.src
+            )
+        })
+        .collect();
+    let config = format!(
+        "{{\"caps\":{},\"dev\":{dev},\"fonts\":[{}]}}",
+        app.caps.to_json(),
+        fonts.join(",")
+    );
     custom_section(&mut out, "vcwl.config", config.as_bytes());
     out
 }
@@ -211,10 +359,6 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
         .map(|p| Meta::from_manifest(&p.manifest))
         .unwrap_or_default();
     let mut files: Vec<(&str, Vec<u8>)> = vec![
-        (
-            "index.html",
-            index_html(&app.title, &app.caps, dev, &meta).into_bytes(),
-        ),
         ("app.wasm", app_wasm(&o.wasm, app, dev)),
         ("render.wasm", RENDER_WASM.to_vec()),
         ("vcwl.js", VCWL_JS.as_bytes().to_vec()),
@@ -244,6 +388,26 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
             copy_dir(&public, out, &public)?;
         }
     }
+    for f in &app.fonts {
+        if !out.join(&f.src).is_file() {
+            return Err(format!(
+                "font \"{}\": {} not found (put the file in public/{})",
+                f.family, f.src, f.src
+            ));
+        }
+    }
+    // The page comes last: prerendering runs the files written above.
+    let wants_pre = project
+        .as_ref()
+        .is_some_and(|p| manifest_value(&p.manifest, "prerender").as_deref() == Some("true"));
+    let pre = match wants_pre && !dev {
+        true => Some(prerender(out, app)?),
+        false => None,
+    };
+    let html = index_html(app, dev, &meta, pre.as_ref());
+    std::fs::write(out.join("index.html"), &html)
+        .map_err(|e| format!("{}: {e}", out.join("index.html").display()))?;
+    sizes.insert(0, ("index.html".to_string(), html.len()));
     Ok(sizes)
 }
 

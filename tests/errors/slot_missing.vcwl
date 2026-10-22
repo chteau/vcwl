@@ -1,0 +1,14 @@
+// error: component `Card` cannot take child content
+app "T"
+
+component Card {
+    box {
+        text("x")
+    }
+}
+
+component App {
+    Card() {
+        text("content")
+    }
+}

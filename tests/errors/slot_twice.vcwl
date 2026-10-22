@@ -1,0 +1,13 @@
+// error: a component can have only one `slot`
+app "T"
+
+component Card {
+    box {
+        slot
+        slot
+    }
+}
+
+component App {
+    Card()
+}

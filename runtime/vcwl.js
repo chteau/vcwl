@@ -8,6 +8,18 @@ const IO_BASE = 65536;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: false });
 
+/** UTF-8 at `bytes[at..at + n]`; short ASCII strings skip the (comparatively slow) decoder. */
+function decode(bytes, at, n) {
+  if (n > 32) return decoder.decode(bytes.subarray(at, at + n));
+  let s = "";
+  for (let i = at; i < at + n; i++) {
+    const c = bytes[i];
+    if (c > 127) return decoder.decode(bytes.subarray(at, at + n));
+    s += String.fromCharCode(c);
+  }
+  return s;
+}
+
 export class VcwlPanic extends Error {
   constructor(message) {
     super(message);
@@ -99,9 +111,9 @@ const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 // Result kinds passed to `fetch_done`.
 const FETCH_OK = 0, FETCH_NETWORK = 1, FETCH_TIMEOUT = 2, FETCH_STATUS = 3, FETCH_INVALID = 4;
 // Work items produced by the renderer (`render/src/engine.rs`, `out`).
-const OUT = { EMIT: 1, TITLE: 2, NAVIGATE: 3, OPEN: 4, WARN: 5, FETCH: 6, LOAD_IMAGE: 7, CURSOR: 8, COPY: 9 };
+export const OUT = { EMIT: 1, TITLE: 2, NAVIGATE: 3, OPEN: 4, WARN: 5, FETCH: 6, LOAD_IMAGE: 7, CURSOR: 8, COPY: 9 };
 // Display list opcodes (`render/src/paint.rs`, `op`).
-const PAINT = { FILL: 1, STROKE: 2, TEXT: 3, FONT: 4, CLIP: 5, RESTORE: 6, ALPHA: 7, TRANSFORM: 8, IMAGE: 9, SHADOW: 10, GRADIENT: 11, LINE: 12 };
+const PAINT = { FILL: 1, STROKE: 2, TEXT: 3, FONT: 4, CLIP: 5, RESTORE: 6, ALPHA: 7, TRANSFORM: 8, IMAGE: 9, SHADOW: 10, GRADIENT: 11, LINE: 12, INSET_SHADOW: 13 };
 const SAFE_URL = /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
 
 /** Rejects `javascript:` and other script-capable URLs. */
@@ -111,7 +123,7 @@ export function sanitizeUrl(value) {
 }
 
 /** Reads words and strings from a little-endian buffer in `memory`. */
-function reader(memory, ptr, len) {
+export function reader(memory, ptr, len) {
   const view = new DataView(memory.buffer, ptr, len);
   const bytes = new Uint8Array(memory.buffer, ptr, len);
   let p = 0;
@@ -137,7 +149,7 @@ function reader(memory, ptr, len) {
     },
     str() {
       const n = view.getInt32(p, true);
-      const s = decoder.decode(bytes.subarray(p + 4, p + 4 + n));
+      const s = decode(bytes, p + 4, n);
       p += 4 + ((n + 3) & ~3);
       return s;
     },
@@ -156,6 +168,10 @@ function css(c) {
 
 function shape(ctx, x, y, w, h, r) {
   ctx.beginPath();
+  addShape(ctx, x, y, w, h, r);
+}
+
+function addShape(ctx, x, y, w, h, r) {
   if (r[0] || r[1] || r[2] || r[3]) ctx.roundRect(x, y, w, h, r);
   else ctx.rect(x, y, w, h);
 }
@@ -173,19 +189,26 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   let r = null, x = null, busy = false, scheduled = false, wakeTimer = 0;
   const queue = [];
   host.dead = false;
-  host.stats = { flushes: 0, frames: 0, bytes: 0, mirrorMs: 0 };
+  host.stats = { flushes: 0, frames: 0, bytes: 0, mirrorMs: 0, renderMs: 0, drawMs: 0 };
 
-  const measureCtx = (typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1) : doc.createElement("canvas")).getContext("2d");
-  let lastFont = "", lastSpacing = 0;
-  const rstr = (ptr, len) => decoder.decode(new Uint8Array(r.memory.buffer, ptr, len));
+  // One measuring context per font and letter spacing: setting `font` re-parses it, which
+  // costs more than measuring a word.
+  const measurers = new Map(), baselines = new Map();
+  const measurer = (font, spacing) => {
+    const key = font + "|" + spacing;
+    let c = measurers.get(key);
+    if (!c) {
+      c = (typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1) : doc.createElement("canvas")).getContext("2d");
+      c.font = font;
+      c.letterSpacing = spacing + "px";
+      measurers.set(key, c);
+    }
+    return c;
+  };
+  const rstr = (ptr, len) => decode(new Uint8Array(r.memory.buffer), ptr, len);
   const renderImports = {
     host: {
-      measure(fp, fl, spacing, tp, tl) {
-        const font = rstr(fp, fl);
-        if (font !== lastFont) measureCtx.font = lastFont = font;
-        if (spacing !== lastSpacing) measureCtx.letterSpacing = (lastSpacing = spacing) + "px";
-        return measureCtx.measureText(rstr(tp, tl)).width;
-      },
+      measure: (fp, fl, spacing, tp, tl) => measurer(rstr(fp, fl), spacing).measureText(rstr(tp, tl)).width,
     },
   };
   r = (await WebAssembly.instantiate(render, renderImports)).exports;
@@ -341,18 +364,36 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     win.requestAnimationFrame(frame);
   }
 
-  function frame() {
-    scheduled = false;
+  let mirrorQueued = false, mirrorWaiters = [];
+  const mirrorChannel = new MessageChannel();
+  mirrorChannel.port1.onmessage = () => {
+    mirrorQueued = false;
     if (host.dead) return;
-    host.paintNow();
-    // The mirror follows the canvas within the same frame, after it is drawn.
     try {
       const t0 = win.performance.now();
       syncMirror();
       host.stats.mirrorMs += win.performance.now() - t0;
+    } catch (e) {
+      return fail(e);
+    }
+    for (const w of mirrorWaiters.splice(0)) w();
+  };
+  /** Resolves once the accessibility mirror has caught up with the last frame. */
+  host.mirrored = () => (mirrorQueued || scheduled ? new Promise((r) => mirrorWaiters.push(r)) : Promise.resolve());
+
+  function frame() {
+    scheduled = false;
+    if (host.dead) return;
+    host.paintNow();
+    try {
       syncFocus();
     } catch (e) {
       return fail(e);
+    }
+    // The mirror follows in a task of its own, after this frame is on screen.
+    if (!mirrorQueued) {
+      mirrorQueued = true;
+      mirrorChannel.port2.postMessage(0);
     }
     schedule(); // running transitions
     clearTimeout(wakeTimer);
@@ -372,14 +413,18 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   /** Paints now if anything changed (also used by tests and benchmarks). */
   host.paintNow = () => {
     let n;
+    const t0 = win.performance.now();
     try {
-      n = r.frame(win.performance.now());
+      n = r.frame(t0);
     } catch (e) {
       return fail(e);
     }
     if (n) {
       last = new Uint8Array(r.memory.buffer, r.out_ptr(), n).slice();
+      const t1 = win.performance.now();
+      host.stats.renderMs += t1 - t0;
       replay();
+      host.stats.drawMs += win.performance.now() - t1;
     }
   };
 
@@ -390,19 +435,33 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   }
 
   function paint(b) {
-    host.stats.frames++;
+    if (host.stats.frames++ === 0) {
+      win.performance.mark?.("vcwl:first-frame");
+      // The canvas replaces the prerendered page in the same frame.
+      if (opts.prerendered) {
+        canvas.style.visibility = "";
+        opts.prerendered.remove();
+        win.scrollTo(0, 0);
+      }
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.textBaseline = "middle";
+    ctx.textBaseline = "alphabetic";
     ctx.lineCap = "butt";
     const r4 = () => [b.f32(), b.f32(), b.f32(), b.f32()];
+    // Canvas state setters parse their value each time: skip the ones that would not change it.
+    // `restore()` brings back an earlier state, so the cache is dropped there.
+    let fill = 0xffffffff, font, spacing = "0px";
+    const setFill = (c) => {
+      if (c !== fill) ctx.fillStyle = css((fill = c));
+    };
     while (b.more()) {
       switch (b.u32()) {
         case PAINT.FILL: {
           const [x0, y0, w, h] = r4();
-          ctx.fillStyle = css(b.u32());
+          setFill(b.u32());
           shape(ctx, x0, y0, w, h, r4());
           ctx.fill();
           break;
@@ -420,15 +479,21 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
         }
         case PAINT.TEXT: {
           const tx = b.f32(), ty = b.f32(), color = b.u32(), f = fonts[b.u32()];
-          if (ctx.font !== f[0]) ctx.font = f[0];
-          ctx.letterSpacing = f[1];
-          ctx.fillStyle = css(color);
-          ctx.fillText(b.str(), tx, ty);
+          if (f[0] !== font) ctx.font = font = f[0];
+          if (f[1] !== spacing) ctx.letterSpacing = spacing = f[1];
+          setFill(color);
+          ctx.fillText(b.str(), tx, ty + f[2]);
           break;
         }
         case PAINT.FONT: {
-          const id = b.u32(), spacing = b.f32();
-          fonts[id] = [b.str(), spacing + "px"];
+          const id = b.u32(), spacing = b.f32(), font = b.str();
+          // As in CSS, the font's ascent and descent are centered on the line.
+          let shift = baselines.get(font);
+          if (shift === undefined) {
+            const m = measurer(font, 0).measureText("");
+            baselines.set(font, (shift = (m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2));
+          }
+          fonts[id] = [font, spacing + "px", shift];
           break;
         }
         case PAINT.CLIP: {
@@ -440,6 +505,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
         }
         case PAINT.RESTORE:
           ctx.restore();
+          fill = font = spacing = undefined;
           break;
         case PAINT.ALPHA:
           ctx.save();
@@ -471,11 +537,37 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
           ctx.restore();
           break;
         }
+        case PAINT.INSET_SHADOW: {
+          const [x0, y0, w, h] = r4(), radii = r4();
+          const ox = b.f32(), oy = b.f32(), blur = b.f32(), spread = b.f32(), color = css(b.u32());
+          // Inside the box, the shadow of everything outside its (shrunk, offset) shape.
+          const far = 100000, pad = blur + Math.abs(ox) + Math.abs(oy) + 1;
+          ctx.save();
+          shape(ctx, x0, y0, w, h, radii);
+          ctx.clip();
+          ctx.shadowColor = color;
+          ctx.shadowBlur = blur * dpr;
+          ctx.shadowOffsetX = (ox + far) * dpr;
+          ctx.shadowOffsetY = oy * dpr;
+          ctx.fillStyle = "#000";
+          ctx.beginPath();
+          ctx.rect(x0 - far - pad, y0 - pad, w + 2 * pad, h + 2 * pad);
+          // Sides the shadow does not reach extend past the box, so no seam shows there.
+          const out = (inward) => (blur === 0 && inward <= 0 ? pad : 0);
+          const [l, t, rt, bt] = [out(spread + ox), out(spread + oy), out(spread - ox), out(spread - oy)];
+          const hx = x0 + spread + ox - l, hy = y0 + spread + oy - t;
+          const hw = Math.max(0, w - 2 * spread) + l + rt, hh = Math.max(0, h - 2 * spread) + t + bt;
+          addShape(ctx, hx - ox - far, hy - oy, hw, hh, radii.map((v) => Math.max(0, v - spread)));
+          ctx.fill("evenodd");
+          ctx.restore();
+          break;
+        }
         case PAINT.GRADIENT: {
           const [x0, y0, w, h] = r4(), radii = r4();
           const g = ctx.createLinearGradient(b.f32(), b.f32(), b.f32(), b.f32());
           for (let i = b.u32(); i > 0; i--) g.addColorStop(Math.min(1, Math.max(0, b.f32())), css(b.u32()));
           ctx.fillStyle = g;
+          fill = undefined;
           shape(ctx, x0, y0, w, h, radii);
           ctx.fill();
           break;
@@ -576,20 +668,40 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     return null;
   };
 
+  // Shared styles come from one constructed sheet when the browser has them, so mirror
+  // elements only carry their position inline.
+  let boxClass = "";
+  try {
+    const sheet = new win.CSSStyleSheet();
+    sheet.replaceSync(`.vcwl-m{${BOX}}`);
+    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
+    boxClass = "vcwl-m";
+  } catch {}
+  const protos = new Map();
+
   function mirrorElement(tag) {
-    let el;
-    if (tag === "#text") el = doc.createElement("span");
-    else if (tag === "img") {
-      el = doc.createElement("span");
-      el.setAttribute("role", "img");
-    } else el = doc.createElement(MIRROR_TAGS.has(tag) ? tag : "div");
-    el.style.cssText = BOX;
-    return el;
+    let el = protos.get(tag);
+    if (!el) {
+      if (tag === "#text") el = doc.createElement("span");
+      else if (tag === "img") {
+        el = doc.createElement("span");
+        el.setAttribute("role", "img");
+      } else el = doc.createElement(MIRROR_TAGS.has(tag) ? tag : "div");
+      if (boxClass) el.className = boxClass;
+      else el.style.cssText = BOX;
+      protos.set(tag, el);
+    }
+    return el.cloneNode(false);
   }
 
   function setAttrs(m, attrs) {
     const el = m.el;
-    for (const k of Object.keys(m.attrs)) if (!(k in attrs)) el.removeAttribute(k === "alt" ? "aria-label" : k);
+    for (const k of Object.keys(m.attrs)) {
+      if (k in attrs) continue;
+      if (k === "text") el.textContent = "";
+      else if (k === "font") el.style.font = "";
+      else el.removeAttribute(k === "alt" ? "aria-label" : k);
+    }
     for (const [k, v] of Object.entries(attrs)) {
       if (m.attrs[k] === v) continue;
       switch (k) {
@@ -636,10 +748,11 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
       let m = mirror.get(id);
       seen.add(id);
       const p = parent < 0 ? a11y : mirror.get(parent).el;
-      if (!kids.has(p)) kids.set(p, []);
+      if (parent < 0 && !kids.has(p)) kids.set(p, []);
       if (m && m.hash === hash) {
         b.skip(len);
         kids.get(p).push(m.el);
+        kids.set(m.el, []);
         continue;
       }
       const tag = b.str();
@@ -665,6 +778,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
         m.flags = flags;
       }
       kids.get(p).push(m.el);
+      kids.set(m.el, []);
     }
     for (const [p, list] of kids) order(p, list);
     for (const [id, m] of mirror) {
@@ -680,6 +794,11 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
    * their current positions stay, the others are inserted before their successor.
    */
   function order(p, list) {
+    if (!list.length) {
+      // Mirror elements with children hold no text of their own.
+      if (p.firstElementChild) p.replaceChildren();
+      return;
+    }
     const at = new Map();
     for (let i = 0, c = p.firstElementChild; c; c = c.nextElementSibling, i++) at.set(c, i);
     const pos = list.map((el) => (el.parentNode === p ? at.get(el) : -1));
@@ -700,6 +819,8 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     });
     const keep = new Set();
     for (let i = idx[tails.length - 1] ?? -1; i >= 0; i = prev[i]) keep.add(i);
+    // Mostly new children: one replacement detaches the old ones in a single operation.
+    if (keep.size * 2 < list.length) return p.replaceChildren(...list);
     let next = null;
     for (let i = list.length - 1; i >= 0; i--) {
       if (!keep.has(i)) p.insertBefore(list[i], next);
@@ -813,6 +934,14 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   x = host.exports = instance.exports;
   resize();
 
+  if (opts.prerendered) r.take_over(win.scrollY);
+  // A font that arrives after the first frame changes text widths.
+  doc.fonts?.addEventListener?.("loadingdone", () => {
+    measurers.clear();
+    baselines.clear();
+    input(() => r.fonts_changed());
+  });
+
   host.tree = () => {
     host.paintNow();
     syncMirror();
@@ -898,6 +1027,21 @@ async function compile(url) {
   return WebAssembly.compile(await resp.arrayBuffer());
 }
 
+/**
+ * Registers the app's fonts and waits for them (they were preloaded with the page), at most
+ * `FONT_WAIT_MS`: the first frame then uses them instead of being laid out twice.
+ */
+const FONT_WAIT_MS = 3000;
+async function loadFonts(doc, fonts) {
+  if (!fonts.length || typeof FontFace === "undefined") return;
+  const loads = fonts.map((f) => {
+    const face = new FontFace(f.family, `url("${new URL(f.src, doc.baseURI)}")`, { weight: f.weight, style: f.style });
+    doc.fonts.add(face);
+    return face.load().catch((e) => console.warn(`[vcwl] font "${f.family}" failed to load: ${e.message ?? e}`));
+  });
+  await Promise.race([Promise.all(loads), new Promise((r) => setTimeout(r, FONT_WAIT_MS))]);
+}
+
 /** Loads `app.wasm` and `render.wasm` next to this script and starts the application. */
 export async function boot(doc = document) {
   const win = doc.defaultView;
@@ -908,13 +1052,18 @@ export async function boot(doc = document) {
   };
   const canvas = doc.createElement("canvas");
   canvas.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;display:block;outline:none;touch-action:none";
+  // A prerendered page stays visible and usable until the first frame.
+  const prerendered = doc.getElementById("vcwl-pre");
+  if (prerendered) canvas.style.visibility = "hidden";
   doc.body.append(canvas);
   let host;
   try {
     const [app, render] = await Promise.all([compile(new URL("app.wasm", import.meta.url)), compile(new URL("render.wasm", import.meta.url))]);
+    win.performance.mark?.("vcwl:compiled");
     const config = WebAssembly.Module.customSections(app, "vcwl.config")[0];
     if (config) cfg = JSON.parse(decoder.decode(config));
-    host = await createCanvasHost(canvas, app, render, { onError: report, caps: cfg.caps });
+    await loadFonts(doc, cfg.fonts ?? []);
+    host = await createCanvasHost(canvas, app, render, { onError: report, caps: cfg.caps, prerendered });
   } catch (e) {
     const unsupported = typeof WebAssembly === "undefined" || e instanceof WebAssembly.CompileError;
     console.error(e);
@@ -922,6 +1071,7 @@ export async function boot(doc = document) {
     return null;
   }
   win.vcwl = host;
+  win.performance.mark?.("vcwl:started");
   host.call((x) => x.set_route(host.writeIO(routeFromLocation(win.location))));
   host.call((x) => x.start());
   win.addEventListener("hashchange", () => host.setRoute(routeFromLocation(win.location)));

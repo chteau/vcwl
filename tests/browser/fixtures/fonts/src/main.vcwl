@@ -1,0 +1,26 @@
+// Browser-test fixture: a web font, and a prerendered page.
+app "Fonts"
+
+font "Tuffy" from "fonts/tuffy-bold.ttf" weight 700
+
+style Display {
+    font: "Tuffy", serif
+    weight: 700
+    size: 40px
+}
+
+component App {
+    state clicks: Int = 0
+
+    column {
+        heading("Wide glyphs", level: 1) {
+            style Display
+        }
+        paragraph("In the fallback font.")
+        button("Clicked {clicks}") {
+            on click {
+                clicks += 1
+            }
+        }
+    }
+}

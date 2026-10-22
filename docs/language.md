@@ -175,6 +175,36 @@ TodoItem(todo: t) {
 Properties are read-only. State changes only in event handlers; assigning in a view is a compile
 error. After a handler finishes, the views that depend on changed values update in one batch.
 
+A component can take child content with one `slot` in its view. Content given at the use site is
+placed there; it belongs to the parent, so it reads the parent's state and its handlers run in the
+parent:
+
+```vcwl
+component Card(title: String) {
+    event close
+
+    article {
+        heading(title, level: 2)
+        slot
+        button("Close") {
+            on click {
+                emit close
+            }
+        }
+    }
+}
+
+Card(title: "Inbox") {
+    text("{unread} unread")      // parent state; updates when `unread` changes
+    on close {                   // handlers for Card's events sit next to the content
+        open = false
+    }
+}
+```
+
+`slot` may appear once, inside an element, and not inside `if`, `match`, `for`, `routes` or
+another component's content. Passing content to a component without a slot is a compile error.
+
 ### Views
 
 - Text: `text("Hello {name}")`.
@@ -198,6 +228,19 @@ error. After a handler finishes, the views that depend on changed values update 
 
 Events: `on click`, `on input(v)`, `on change(v)`, `on submit`, `on focus`, `on blur`,
 `on dblclick`, and `on mount` in a component body.
+
+### Fonts
+
+```vcwl
+font "Tuffy" from "fonts/tuffy-bold.ttf" weight 700
+font "Inter" from "fonts/inter.woff2" weight 100..900   // variable font
+font "Inter" from "fonts/inter-italic.woff2" italic
+```
+
+The file must exist under `public/` and be `.woff2`, `.woff`, `.ttf` or `.otf`. Styles then use
+the family by name (`font: "Tuffy", sans-serif`). The page preloads the files; the host loads
+them before the first frame (waiting at most 3 s, then falling back) and re-measures text when a
+font arrives later.
 
 ### Styles
 

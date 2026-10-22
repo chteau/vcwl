@@ -43,6 +43,8 @@ Working end to end, tested in Node.js and headless Chrome:
   navigation, text fields with selection and clipboard, checkboxes, select pop-ups, scrolling;
 - `fetch` with JSON validated at run time against the expected type, and network access limited
   by declared capabilities (enforced by the host and the Content-Security-Policy);
+- components with child content (`slot`), web fonts (`font "X" from "fonts/x.woff2"`), and
+  build-time prerendering of every route to static HTML for first paint and crawlers;
 - tooling: `vcwl new | dev | build | check | test | fmt | run | compile | clean`.
 
 ## Quick start

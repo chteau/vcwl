@@ -25,6 +25,7 @@ pub mod op {
     pub const SHADOW: u32 = 10;
     pub const GRADIENT: u32 = 11;
     pub const LINE: u32 = 12;
+    pub const INSET_SHADOW: u32 = 13;
 }
 
 /// A painted box, in viewport coordinates, clipped by its scroll ancestors.
@@ -363,7 +364,7 @@ impl<'a> Painter<'a> {
         for c in kids {
             if self.t.n(c).is("li") {
                 marker += 1;
-                self.marker(c, cx, cy, marker);
+                self.marker(c, cx, cy, marker, inner_clip);
             }
             self.node(c, cx, cy, inner_clip);
         }
@@ -431,6 +432,16 @@ impl<'a> Painter<'a> {
                     self.out.push(c);
                 }
             }
+        }
+        // Inset shadows go above the background, below the border.
+        for sh in s.shadow.iter().filter(|sh| sh.inset) {
+            self.out.push(op::INSET_SHADOW);
+            self.rect(b);
+            self.radii(s.radius);
+            for v in [sh.x, sh.y, sh.blur, sh.spread] {
+                self.f(v);
+            }
+            self.out.push(sh.color);
         }
         let bs = s.border;
         let uniform = bs
@@ -502,10 +513,14 @@ impl<'a> Painter<'a> {
         }
     }
 
-    fn marker(&mut self, li: Id, cx: f32, cy: f32, index: usize) {
+    fn marker(&mut self, li: Id, cx: f32, cy: f32, index: usize, clip: Rect) {
         let n = self.t.n(li);
-        let s = n.style.clone();
         let r = n.lay.rect;
+        // Like their items, markers outside the visible area are not painted.
+        if cy + r.y > clip.y + clip.h || cy + r.y + r.h < clip.y {
+            return;
+        }
+        let s = n.style.clone();
         let mid = cy + r.y + n.lay.border[0] + n.lay.padding[0] + s.line_height / 2.0;
         match s.list_style {
             ListStyle::None => {}

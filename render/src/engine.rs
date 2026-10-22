@@ -12,6 +12,7 @@ use crate::paint::{self, Edit, Hit, Painter, Popup};
 use crate::style::{Cursor, Media, Overflow, Position, Sheet};
 use crate::text::{Fonts, Measure};
 
+pub mod html;
 pub mod semantics;
 
 #[derive(Debug, PartialEq)]
@@ -104,6 +105,8 @@ pub struct Engine {
     pub now: f64,
     /// The accessibility mirror may be out of date.
     sem_dirty: bool,
+    /// Scroll position of a prerendered page that the next frame takes over.
+    takeover: Option<f32>,
     /// Running transitions by node.
     anims: HashMap<Id, Vec<Anim>>,
     /// Smooth page scroll in progress: from, to, start time.
@@ -143,6 +146,7 @@ impl Engine {
             blink_start: 0.0,
             now: 0.0,
             sem_dirty: true,
+            takeover: None,
             anims: HashMap::new(),
             page_scroll: None,
         }
@@ -273,6 +277,12 @@ impl Engine {
         }
     }
 
+    /// A web font finished loading: measured widths are stale.
+    pub fn fonts_changed(&mut self) {
+        self.fonts = Fonts::default();
+        self.invalidate_all();
+    }
+
     pub fn set_preferences(&mut self, dark: bool, reduced_motion: bool) {
         if (dark, reduced_motion) != (self.media.dark, self.media.reduced_motion) {
             self.media.dark = dark;
@@ -339,8 +349,14 @@ impl Engine {
             self.paint_dirty = true;
         }
         self.update_layout(m);
+        let takeover = self.takeover.take();
+        if let Some(y) = takeover {
+            self.scroll_by(0, 0.0, y);
+        }
         self.step_page_scroll(now);
-        self.reveal();
+        if self.reveal(takeover.is_some()) {
+            self.update_layout(m);
+        }
         if !self.anims.is_empty() {
             self.paint_dirty = true;
         }
@@ -438,9 +454,11 @@ impl Engine {
 
     /// Ends `when appear` styles of elements that came into view (their transitions start
     /// on the next frame).
-    fn reveal(&mut self) {
+    /// Marks `when appear` elements that entered the viewport; with `instant`, they take their
+    /// final style without a transition. Returns whether any did.
+    fn reveal(&mut self, instant: bool) -> bool {
         if !self.sheet.uses_appear() {
-            return;
+            return false;
         }
         let vh = self.media.height;
         let mut shown = Vec::new();
@@ -454,11 +472,24 @@ impl Engine {
                 shown.push(id);
             }
         }
+        let any = !shown.is_empty();
         for id in shown {
-            self.tree.m(id).flags |= dom::SEEN;
+            let n = self.tree.m(id);
+            n.flags |= dom::SEEN;
+            if instant {
+                n.flags &= !dom::STYLED;
+            }
             self.tree.mark_style(id);
             self.invalidate();
         }
+        any
+    }
+
+    /// The page was prerendered and is on screen: the next frame keeps what the reader sees,
+    /// at the same scroll position and without `when appear` intros for visible elements.
+    pub fn take_over(&mut self, scroll_y: f32) {
+        self.takeover = Some(scroll_y);
+        self.invalidate();
     }
 
     /// Writes animated values into the styles of animating nodes (and of descendants that
@@ -1673,6 +1704,66 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn takeover_keeps_the_prerendered_page() {
+        let mut b = Buf::default();
+        b.create(1, "div").class(1, "fade").insert(0, 1, 0);
+        b.create(2, "div").class(2, "tall").insert(0, 2, 0);
+        b.create(3, "div").class(3, "fade").insert(0, 3, 0);
+        b.create(4, "div").class(4, "tall").insert(0, 4, 0);
+        let css = ".tall{height:2000px}.fade{height:10px;transition:opacity 100ms linear}.fade:appear{opacity:0}";
+        let mut e = Engine::new(css, 800.0, 600.0);
+        e.apply(&b.0).unwrap();
+        e.take_over(1500.0);
+        e.frame(&mut Mono, 0.0).unwrap();
+        assert_eq!(e.tree.n(0).lay.scroll.1, 1500.0, "scroll kept");
+        assert_eq!(e.tree.n(3).style.opacity, 1.0, "visible: shown at once");
+        assert!(e.anims.is_empty(), "no intro transition");
+        assert_eq!(
+            e.tree.n(1).style.opacity,
+            0.0,
+            "scrolled past: still waiting"
+        );
+    }
+
+    #[test]
+    fn inset_shadows_paint_inside_the_box() {
+        let mut b = Buf::default();
+        b.create(1, "div").class(1, "c").insert(0, 1, 0);
+        let mut e = Engine::new(
+            ".c{height:20px;box-shadow:inset 0 -2px 0 #d16a47}",
+            800.0,
+            600.0,
+        );
+        e.apply(&b.0).unwrap();
+        let list = e.frame(&mut Mono, 0.0).unwrap();
+        let at = list
+            .iter()
+            .position(|&w| w == paint::op::INSET_SHADOW)
+            .expect("inset shadow painted");
+        let f = |i: usize| f32::from_bits(list[at + i]);
+        assert_eq!((f(3), f(4)), (800.0, 20.0), "the element's box");
+        assert_eq!((f(9), f(10), f(11), f(12)), (0.0, -2.0, 0.0, 0.0));
+        assert_eq!(list[at + 13], 0xd16a47ff);
+    }
+
+    #[test]
+    fn offscreen_list_markers_are_not_painted() {
+        let ops = |rows: usize| {
+            let mut b = Buf::default();
+            b.create(1, "ul").insert(0, 1, 0);
+            for i in 0..rows as i32 {
+                b.create(10 + i, "li")
+                    .class(10 + i, "r")
+                    .insert(1, 10 + i, 0);
+            }
+            let mut e = Engine::new(".r{height:20px}", 800.0, 600.0);
+            e.apply(&b.0).unwrap();
+            e.frame(&mut Mono, 0.0).unwrap().len()
+        };
+        assert_eq!(ops(1000), ops(40), "only the visible rows paint");
     }
 
     #[test]

@@ -168,24 +168,69 @@ impl<'a> Parser<'a> {
 
     // ----- items -----
 
+    /// A string literal without interpolation.
+    fn plain_str(&mut self, what: &str) -> Result<String> {
+        let Tok::Str(pieces) = self.peek().clone() else {
+            return self.err(&format!("{what} string"));
+        };
+        let s = match pieces.as_slice() {
+            [] => String::new(),
+            [StrPiece::Lit(s)] => s.clone(),
+            _ => {
+                return Err(Diag::syntax(
+                    self.span(),
+                    format!("{what}s cannot contain interpolation"),
+                ));
+            }
+        };
+        self.bump();
+        Ok(s)
+    }
+
     fn item(&mut self) -> Result<Item> {
         let start = self.span();
         if self.eat_kw("import") {
-            let Tok::Str(pieces) = self.peek().clone() else {
-                return self.err("an import path string");
-            };
-            let path = match pieces.as_slice() {
-                [StrPiece::Lit(s)] => s.clone(),
-                _ => {
-                    return Err(Diag::syntax(
-                        self.span(),
-                        "import paths cannot contain interpolation",
-                    ));
-                }
-            };
-            self.bump();
+            let path = self.plain_str("an import path")?;
             return Ok(Item::Import(Import {
                 path,
+                span: start.to(self.prev_span()),
+            }));
+        }
+        if self.is_kw("font") && matches!(self.peek_at(1), Tok::Str(_)) {
+            self.bump();
+            let family = self.plain_str("a font family")?;
+            if !self.eat_kw("from") {
+                return self.err("`from \"path/to/font.woff2\"`");
+            }
+            let src = self.plain_str("a font file path")?;
+            let (mut weight, mut italic) = (None, false);
+            while !self.token().nl && !matches!(self.peek(), Tok::Eof) {
+                if self.eat_kw("weight") {
+                    let Tok::Int(lo) = *self.peek() else {
+                        return self.err("a font weight (100–900)");
+                    };
+                    self.bump();
+                    let hi = if self.eat("..") {
+                        let Tok::Int(hi) = *self.peek() else {
+                            return self.err("the upper font weight");
+                        };
+                        self.bump();
+                        hi
+                    } else {
+                        lo
+                    };
+                    weight = Some((lo, hi));
+                } else if self.eat_kw("italic") {
+                    italic = true;
+                } else {
+                    return self.err("`weight`, `italic` or the end of the line");
+                }
+            }
+            return Ok(Item::Font(FontDecl {
+                family,
+                src,
+                weight,
+                italic,
                 span: start.to(self.prev_span()),
             }));
         }

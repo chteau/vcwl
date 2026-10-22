@@ -1,0 +1,8 @@
+// error: the font file must be a relative path inside `public/`
+app "T"
+
+font "Inter" from "../secret/Inter.woff2"
+
+component App {
+    text("x")
+}

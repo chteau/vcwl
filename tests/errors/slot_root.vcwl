@@ -1,0 +1,10 @@
+// error: `slot` must be inside an element of the component
+app "T"
+
+component Card {
+    slot
+}
+
+component App {
+    Card()
+}

@@ -16,9 +16,11 @@ export function build(projectDir, args = []) {
   return path.join(projectDir, "dist");
 }
 
+export const launch = () => puppeteer.launch({ executablePath: chrome, headless: true, args: ["--no-sandbox"] });
+
 export async function open(dist, { base = "/", hash = "", viewport = { width: 1000, height: 800 }, api = null, ready: until = null } = {}) {
   const { server, url } = await serve(dist, base, api);
-  const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ["--no-sandbox"] });
+  const browser = await launch();
   const page = await browser.newPage();
   await page.setViewport(viewport);
   const errors = [];
@@ -39,7 +41,11 @@ export async function open(dist, { base = "/", hash = "", viewport = { width: 10
   };
 }
 
-export const ready = (page) => page.waitForFunction(() => window.vcwl?.tree, { timeout: 10000 });
+export async function ready(page) {
+  await page.waitForFunction(() => window.vcwl?.tree, { timeout: 10000 });
+  // The accessibility mirror follows the first frame.
+  await page.evaluate(() => window.vcwl.mirrored());
+}
 
 /** A snapshot of the renderer's element tree. */
 export class Tree {

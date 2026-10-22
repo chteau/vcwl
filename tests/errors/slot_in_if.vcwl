@@ -1,0 +1,14 @@
+// error: `slot` must be inside an element of the component, outside `if`, `match`, `for` and `routes`
+app "T"
+
+component Card(open: Bool) {
+    box {
+        if open {
+            slot
+        }
+    }
+}
+
+component App {
+    Card(open: true)
+}

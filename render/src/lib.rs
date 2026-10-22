@@ -249,6 +249,23 @@ mod wasm {
         with(|e| e.choose_index(id, i as usize));
     }
 
+    /// Style rules, a NUL byte, then the tree as HTML (prerendering).
+    #[unsafe(no_mangle)]
+    pub extern "C" fn prerender() -> usize {
+        let (html, css) = with(|e| e.html());
+        output(format!("{css}\0{html}").into_bytes())
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn fonts_changed() {
+        with(|e| e.fonts_changed());
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn take_over(scroll_y: f32) {
+        with(|e| e.take_over(scroll_y));
+    }
+
     #[unsafe(no_mangle)]
     pub extern "C" fn dump() -> usize {
         output(with(|e| e.dump()).into_bytes())

@@ -26,6 +26,17 @@ pub enum Item {
     Component(Component),
     App(AppDecl),
     Style(NamedStyle),
+    Font(FontDecl),
+}
+
+/// `font "Family" from "path" [weight N[..M]] [italic]`: a font file shipped with the app.
+#[derive(Clone, Debug)]
+pub struct FontDecl {
+    pub family: String,
+    pub src: String,
+    pub weight: Option<(i64, i64)>,
+    pub italic: bool,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]

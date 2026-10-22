@@ -7,7 +7,7 @@ enforce.
 
 ## Enforced
 
-- **No markup at all.** The element tree lives in the renderer. The accessibility mirror creates
+- **No markup at run time.** The element tree lives in the renderer. The accessibility mirror creates
   DOM elements only from a fixed list of tags, sets text with `textContent`, copies only `aria-*`,
   `role`, `title`, `lang` and `placeholder` attributes (plus sanitized `href`), and never sets
   `src`, `style` attributes or event handlers. Text is painted or assigned, never parsed.
@@ -16,7 +16,9 @@ enforce.
 - **No event-handler attributes.** The renderer refuses attributes starting with `on` and properties
   other than `value`, and rejects malformed command buffers (unknown nodes, cycles).
 - **Capabilities.** An app declares the hosts it may contact. The build emits a
-  Content-Security-Policy meta tag: `default-src 'none'`, scripts from `'self'` only, no styles,
+  Content-Security-Policy meta tag: `default-src 'none'`, scripts from `'self'` only, no styles
+  (except, with prerendering, the one inline style sheet allowed by its SHA-256 hash), fonts from
+  `'self'` only when the app declares fonts,
   `wasm-unsafe-eval` for the module, `connect-src` limited to `'self'` plus the declared hosts
   (HTTPS only). The host also refuses `fetch` URLs outside the capability before any request is
   made, and `fetch` without a network capability is a compile error.
@@ -26,6 +28,11 @@ enforce.
   stops the application (no further handlers run) and dev builds show the error.
 - **No re-entrancy.** The renderer queues events and the host delivers them one at a time, between
   calls into the application; events for elements removed in the meantime are dropped.
+
+- **Prerendered HTML is generated, not templated.** It is serialized from the renderer's tree:
+  text and attribute values are escaped, only a fixed list of attributes and `aria-*` is written,
+  URLs are sanitized as at run time, tags are restricted to lowercase names, and bound style values
+  are written only if they parse as finite numbers with a known unit.
 
 ## Not enforced or not yet implemented
 

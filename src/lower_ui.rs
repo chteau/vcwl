@@ -86,6 +86,8 @@ pub struct Scope {
     pub bound: HashMap<LocalId, u32>,
     pub key_field: Option<u32>,
     pub fns: ScopeFns,
+    /// Component scopes with a `slot`: fields holding its anchor node and that node's parent.
+    pub slot: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -274,6 +276,11 @@ impl Lower<'_> {
                 events.push((f, s, sig));
             }
             self.u().scopes[si].comp_fields = CompFields { dead, events };
+            if self.u().sigs[ci].has_slot {
+                let anchor = self.add_field(si, VT::I32);
+                let parent = self.add_field(si, VT::I32);
+                self.u().scopes[si].slot = Some((anchor, parent));
+            }
         }
         for ci in 0..n {
             let comp = self.u().comps[ci].clone();
@@ -327,6 +334,7 @@ impl Lower<'_> {
             bound: HashMap::new(),
             key_field: None,
             fns,
+            slot: None,
         });
         u.scopes.len() - 1
     }
@@ -663,9 +671,15 @@ impl Lower<'_> {
                     }
                     d | self.views_deps(cx, body)
                 }
-                TView::Component { props, .. } => props
-                    .iter()
-                    .fold(BIT_ROUTE, |acc, p| acc | self.deps(cx, p)),
+                TView::Component {
+                    props, children, ..
+                } => {
+                    props
+                        .iter()
+                        .fold(BIT_ROUTE, |acc, p| acc | self.deps(cx, p))
+                        | self.views_deps(cx, children)
+                }
+                TView::Slot => 0,
             };
         }
         m
@@ -1373,9 +1387,31 @@ impl Lower<'_> {
                 comp: child,
                 props,
                 events,
+                children,
                 ..
-            } => self.view_component(g, *child, props, events, pos),
+            } => self.view_component(g, comp, *child, props, events, children, pos),
+            TView::Slot => self.view_slot(g, pos),
         }
+    }
+
+    /// Marks where the component's `slot` content goes; the user of the component mounts it.
+    fn view_slot(&mut self, g: &mut Gen, pos: Pos) {
+        let ty = self.scope_ty(g.si);
+        let (anchor_f, parent_f) = self.u().scopes[g.si].slot.expect("slot fields reserved");
+        let nn = self.helper_new_node();
+        let a = g.mount.temp(VT::I32);
+        g.mb.push(set(a, IExpr::Call(nn, vec![])));
+        let c = self.op(&mut g.mount, opc::COMMENT, vec![get(a)], vec![]);
+        g.mb.push(c);
+        let ins = self.insert(&mut g.mount, pos, get(a));
+        g.mb.push(ins);
+        g.mb.push(IExpr::StructSet(ty, anchor_f, b(get(0)), b(get(a))));
+        g.mb.push(IExpr::StructSet(
+            ty,
+            parent_f,
+            b(get(0)),
+            b(Self::parent_node(pos)),
+        ));
     }
 
     fn view_text(&mut self, g: &mut Gen, e: &TExpr, pos: Pos) {
@@ -2800,12 +2836,15 @@ impl Lower<'_> {
         idx
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn view_component(
         &mut self,
         g: &mut Gen,
+        comp: &TComp,
         child: usize,
         props: &[TExpr],
         events: &[(usize, usize)],
+        children: &[TView],
         pos: Pos,
     ) {
         let si = g.si;
@@ -2876,6 +2915,53 @@ impl Lower<'_> {
             FuncRef::Local(cfns.mount),
             vec![get(c), pn, an],
         ));
+        // Slot content: a fragment of this scope, mounted at the child's slot anchor.
+        let slot = match self.u().scopes[cs].slot {
+            Some((anchor_f, parent_f)) if !children.is_empty() => {
+                let ci = self.u().scopes[si].comp;
+                let bs = self.new_scope(ci, Some(si));
+                let bty = self.scope_ty(bs);
+                let bfns = self.u().scopes[bs].fns;
+                let bf = self.add_field(si, VT::Ref(bty));
+                let f = g.mount.temp(VT::Ref(bty));
+                g.mb.extend([
+                    set(f, IExpr::StructNewDefault(bty)),
+                    IExpr::StructSet(bty, 0, b(get(f)), b(get(0))),
+                    IExpr::Call(
+                        FuncRef::Local(bfns.mount),
+                        vec![
+                            get(f),
+                            IExpr::StructGet(cty, parent_f, b(get(c))),
+                            IExpr::StructGet(cty, anchor_f, b(get(c))),
+                        ],
+                    ),
+                    IExpr::StructSet(ty, bf, b(get(0)), b(get(f))),
+                ]);
+                let mut probe = FnCx::new(vec![], comp.locals.clone(), vec![]);
+                probe.scope = Some(ScopeRef {
+                    scope: bs,
+                    local: 0,
+                });
+                let deps = self.views_deps(&probe, children);
+                let frag = un(UnOp::RefAsNonNull, IExpr::StructGet(ty, bf, b(get(0))));
+                g.ub.push(IExpr::If(
+                    None,
+                    b(Self::dirty(deps)),
+                    vec![IExpr::Call(
+                        FuncRef::Local(bfns.update),
+                        vec![frag.clone(), get(1)],
+                    )],
+                    vec![],
+                ));
+                // The child removes the content's nodes with its own; release handlers only.
+                g.db.push(IExpr::Call(
+                    FuncRef::Local(bfns.destroy),
+                    vec![frag, IExpr::I32(0)],
+                ));
+                Some(bs)
+            }
+            _ => None,
+        };
         let mut ub = vec![
             set(
                 cl,
@@ -2903,6 +2989,9 @@ impl Lower<'_> {
         ));
         if matches!(pos, Pos::Root) {
             g.roots.push(Root::Child { field, comp: child });
+        }
+        if let Some(bs) = slot {
+            self.gen_scope(bs, comp, children);
         }
     }
 

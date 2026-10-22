@@ -111,6 +111,8 @@ impl Engine {
         while let Some((id, parent)) = stack.pop() {
             let n = self.tree.n(id);
             let mut kept = parent;
+            // Text of form controls, and lone text runs, are carried in attributes.
+            let mut carried = false;
             match n.kind {
                 Kind::Comment => {}
                 Kind::Text if n.text.trim().is_empty() => {}
@@ -144,6 +146,15 @@ impl Engine {
                             }
                             _ => {}
                         }
+                        // An element holding just one text run carries it, halving the
+                        // number of mirror elements for the common case.
+                        carried = matches!(n.tag.as_str(), "option" | "textarea" | "input");
+                        if let Some(t) = self.only_text(id) {
+                            carried = true;
+                            let t = self.tree.n(t);
+                            attrs.push(("text", &t.text));
+                            attrs.push(("font", &t.style.font));
+                        }
                         let flags = if self.focus == Some(id) { FOCUSED } else { 0 }
                             | if n.checked { CHECKED } else { 0 }
                             | if n.attr("disabled").is_some() {
@@ -159,14 +170,28 @@ impl Engine {
                         }
                         entry(&mut w, id, parent, e);
                     }
-                    // Text of form controls is carried in their attributes.
-                    if !matches!(n.tag.as_str(), "option" | "textarea" | "input") {
+                    if !carried {
                         stack.extend(n.children.iter().rev().map(|&c| (c, kept)));
                     }
                 }
             }
         }
         Some(w.0)
+    }
+
+    /// The single non-blank text child of `id`, if it has no other content.
+    fn only_text(&self, id: Id) -> Option<Id> {
+        let mut found = None;
+        for &c in &self.tree.n(id).children {
+            let n = self.tree.n(c);
+            match n.kind {
+                Kind::Comment => {}
+                Kind::Text if n.text.trim().is_empty() => {}
+                Kind::Text if found.is_none() => found = Some(c),
+                _ => return None,
+            }
+        }
+        found
     }
 
     /// Focused element (or -1), its selection as UTF-16 offsets and its value (text fields).
@@ -289,11 +314,9 @@ mod tests {
             .iter()
             .map(|(id, p, tag, _)| (*id, *p, tag.as_str()))
             .collect();
-        assert_eq!(
-            shape,
-            vec![(2, -1, "h1"), (3, 2, "#text"), (4, -1, "input")]
-        );
-        assert_eq!(list[2].3, vec!["aria-label=Name", "value="]);
+        assert_eq!(shape, vec![(2, -1, "h1"), (4, -1, "input")]);
+        assert_eq!(list[0].3[0], "text=Hi");
+        assert_eq!(list[1].3, vec!["aria-label=Name", "value="]);
         assert!(e.semantics(&mut Mono).is_none(), "unchanged");
         e.field_input(4, "zoé", 3, 3, false);
         assert_eq!(e.tree.n(4).value, "zoé");

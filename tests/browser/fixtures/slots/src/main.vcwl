@@ -1,0 +1,49 @@
+// Browser-test fixture: components that show content given by their user.
+app "Slots"
+
+component Card(title: String) {
+    event close
+
+    article {
+        heading(title, level: 2)
+        slot
+        button("Close") {
+            on click {
+                emit close
+            }
+        }
+    }
+}
+
+component App {
+    state n: Int = 0
+    state open: Bool = true
+    state items: [Int] = [1, 2]
+
+    column {
+        if open {
+            Card(title: "Counter") {
+                paragraph("Count {n}")
+                button("Add") {
+                    on click {
+                        n += 1
+                    }
+                }
+                on close {
+                    open = false
+                }
+            }
+        }
+        Card(title: "Empty")
+        for i in items key i {
+            Card(title: "Item {i}") {
+                text("n is {n}")
+            }
+        }
+        button("Reverse") {
+            on click {
+                items = [items[1], items[0]]
+            }
+        }
+    }
+}

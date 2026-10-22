@@ -7,5 +7,6 @@ edition = "2024"
 members = ["render"]
 
 [dependencies]
+vcwl-render = { path = "render" }
 wasm-encoder = "0.262.0"
 wasmparser = "0.262.0"

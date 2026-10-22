@@ -18,6 +18,7 @@ pub mod node;
 pub mod opt;
 pub mod parser;
 pub mod project;
+pub mod sha256;
 pub mod style;
 pub mod testrunner;
 pub mod tir;

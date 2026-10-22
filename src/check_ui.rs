@@ -33,6 +33,8 @@ pub struct CompSig {
     pub name: String,
     pub params: Vec<(String, Type)>,
     pub events: Vec<(String, Option<Type>)>,
+    /// The body has a `slot` for content given where the component is used.
+    pub has_slot: bool,
     pub file: usize,
     pub item: usize,
 }
@@ -138,12 +140,16 @@ pub enum TView {
         span: Span,
     },
     /// Child component; `events` maps the child's event index to a handler of this component.
+    /// `children` is content for the child's `slot`, rendered in this component's scope.
     Component {
         comp: usize,
         props: Vec<TExpr>,
         events: Vec<(usize, usize)>,
+        children: Vec<TView>,
         span: Span,
     },
+    /// Where a component shows the content it is given.
+    Slot,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -470,10 +476,25 @@ impl Checker<'_> {
                         ),
                     ));
                 }
+                let mut slots = Vec::new();
+                find_slots(&c.body, false, false, &mut slots);
+                for (span, ok) in &slots {
+                    if !ok {
+                        self.diags.push(Diag::ty(
+                            *span,
+                            "`slot` must be inside an element of the component, outside `if`, `match`, `for` and `routes`",
+                        ));
+                    }
+                }
+                if let Some((span, _)) = slots.get(1) {
+                    self.diags
+                        .push(Diag::ty(*span, "a component can have only one `slot`"));
+                }
                 sigs.push(CompSig {
                     name: c.name.name.clone(),
                     params,
                     events,
+                    has_slot: !slots.is_empty(),
                     file: fi,
                     item: ii,
                 });
@@ -693,7 +714,13 @@ impl Checker<'_> {
                 }
                 body.iter_mut().for_each(|c| self.zonk_view(c));
             }
-            TView::Component { props, .. } => props.iter_mut().for_each(|x| self.zonk_expr(x)),
+            TView::Component {
+                props, children, ..
+            } => {
+                props.iter_mut().for_each(|x| self.zonk_expr(x));
+                children.iter_mut().for_each(|c| self.zonk_view(c));
+            }
+            TView::Slot => {}
         }
     }
 
@@ -995,6 +1022,12 @@ impl Checker<'_> {
         let name = el.name.name.as_str();
         if name.starts_with(char::is_uppercase) {
             return self.check_component_use(el, cx);
+        }
+        if name == "slot" {
+            if !el.args.is_empty() || !el.children.is_empty() {
+                return Err(Diag::ty(el.span, "`slot` takes no arguments or body"));
+            }
+            return Ok(TView::Slot);
         }
         if name == "text" {
             if !el.children.is_empty() {
@@ -1323,13 +1356,27 @@ impl Checker<'_> {
         };
         let sig = cx.sigs[idx].clone();
         let mut events = Vec::new();
+        let content: Vec<View> = el
+            .children
+            .iter()
+            .filter(|c| !matches!(c, View::On { .. }))
+            .cloned()
+            .collect();
+        if !content.is_empty() && !sig.has_slot {
+            return Err(Diag::ty(
+                el.span,
+                format!("component `{name}` cannot take child content"),
+            )
+            .help(format!(
+                "add `slot` where the content goes in `{name}`, or pass data through properties"
+            )));
+        }
         for c in &el.children {
             let View::On {
                 event, param, body, ..
             } = c
             else {
-                return Err(Diag::ty(el.span, format!("component `{name}` cannot take child content"))
-                    .help("pass data through properties; only `on <event> { ... }` handlers are allowed here"));
+                continue;
             };
             let Some(ei) = sig.events.iter().position(|e| e.0 == event.name) else {
                 let mut d = Diag::ty(
@@ -1427,10 +1474,12 @@ impl Checker<'_> {
                 }
             }
         }
+        let children = self.scoped_views(&content, cx)?;
         Ok(TView::Component {
             comp: idx,
             props,
             events,
+            children,
             span: el.span,
         })
     }
@@ -1591,4 +1640,37 @@ struct ViewCx<'s> {
     handlers: Vec<THandler>,
     mount: Vec<usize>,
     root_classes: Vec<String>,
+}
+
+/// `slot` elements of a component body, and whether each is where it may be: inside an element
+/// of the component itself, not in a fragment (`if`, `match`, `for`, `routes`, another
+/// component's content).
+fn find_slots(views: &[View], in_elem: bool, in_frag: bool, out: &mut Vec<(Span, bool)>) {
+    for v in views {
+        match v {
+            View::Element(el) if el.name.name == "slot" => out.push((el.span, in_elem && !in_frag)),
+            View::Element(el) if el.name.name.starts_with(char::is_uppercase) => {
+                find_slots(&el.children, in_elem, true, out)
+            }
+            View::Element(el) => find_slots(&el.children, true, in_frag, out),
+            View::If { then, els, .. } => {
+                find_slots(then, in_elem, true, out);
+                if let Some(e) = els {
+                    find_slots(e, in_elem, true, out);
+                }
+            }
+            View::For { body, .. } => find_slots(body, in_elem, true, out),
+            View::Match { arms, .. } => {
+                for (_, b) in arms {
+                    find_slots(b, in_elem, true, out);
+                }
+            }
+            View::Routes { arms, .. } => {
+                for (_, _, b) in arms {
+                    find_slots(b, in_elem, true, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }

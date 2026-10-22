@@ -16,10 +16,7 @@ export component Home(b: Bench) {
     column {
         Hero(version: b.pluginVersion)
 
-        section(id: "how", label: "Claude Code pays for the same tokens over and over.") {
-            style Reveal
-            style Sec
-            SectionHead(label: "How it works", title: "Claude Code pays for the same tokens over and over.")
+        Section(id: "how", label: "How it works", title: "Claude Code pays for the same tokens over and over.") {
             grid(gap: 18px) {
                 style TwoCols
                 article {
@@ -65,10 +62,7 @@ export component Home(b: Bench) {
             }
         }
 
-        section(id: "idea", label: "The same task, measured: two real sessions.") {
-            style Reveal
-            style Sec
-            SectionHead(label: "One real session", title: "The same task, measured: two real sessions.")
+        Section(id: "idea", label: "One real session", title: "The same task, measured: two real sessions.") {
             article {
                 style Card
                 column(gap: 10px) {
@@ -84,10 +78,7 @@ export component Home(b: Bench) {
             }
         }
 
-        section(id: "levers", label: "Five changes, active from the first session.") {
-            style Reveal
-            style Sec
-            SectionHead(label: "What it changes", title: "Five changes, active from the first session.")
+        Section(id: "levers", label: "What it changes", title: "Five changes, active from the first session.") {
             grid(gap: 10px) {
                 style FiveCols
                 Rung(n: 1, title: "Smaller floor.", body: "Lean levels hide tools and built-in skills a coding session rarely needs: {floor} per request by default.")
@@ -98,10 +89,7 @@ export component Home(b: Bench) {
             }
         }
 
-        section(id: "numbers", label: "Measured on {a.tasks} real tasks, not estimated.") {
-            style Reveal
-            style Sec
-            SectionHead(label: "Benchmark", title: "Measured on {a.tasks} real tasks, not estimated.")
+        Section(id: "numbers", label: "Benchmark", title: "Measured on {a.tasks} real tasks, not estimated.") {
             grid(gap: 1px) {
                 style FiveCols
                 style {
@@ -144,10 +132,7 @@ export component Home(b: Bench) {
             }
         }
 
-        section(id: "install", label: "Add the marketplace, install, restart.") {
-            style Reveal
-            style Sec
-            SectionHead(label: "Install", title: "Add the marketplace, install, restart.")
+        Section(id: "install", label: "Install", title: "Add the marketplace, install, restart.") {
             CopyBlock(code: "/plugin marketplace add chteau/tokenforge\n/plugin install tokenforge@tokenforge")
             grid(gap: 10px) {
                 style FourCols
@@ -177,10 +162,7 @@ export component Home(b: Bench) {
             }
         }
 
-        section(id: "commands", label: "Everything it adds, in one table.") {
-            style Reveal
-            style Sec
-            SectionHead(label: "Commands", title: "Everything it adds, in one table.")
+        Section(id: "commands", label: "Commands", title: "Everything it adds, in one table.") {
             column {
                 style Card
                 style {
@@ -197,10 +179,7 @@ export component Home(b: Bench) {
             }
         }
 
-        section(id: "levels", label: "Choose what each request carries.") {
-            style Reveal
-            style Sec
-            SectionHead(label: "Lean levels", title: "Choose what each request carries.")
+        Section(id: "levels", label: "Lean levels", title: "Choose what each request carries.") {
             grid(gap: 18px) {
                 style FourCols
                 Level(name: "on", tokens: fmt_k(lean_tokens(b, "on"), true), body: "Hides agent-orchestration tools: Workflow, Monitor, Cron, worktrees, NotebookEdit.", default: false)
@@ -368,14 +347,19 @@ style Sec {
     margin: 72px 0 0
 }
 
-component SectionHead(label: String, title: String) {
-    column {
-        paragraph(label) {
-            style Label
+component Section(id: String, label: String, title: String) {
+    section(id: id, label: title) {
+        style Reveal
+        style Sec
+        column {
+            paragraph(label) {
+                style Label
+            }
+            heading(title, level: 2) {
+                style SectionTitle
+            }
         }
-        heading(title, level: 2) {
-            style SectionTitle
-        }
+        slot
     }
 }
 

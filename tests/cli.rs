@@ -140,3 +140,55 @@ fn repository_sources_are_formatted() {
         String::from_utf8_lossy(&o.stderr)
     );
 }
+
+#[test]
+fn build_checks_fonts_and_allows_the_prerendered_style_by_hash() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("font-project");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("vcwl.toml"),
+        "entry = \"src/main.vcwl\"\nout = \"dist\"\nprerender = true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/main.vcwl"),
+        "app \"T\"\n\nfont \"Tuffy\" from \"fonts/t.ttf\"\n\ncomponent App {\n    text(\"<hi>\")\n}\n",
+    )
+    .unwrap();
+    let build = || {
+        Command::new(env!("CARGO_BIN_EXE_vcwl"))
+            .arg("build")
+            .current_dir(&dir)
+            .output()
+            .unwrap()
+    };
+    let o = build();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        !o.status.success() && err.contains("fonts/t.ttf not found"),
+        "{err}"
+    );
+    std::fs::create_dir_all(dir.join("public/fonts")).unwrap();
+    let font = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/browser/fixtures/fonts/public/fonts/tuffy-bold.ttf");
+    std::fs::copy(font, dir.join("public/fonts/t.ttf")).unwrap();
+    let o = build();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let html = std::fs::read_to_string(dir.join("dist/index.html")).unwrap();
+    let style = html
+        .split("<style>")
+        .nth(1)
+        .unwrap()
+        .split("</style>")
+        .next()
+        .unwrap();
+    let hash = vcwl::node::base64(&vcwl::sha256::digest(style.as_bytes()));
+    assert!(
+        html.contains(&format!("style-src 'sha256-{hash}'")),
+        "{html}"
+    );
+    assert!(html.contains("font-src 'self'"), "{html}");
+    assert!(html.contains(">&lt;hi&gt;<"), "escaped text: {html}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

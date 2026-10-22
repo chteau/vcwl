@@ -1,0 +1,8 @@
+// error: invalid font family name
+app "T"
+
+font "x;color:red" from "fonts/a.woff2"
+
+component App {
+    text("x")
+}

@@ -60,5 +60,20 @@ url = "https://user.github.io/repo/"   # makes og:url and an absolute og:image
 ```
 
 They become `<meta name="description">`, Open Graph and Twitter card tags, `theme-color` and the
-page icon. The page content itself is drawn on a canvas; crawlers that run JavaScript read the
-accessibility mirror's text, others see only this metadata.
+page icon.
+
+## Prerendering
+
+```toml
+prerender = true
+```
+
+`vcwl build` then runs the app once per route at build time (with Node.js, which must be
+installed) and writes the resulting element tree into `index.html` as plain HTML with a generated
+style sheet. Browsers show it before any WebAssembly has loaded, and crawlers that do not run
+JavaScript index the full text of every route. Routes are switched with CSS `:target`, so the
+static page works without JavaScript. When the canvas has drawn its first frame it replaces the
+static page, keeping the scroll position. See [ADR 12](adr/0012-prerendering.md).
+
+Prerendering waits for fetches to same-origin files in `dist/` (they are read from disk); requests
+to other hosts are not made at build time and render as their loading state.
