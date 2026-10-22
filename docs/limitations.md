@@ -45,8 +45,6 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
   properties change at once, and there are no keyframe animations.
 - Rotated elements are hit-tested by their bounding box.
 - `render.wasm` adds 134 KB (gzip) to every app.
-- Content given for a slot is refreshed as a whole when any value of its user that it reads
-  changes, or when the value the slot passes changes (not just the parts that depend on it).
 - Prerendered HTML is laid out by the browser, not by the renderer: it matches closely but not to
   the pixel (measured drift up to ~15 px at the bottom of long pages of `examples/tokenforge`), so
   content can shift slightly when the canvas takes over. Text widths at build time use a fixed

@@ -178,7 +178,9 @@ stores, in the child's scope, its own scope and six functions over such a fragme
 with the slot's value, mount, update, destroy, move, first node), with the fragment passed as
 `anyref`; the child calls them wherever the slot appears, any number of times (inside `if` and
 keyed `for`). When values the content reads change, the user sets `BIT_SLOT` in the child's
-dirty mask, and each slot site refreshes its fragment.
+dirty mask and leaves its own mask in the child's scope; each slot site passes that mask on to
+its fragment's update (plus `BIT_BOUND` when the value it passes may have changed), so only the
+parts of the content that read a changed value are updated.
 
 Event listeners are registered by the host and identified by a *handler slot*; the module keeps the
 slot table (scope and handler kind) in GC arrays and releases slots when elements are destroyed.

@@ -4,6 +4,12 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 14 — finer slot updates
+
+- Slot content updates only the parts that read a changed value: the user passes its dirty mask
+  through the child instead of refreshing the whole content (one state change read by one of two
+  texts in three rows: 6 → 3 DOM commands, checked by a browser test).
+
 ### Milestone 13 — slots that pass values, glTF materials
 
 - Slots can pass a value to their content: `slot row(Type)` declares it, `slot(row, value)` gives

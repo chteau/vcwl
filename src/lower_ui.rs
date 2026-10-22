@@ -95,13 +95,15 @@ pub struct Scope {
 /// A slot's fields in its component scope. The user of the component fills them with the
 /// scope its content belongs to (`owner`) and functions over that content's fragment,
 /// passed around as `anyref`: `new(owner[, value])`, `mount(frag, parent, anchor)`,
-/// `update(frag[, value])`, `destroy(frag, detach)`, `move(frag, parent, anchor)` and
-/// `first(frag)`. Unfilled slots keep null functions.
+/// `update(frag, mask[, value])`, `destroy(frag, detach)`, `move(frag, parent, anchor)` and
+/// `first(frag)`. Unfilled slots keep null functions. With `BIT_SLOT`, the user leaves its own
+/// dirty mask in `mask`, which the child passes on to `update`.
 #[derive(Clone)]
 pub struct SlotFields {
     name: String,
     value: Option<VT>,
     owner: u32,
+    mask: u32,
     /// Field and function type of each function, in the order above.
     fns: [(u32, u32); 6],
 }
@@ -313,12 +315,13 @@ impl Lower<'_> {
                 let sigs = [
                     (with_value(vec![VT::Any]), Some(VT::Any)),
                     (vec![VT::Any, VT::I32, VT::I32], None),
-                    (with_value(vec![VT::Any]), None),
+                    (with_value(vec![VT::Any, VT::I64]), None),
                     (vec![VT::Any, VT::I32], None),
                     (vec![VT::Any, VT::I32, VT::I32], None),
                     (vec![VT::Any], Some(VT::I32)),
                 ];
                 let owner = self.add_field(si, VT::Any);
+                let mask = self.add_field(si, VT::I64);
                 let fns = sigs.map(|(params, result)| {
                     let sig = self.m.add_type(TypeDef::Func { params, result });
                     (self.add_field(si, VT::RefNull(sig)), sig)
@@ -327,6 +330,7 @@ impl Lower<'_> {
                     name,
                     value,
                     owner,
+                    mask,
                     fns,
                 });
             }
@@ -1532,18 +1536,38 @@ impl Lower<'_> {
         ));
 
         // update: when the user's values (or the passed value) may have changed.
-        let deps = BIT_SLOT | value.map_or(0, |v| self.deps(&g.update, v));
+        // The content's own mask: the user's, if it changed values the content reads, and
+        // BIT_BOUND if the value passed may have changed.
+        let value_deps = value.map_or(0, |v| self.deps(&g.update, v));
         let r = g.update.temp(VT::Ref(rty));
+        let m = g.update.temp(VT::I64);
         let path = self.scope_path(&g.update, root);
-        let mut args = vec![frag_of()];
+        let mut args = vec![frag_of(), get(m)];
         if let (Some(v), Some(_)) = (value, sf.value) {
             args.push(self.expr(&mut g.update, v));
         }
         g.ub.push(IExpr::If(
             None,
-            b(bin(Op::I32And, Self::dirty(deps), filled(frag_of()))),
+            b(bin(
+                Op::I32And,
+                Self::dirty(BIT_SLOT | value_deps),
+                filled(frag_of()),
+            )),
             vec![
                 set(r, un(UnOp::RefAsNonNull, path)),
+                set(m, IExpr::I64(0)),
+                IExpr::If(
+                    None,
+                    b(Self::dirty(BIT_SLOT)),
+                    vec![set(m, IExpr::StructGet(rty, sf.mask, b(get(r))))],
+                    vec![],
+                ),
+                IExpr::If(
+                    None,
+                    b(Self::dirty(value_deps)),
+                    vec![set(m, bin(Op::I64Or, get(m), IExpr::I64(BIT_BOUND)))],
+                    vec![],
+                ),
                 call(get(r), SLOT_UPDATE, args),
             ],
             vec![],
@@ -3110,7 +3134,10 @@ impl Lower<'_> {
             slot_updates.push(IExpr::If(
                 None,
                 b(Self::dirty(deps)),
-                vec![set(cm, bin(Op::I64Or, get(cm), IExpr::I64(BIT_SLOT)))],
+                vec![
+                    set(cm, bin(Op::I64Or, get(cm), IExpr::I64(BIT_SLOT))),
+                    IExpr::StructSet(cty, sf.mask, b(get(cl)), b(get(1))),
+                ],
                 vec![],
             ));
             fills.push((bs, &fill.views));
@@ -3185,11 +3212,10 @@ impl Lower<'_> {
             new.push(IExpr::StructSet(bty, f, b(get(2)), b(get(1))));
         }
         new.push(get(1 + has_value as u32));
-        let mut update = set_value(1);
-        // The content depends on the user's values, which the child cannot see: refresh all.
+        let mut update = set_value(2);
         update.push(IExpr::Call(
             FuncRef::Local(bfns.update),
-            vec![frag(), IExpr::I64(-1)],
+            vec![frag(), get(1)],
         ));
         let bodies = [
             (new, vec![VT::Ref(bty)]),

@@ -59,7 +59,7 @@ test("named slots place each block where the component puts it, following the us
 
 const names = async (page) => {
   const t = await tree(page);
-  return t.all("li").map((li) => t.text(li));
+  return t.all("ul")[0].children.filter((c) => c.tag === "li").map((li) => t.text(li));
 };
 const hasText = (t, s) => t.nodes.some((n) => n.text === s);
 
@@ -77,10 +77,12 @@ test("content given for a slot in a keyed list moves and goes with its item", as
   await click(page, "button:text('Rotate')");
   await waitFor(page, (t) => t.text("li:nth-child(1)") === "cy 1");
   assert.deepEqual(await names(page), ["cy 1", "ann 1", "bob 1"]);
+  const t = await tree(page);
+  assert.deepEqual(t.all("ol")[0].children.filter((c) => c.tag === "li").map((li) => t.text(li)), ["u cy", "u ann", "u bob"], "unkeyed rows get the new values");
   await click(page, "li:nth-child(2) button");
   await waitFor(page, (t) => hasText(t, "picked ann"));
   await click(page, "button:text('Drop')");
-  await waitFor(page, (t) => t.count("li") === 2);
+  await waitFor(page, (t) => t.count("li") === 7);
   assert.deepEqual(await names(page), ["cy 1", "ann 1"]);
   assert.equal(await page.evaluate(() => window.vcwl.liveListeners()), before - 1, "the dropped row's handler is released");
 });
@@ -90,6 +92,16 @@ test("content in a child's list updates when the user's state changes", async ()
   await click(page, "button:text('Inc')");
   await waitFor(page, (t) => t.text("li:nth-child(1)") === "cy 2");
   assert.deepEqual(await names(page), ["cy 2", "ann 2"]);
+});
+
+test("slot content updates only the parts that read a changed value", async () => {
+  const { page } = app;
+  const before = await page.evaluate(() => window.vcwl.commands());
+  await click(page, "button:text('M')");
+  await waitFor(page, (t) => hasText(t, "m1"));
+  const spent = (await page.evaluate(() => window.vcwl.commands())) - before;
+  // One text per row of the second list; the texts reading `n` are left alone.
+  assert.equal(spent, 3);
 });
 
 test("a component can forward its slot into a child's content", async () => {

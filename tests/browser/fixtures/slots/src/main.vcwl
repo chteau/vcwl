@@ -42,6 +42,19 @@ component Names(names: [String]) {
     }
 }
 
+// Unkeyed: rotating the names changes the value each row's content gets.
+component Numbered(names: [String]) {
+    slot row(String)
+
+    ordered_list {
+        for s in names {
+            item {
+                slot(row, s)
+            }
+        }
+    }
+}
+
 // Slots inside `if`, and a slot at the root of a component.
 component Fold(open: Bool) {
     if open {
@@ -63,6 +76,7 @@ component App {
     state names: [String] = ["ann", "bob", "cy"]
     state picked: String = "none"
     state shown: Bool = false
+    state m: Int = 0
 
     column {
         if open {
@@ -121,6 +135,22 @@ component App {
         button("Drop") {
             on click {
                 names = [names[0], names[1]]
+            }
+        }
+        Names(names: ["x", "y", "z"]) {
+            slot(row, w) {
+                text("{w} {n}")
+                span("m{m}")
+            }
+        }
+        Numbered(names: names) {
+            slot(row, w) {
+                text("u {w}")
+            }
+        }
+        button("M") {
+            on click {
+                m += 1
             }
         }
         Fold(open: shown) {
