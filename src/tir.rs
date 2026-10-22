@@ -57,6 +57,8 @@ pub enum TK {
     CompVar(usize),
     /// The current route path (a global reactive value).
     Route,
+    /// Whether the user of this component filled its slot number `.0` (fallback content).
+    SlotFilled(usize),
     Bin(BinOp, Box<TExpr>, Box<TExpr>),
     Not(Box<TExpr>),
     Neg(Box<TExpr>),

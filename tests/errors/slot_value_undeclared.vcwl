@@ -1,0 +1,14 @@
+// error: this slot is not declared with a value type
+app "T"
+
+component List(items: [String]) {
+    column {
+        for s in items {
+            slot(row, s)
+        }
+    }
+}
+
+component App {
+    List(items: [])
+}

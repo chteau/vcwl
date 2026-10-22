@@ -4,6 +4,15 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 13 — slots that pass values
+
+- Slots can pass a value to their content: `slot row(Type)` declares it, `slot(row, value)` gives
+  it, `slot(row, x) { ... }` names it at the use site.
+- Slots work inside `if`, `match` and `for`, at the root of a component, and can be forwarded into
+  a child's content; a slot's body is fallback content shown when it is not filled. Slot content
+  is now created by the child through functions the user passes, once per place it appears.
+- `scene3d.js` is only written to builds of apps that show a `scene`.
+
 ### Milestone 12 — named slots, a cheaper mirror, more 3D
 
 - Named slots: `slot(name)` in a component's view, `slot(name) { ... }` at the use site; other

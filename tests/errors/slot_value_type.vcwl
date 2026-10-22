@@ -1,0 +1,16 @@
+// error: expected `Int`
+app "T"
+
+component List(items: [String]) {
+    slot row(Int)
+
+    column {
+        for s in items {
+            slot(row, s)
+        }
+    }
+}
+
+component App {
+    List(items: [])
+}

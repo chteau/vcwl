@@ -1,0 +1,16 @@
+// error: slot `header` of `Panel` passes no value
+app "T"
+
+component Panel {
+    column {
+        slot(header)
+    }
+}
+
+component App {
+    Panel {
+        slot(header, x) {
+            text("x")
+        }
+    }
+}

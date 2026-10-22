@@ -22,8 +22,37 @@ component Panel {
         }
         slot
         footer {
-            slot(footer)
+            slot(footer) {
+                text("no footer")
+            }
         }
+    }
+}
+
+// Passes each name to the content its user gives for `row`.
+component Names(names: [String]) {
+    slot row(String)
+
+    list {
+        for s in names key s {
+            item {
+                slot(row, s)
+            }
+        }
+    }
+}
+
+// Slots inside `if`, and a slot at the root of a component.
+component Fold(open: Bool) {
+    if open {
+        slot
+    }
+}
+
+// Forwards its own slot into a Card's.
+component Framed {
+    Card(title: "framed") {
+        slot
     }
 }
 
@@ -31,6 +60,9 @@ component App {
     state n: Int = 0
     state open: Bool = true
     state items: [Int] = [1, 2]
+    state names: [String] = ["ann", "bob", "cy"]
+    state picked: String = "none"
+    state shown: Bool = false
 
     column {
         if open {
@@ -69,6 +101,42 @@ component App {
         Panel {
             slot(header) {
                 text("only head")
+            }
+        }
+        Names(names: names) {
+            slot(row, who) {
+                button("{who} {n}") {
+                    on click {
+                        picked = who
+                    }
+                }
+            }
+        }
+        paragraph("picked {picked}")
+        button("Rotate") {
+            on click {
+                names = [names[2], names[0], names[1]]
+            }
+        }
+        button("Drop") {
+            on click {
+                names = [names[0], names[1]]
+            }
+        }
+        Fold(open: shown) {
+            text("folded {n}")
+        }
+        button("Inc") {
+            on click {
+                n += 1
+            }
+        }
+        Framed {
+            text("inside {n}")
+        }
+        button("Show") {
+            on click {
+                shown = !shown
             }
         }
     }

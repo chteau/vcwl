@@ -1,0 +1,15 @@
+// error: slot `row` is declared twice
+app "T"
+
+component List {
+    slot row(Int)
+    slot row(String)
+
+    column {
+        slot(row, 1)
+    }
+}
+
+component App {
+    List()
+}

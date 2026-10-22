@@ -18,6 +18,8 @@ pub struct UiEnv {
     pub vars: Vec<(String, Type, VarKind)>,
     /// Events this component can emit, with their payload types.
     pub events: Vec<(String, Option<Type>)>,
+    /// Slots of this component and the type of the value each passes.
+    pub slots: Vec<(String, Option<Type>)>,
     /// Locals bound by views (`for` items, view `match` bindings).
     pub bound: Vec<LocalId>,
 }
@@ -33,9 +35,9 @@ pub struct CompSig {
     pub name: String,
     pub params: Vec<(String, Type)>,
     pub events: Vec<(String, Option<Type>)>,
-    /// Names of the body's slots for content given where the component is used; `""` is the
-    /// unnamed slot.
-    pub slots: Vec<String>,
+    /// The body's slots for content given where the component is used: name (`""` for the
+    /// unnamed slot) and the type of the value it passes to that content.
+    pub slots: Vec<(String, Option<Type>)>,
     pub file: usize,
     pub item: usize,
 }
@@ -141,16 +143,20 @@ pub enum TView {
         span: Span,
     },
     /// Child component; `events` maps the child's event index to a handler of this component.
-    /// `children` is content for the child's slots by name, rendered in this component's scope.
+    /// `children` is content for the child's slots, rendered in this component's scope.
     Component {
         comp: usize,
         props: Vec<TExpr>,
         events: Vec<(usize, usize)>,
-        children: Vec<(String, Vec<TView>)>,
+        children: Vec<TFill>,
         span: Span,
     },
-    /// Where a component puts content given for the slot of this name (`""`: unnamed).
-    Slot(String),
+    /// Where a component puts content given for the slot `name` (`""`: unnamed), passing it
+    /// `value` for a slot declared with a type.
+    Slot {
+        name: String,
+        value: Option<TExpr>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -558,36 +564,70 @@ impl Checker<'_> {
                         ),
                     ));
                 }
-                let mut slots = Vec::new();
-                find_slots(&c.body, false, false, &mut slots);
-                let mut names: Vec<String> = Vec::new();
-                for el in slots {
-                    let ok = el.1;
-                    let el = el.0;
-                    if !ok {
+                let mut slots: Vec<(String, Option<Type>)> = Vec::new();
+                for v in &c.body {
+                    let View::SlotDecl { name, ty, .. } = v else {
+                        continue;
+                    };
+                    if slots.iter().any(|s| s.0 == name.name) {
                         self.diags.push(Diag::ty(
-                            el.span,
-                            "`slot` must be inside an element of the component, outside `if`, `match`, `for` and `routes`",
+                            name.span,
+                            format!("slot `{}` is declared twice", name.name),
                         ));
+                        continue;
                     }
-                    match slot_name(el) {
-                        Ok(n) if names.contains(&n) => self.diags.push(Diag::ty(
+                    match self.resolve_type(ty) {
+                        Ok(t) => slots.push((name.name.clone(), Some(t))),
+                        Err(d) => self.diags.push(d),
+                    }
+                }
+                let mut sites = Vec::new();
+                find_slots(&c.body, &mut sites);
+                let mut seen: Vec<String> = Vec::new();
+                for el in sites {
+                    let (n, value) = match slot_args(el) {
+                        Ok(x) => x,
+                        Err(d) => {
+                            self.diags.push(d);
+                            continue;
+                        }
+                    };
+                    if seen.contains(&n) {
+                        self.diags.push(Diag::ty(
                             el.span,
                             if n.is_empty() {
                                 "a component can have only one unnamed `slot`".to_string()
                             } else {
-                                format!("slot `{n}` is declared twice")
+                                format!("slot `{n}` appears twice")
                             },
+                        ));
+                        continue;
+                    }
+                    seen.push(n.clone());
+                    match (slots.iter().find(|s| s.0 == n), value) {
+                        (Some((_, Some(_))), None) => self.diags.push(Diag::ty(
+                            el.span,
+                            format!("slot `{n}` passes a value: `slot({n}, value)`"),
                         )),
-                        Ok(n) => names.push(n),
-                        Err(d) => self.diags.push(d),
+                        (None, Some(v)) => self.diags.push(
+                            Diag::ty(v.span, "this slot is not declared with a value type")
+                                .help(if n.is_empty() {
+                                    "only named slots pass values: `slot item(Type)` and `slot(item, value)`".to_string()
+                                } else {
+                                    format!("declare it at the top of the component: `slot {n}(Type)`")
+                                }),
+                        ),
+                        _ => {}
+                    }
+                    if !slots.iter().any(|s| s.0 == n) {
+                        slots.push((n, None));
                     }
                 }
                 sigs.push(CompSig {
                     name: c.name.name.clone(),
                     params,
                     events,
-                    slots: names,
+                    slots,
                     file: fi,
                     item: ii,
                 });
@@ -603,14 +643,15 @@ impl Checker<'_> {
         sheet: &mut Sheet,
     ) -> Result<(TComp, Option<String>)> {
         self.begin_body(Vec::new(), Type::Unit, Ctx::Render);
-        let events = sigs
+        let (events, slots) = sigs
             .iter()
             .find(|s| s.name == c.name.name && s.file == self.file)
-            .map(|s| s.events.clone())
+            .map(|s| (s.events.clone(), s.slots.clone()))
             .unwrap_or_default();
         self.ui = Some(UiEnv {
             vars: Vec::new(),
             events,
+            slots,
             bound: Vec::new(),
         });
         let r = self.check_component_inner(c, sigs, sheet);
@@ -814,10 +855,14 @@ impl Checker<'_> {
                 props.iter_mut().for_each(|x| self.zonk_expr(x));
                 children
                     .iter_mut()
-                    .flat_map(|(_, c)| c)
+                    .flat_map(|f| &mut f.views)
                     .for_each(|c| self.zonk_view(c));
             }
-            TView::Slot(_) => {}
+            TView::Slot { value, .. } => {
+                if let Some(v) = value {
+                    self.zonk_expr(v);
+                }
+            }
         }
     }
 
@@ -839,6 +884,14 @@ impl Checker<'_> {
                         return Err(Diag::ty(
                             *span,
                             "`event` must be declared at the top level of a component",
+                        ));
+                    }
+                }
+                View::SlotDecl { span, .. } => {
+                    if !top {
+                        return Err(Diag::ty(
+                            *span,
+                            "`slot name(Type)` must be declared at the top level of a component",
                         ));
                     }
                 }
@@ -1134,11 +1187,30 @@ impl Checker<'_> {
             );
         }
         if name == "slot" {
-            if !el.children.is_empty() {
-                return Err(Diag::ty(el.span, "`slot` has no body in a component's view")
-                    .help("content for a named slot goes inside the component's use: `Card { slot(header) { ... } }`"));
+            let (n, value) = slot_args(el)?;
+            let slots = &self.ui.as_ref().unwrap().slots;
+            let idx = slots
+                .iter()
+                .position(|s| s.0 == n)
+                .expect("slots collected");
+            let value = match (slots[idx].1.clone(), value) {
+                (Some(t), Some(v)) => Some(self.render_expr(v, Some(&t))?),
+                _ => None,
+            };
+            let slot = TView::Slot { name: n, value };
+            // A body is the fallback, shown when the user gives no content for the slot.
+            if el.children.is_empty() {
+                return Ok(slot);
             }
-            return Ok(TView::Slot(slot_name(el)?));
+            let fallback = self.scoped_views(&el.children, cx)?;
+            return Ok(TView::Switch {
+                kind: SwitchKind::If(TExpr {
+                    kind: TK::SlotFilled(idx),
+                    ty: Type::Bool,
+                    span: el.span,
+                }),
+                branches: vec![vec![slot], fallback],
+            });
         }
         if name == "text" {
             if !el.children.is_empty() {
@@ -1494,26 +1566,48 @@ impl Checker<'_> {
         };
         let sig = cx.sigs[idx].clone();
         let mut events = Vec::new();
-        // Content: `slot(name) { ... }` blocks fill named slots, the rest the unnamed one.
-        let mut content: Vec<(String, Span, Vec<View>)> = Vec::new();
+        // Content: `slot(name) { ... }` blocks fill named slots, the rest the unnamed one;
+        // `slot(name, x) { ... }` names the value the slot passes.
+        let mut content: Vec<(String, Option<ast::Ident>, Span, Vec<View>)> = Vec::new();
         for c in &el.children {
             match c {
                 View::On { .. } => {}
                 View::Element(f) if f.name.name == "slot" && !f.args.is_empty() => {
-                    let n = slot_name(f)?;
-                    if content.iter().any(|(m, _, _)| *m == n) {
+                    let (n, bind) = slot_args(f)?;
+                    let bind = match bind.map(|b| &b.kind) {
+                        None => None,
+                        Some(ast::ExprKind::Ident(x)) => Some(ast::Ident {
+                            name: x.clone(),
+                            span: bind.unwrap().span,
+                        }),
+                        Some(_) => {
+                            return Err(Diag::ty(
+                                bind.unwrap().span,
+                                "name the slot's value with a plain name, e.g. `slot(row, r) { ... }`",
+                            ));
+                        }
+                    };
+                    if content.iter().any(|(m, ..)| *m == n) {
                         return Err(Diag::ty(f.span, format!("slot `{n}` is filled twice")));
                     }
-                    content.push((n, f.span, f.children.clone()));
+                    content.push((n, bind, f.span, f.children.clone()));
                 }
-                other => match content.iter_mut().find(|(m, _, _)| m.is_empty()) {
-                    Some(d) => d.2.push(other.clone()),
-                    None => content.push((String::new(), el.span, vec![other.clone()])),
+                other => match content.iter_mut().find(|(m, ..)| m.is_empty()) {
+                    Some(d) => d.3.push(other.clone()),
+                    None => content.push((String::new(), None, el.span, vec![other.clone()])),
                 },
             }
         }
-        for (n, span, _) in &content {
-            if sig.slots.contains(n) {
+        for (n, bind, span, _) in &content {
+            if let Some((_, t)) = sig.slots.iter().find(|s| s.0 == *n) {
+                if let Some(b) = bind
+                    && t.is_none()
+                {
+                    return Err(Diag::ty(
+                        b.span,
+                        format!("slot `{n}` of `{name}` passes no value"),
+                    ));
+                }
                 continue;
             }
             return Err(if n.is_empty() {
@@ -1526,7 +1620,7 @@ impl Checker<'_> {
                 ))
             } else {
                 let mut d = Diag::ty(*span, format!("component `{name}` has no slot `{n}`"));
-                if let Some(s) = suggest(n, sig.slots.iter().map(|s| s.as_str())) {
+                if let Some(s) = suggest(n, sig.slots.iter().map(|s| s.0.as_str())) {
                     d = d.help(format!("did you mean `{s}`?"));
                 }
                 d
@@ -1635,10 +1729,32 @@ impl Checker<'_> {
                 }
             }
         }
-        let children = content
-            .iter()
-            .map(|(n, _, v)| Ok((n.clone(), self.scoped_views(v, cx)?)))
-            .collect::<Result<_>>()?;
+        let mut children = Vec::new();
+        for (n, bind, _, views) in &content {
+            self.local_scopes.push(Vec::new());
+            let r = (|| {
+                let bind = bind.as_ref().map(|b| {
+                    let t = sig
+                        .slots
+                        .iter()
+                        .find(|s| s.0 == *n)
+                        .unwrap()
+                        .1
+                        .clone()
+                        .unwrap();
+                    let l = self.bind(&b.name, t, false);
+                    self.ui.as_mut().unwrap().bound.push(l);
+                    l
+                });
+                Ok(TFill {
+                    name: n.clone(),
+                    bind,
+                    views: self.check_views(views, cx, false)?,
+                })
+            })();
+            self.local_scopes.pop();
+            children.push(r?);
+        }
         Ok(TView::Component {
             comp: idx,
             props,
@@ -1856,45 +1972,41 @@ struct ViewCx<'s> {
     root_classes: Vec<String>,
 }
 
-/// `slot` elements of a component body, and whether each is where it may be: inside an element
-/// of the component itself, not in a fragment (`if`, `match`, `for`, `routes`, another
-/// component's content).
-fn find_slots<'a>(
-    views: &'a [View],
-    in_elem: bool,
-    in_frag: bool,
-    out: &mut Vec<(&'a ast::Element, bool)>,
-) {
+/// `slot` elements of a component body, including inside the content it gives other
+/// components (forwarding), but not the `slot(name) { ... }` blocks that fill their slots.
+fn find_slots<'a>(views: &'a [View], out: &mut Vec<&'a ast::Element>) {
     for v in views {
         match v {
-            View::Element(el) if el.name.name == "slot" => out.push((el, in_elem && !in_frag)),
+            View::Element(el) if el.name.name == "slot" => {
+                out.push(el);
+                find_slots(&el.children, out);
+            }
             View::Element(el) if el.name.name.starts_with(char::is_uppercase) => {
                 for c in &el.children {
                     match c {
-                        // `slot(name) { ... }` fills the used component's slot.
                         View::Element(f) if f.name.name == "slot" && !f.args.is_empty() => {
-                            find_slots(&f.children, in_elem, true, out)
+                            find_slots(&f.children, out)
                         }
-                        c => find_slots(std::slice::from_ref(c), in_elem, true, out),
+                        c => find_slots(std::slice::from_ref(c), out),
                     }
                 }
             }
-            View::Element(el) => find_slots(&el.children, true, in_frag, out),
+            View::Element(el) => find_slots(&el.children, out),
             View::If { then, els, .. } => {
-                find_slots(then, in_elem, true, out);
+                find_slots(then, out);
                 if let Some(e) = els {
-                    find_slots(e, in_elem, true, out);
+                    find_slots(e, out);
                 }
             }
-            View::For { body, .. } => find_slots(body, in_elem, true, out),
+            View::For { body, .. } => find_slots(body, out),
             View::Match { arms, .. } => {
                 for (_, b) in arms {
-                    find_slots(b, in_elem, true, out);
+                    find_slots(b, out);
                 }
             }
             View::Routes { arms, .. } => {
                 for (_, _, b) in arms {
-                    find_slots(b, in_elem, true, out);
+                    find_slots(b, out);
                 }
             }
             _ => {}
@@ -1902,11 +2014,10 @@ fn find_slots<'a>(
     }
 }
 
-/// The name in `slot(name)`, or `""` for a plain `slot`.
-fn slot_name(el: &ast::Element) -> Result<String> {
-    match el.args.as_slice() {
-        [] => Ok(String::new()),
-        [ElemArg::Expr(ast::Arg { name: None, value })] => match &value.kind {
+/// The name in `slot(name)` (`""` for a plain `slot`) and the second argument, if any.
+fn slot_args(el: &ast::Element) -> Result<(String, Option<&ast::Expr>)> {
+    let name = |a: &ElemArg| match a {
+        ElemArg::Expr(ast::Arg { name: None, value }) => match &value.kind {
             ast::ExprKind::Ident(n) => Ok(n.clone()),
             _ => Err(Diag::ty(
                 value.span,
@@ -1915,7 +2026,24 @@ fn slot_name(el: &ast::Element) -> Result<String> {
         },
         _ => Err(Diag::ty(
             el.span,
-            "`slot` takes at most a name, e.g. `slot(header)`",
+            "a slot is named with a plain name, e.g. `slot(header)`",
+        )),
+    };
+    match el.args.as_slice() {
+        [] => Ok((String::new(), None)),
+        [a] => Ok((name(a)?, None)),
+        [a, ElemArg::Expr(ast::Arg { name: None, value })] => Ok((name(a)?, Some(value))),
+        _ => Err(Diag::ty(
+            el.span,
+            "`slot` takes a name and at most one value, e.g. `slot(row, r)`",
         )),
     }
+}
+
+/// Content given for one slot of a used component; `bind` holds the value the slot passes.
+#[derive(Clone, Debug)]
+pub struct TFill {
+    pub name: String,
+    pub bind: Option<LocalId>,
+    pub views: Vec<TView>,
 }

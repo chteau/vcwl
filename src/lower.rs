@@ -307,6 +307,7 @@ impl<'a> Lower<'a> {
                 None => IExpr::Seq(vec![]),
             },
             TK::CompVar(_) | TK::Route => self.ui_read(cx, e),
+            TK::SlotFilled(i) => self.ui_slot_filled(cx, *i),
             TK::Bin(op, a, bb) => self.binop(cx, *op, a, bb),
             TK::Not(a) => un(UnOp::I32Eqz, self.expr(cx, a)),
             TK::Neg(a) => {

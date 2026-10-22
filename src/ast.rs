@@ -357,6 +357,12 @@ pub enum View {
         ty: Option<TypeExpr>,
         span: Span,
     },
+    /// `slot name(Type)`: a slot that passes a value to the content filling it.
+    SlotDecl {
+        name: Ident,
+        ty: TypeExpr,
+        span: Span,
+    },
     Style(StyleBlock),
     StyleRef(Ident),
     StyleIf {

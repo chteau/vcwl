@@ -173,6 +173,13 @@ mask. There is no virtual tree diffing.
 Keyed lists match new items to old fragments by key, destroy fragments whose key disappeared,
 mount new ones, and move only fragments outside the longest increasing subsequence of old positions.
 
+Content given for a component's slots is compiled as fragments of the user's scope. The user
+stores, in the child's scope, its own scope and six functions over such a fragment (create
+with the slot's value, mount, update, destroy, move, first node), with the fragment passed as
+`anyref`; the child calls them wherever the slot appears, any number of times (inside `if` and
+keyed `for`). When values the content reads change, the user sets `BIT_SLOT` in the child's
+dirty mask, and each slot site refreshes its fragment.
+
 Event listeners are registered by the host and identified by a *handler slot*; the module keeps the
 slot table (scope and handler kind) in GC arrays and releases slots when elements are destroyed.
 Pending `fetch` requests use the same table.

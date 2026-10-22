@@ -10,14 +10,15 @@
 //! - `first(s)` returns its first DOM node id, or -1 when it has none.
 //!
 //! Dependencies are computed statically: bit `i` of a mask stands for component value `i`
-//! (property, state or derived value), `BIT_BOUND` for values bound by enclosing fragments
-//! and `BIT_ROUTE` for the current route. DOM changes are encoded as commands in linear
+//! (property, state or derived value), `BIT_BOUND` for values bound by enclosing fragments,
+//! `BIT_SLOT` for content the component's user gives its slots (which depends on the user's
+//! values) and `BIT_ROUTE` for the current route. DOM changes are encoded as commands in linear
 //! memory and applied by the host in one batch per event.
 
 use std::collections::HashMap;
 
 use crate::check_ui::{
-    AttrKind, CompSig, Payload, Special, SwitchKind, TComp, TElem, TVarKind, TView,
+    AttrKind, CompSig, Payload, Special, SwitchKind, TComp, TElem, TFill, TVarKind, TView,
 };
 use crate::diag::{SourceMap, Span};
 use crate::ir::*;
@@ -25,6 +26,7 @@ use crate::lower::{FnCx, IO_BASE, Lower};
 use crate::tir::{LocalId, TExpr, TFetch, TK, TPat, TStmt, Type};
 
 pub const BIT_BOUND: i64 = 1 << 62;
+pub const BIT_SLOT: i64 = 1 << 61;
 pub const BIT_ROUTE: i64 = i64::MIN;
 const CMD_CAP: i32 = 65536;
 const MAX_CMD_STR: i32 = 60000;
@@ -86,9 +88,30 @@ pub struct Scope {
     pub bound: HashMap<LocalId, u32>,
     pub key_field: Option<u32>,
     pub fns: ScopeFns,
-    /// Component scopes' slots: name, then fields holding its anchor node and that node's parent.
-    pub slots: Vec<(String, u32, u32)>,
+    /// Component scopes' slots, filled by the component's user.
+    pub slots: Vec<SlotFields>,
 }
+
+/// A slot's fields in its component scope. The user of the component fills them with the
+/// scope its content belongs to (`owner`) and functions over that content's fragment,
+/// passed around as `anyref`: `new(owner[, value])`, `mount(frag, parent, anchor)`,
+/// `update(frag[, value])`, `destroy(frag, detach)`, `move(frag, parent, anchor)` and
+/// `first(frag)`. Unfilled slots keep null functions.
+#[derive(Clone)]
+pub struct SlotFields {
+    name: String,
+    value: Option<VT>,
+    owner: u32,
+    /// Field and function type of each function, in the order above.
+    fns: [(u32, u32); 6],
+}
+
+const SLOT_NEW: usize = 0;
+const SLOT_MOUNT: usize = 1;
+const SLOT_UPDATE: usize = 2;
+const SLOT_DESTROY: usize = 3;
+const SLOT_MOVE: usize = 4;
+const SLOT_FIRST: usize = 5;
 
 #[derive(Clone, Copy, Default)]
 struct Globals {
@@ -139,6 +162,11 @@ enum Root {
     Child {
         field: u32,
         comp: usize,
+    },
+    /// Content given for slot number `slot` of the component, its fragment in `frag`.
+    Slot {
+        frag: u32,
+        slot: usize,
     },
 }
 
@@ -276,10 +304,31 @@ impl Lower<'_> {
                 events.push((f, s, sig));
             }
             self.u().scopes[si].comp_fields = CompFields { dead, events };
-            for name in self.u().sigs[ci].slots.clone() {
-                let anchor = self.add_field(si, VT::I32);
-                let parent = self.add_field(si, VT::I32);
-                self.u().scopes[si].slots.push((name, anchor, parent));
+            for (name, ty) in self.u().sigs[ci].slots.clone() {
+                let value = ty.and_then(|t| self.vt(&t));
+                let with_value = |mut v: Vec<VT>| {
+                    v.extend(value);
+                    v
+                };
+                let sigs = [
+                    (with_value(vec![VT::Any]), Some(VT::Any)),
+                    (vec![VT::Any, VT::I32, VT::I32], None),
+                    (with_value(vec![VT::Any]), None),
+                    (vec![VT::Any, VT::I32], None),
+                    (vec![VT::Any, VT::I32, VT::I32], None),
+                    (vec![VT::Any], Some(VT::I32)),
+                ];
+                let owner = self.add_field(si, VT::Any);
+                let fns = sigs.map(|(params, result)| {
+                    let sig = self.m.add_type(TypeDef::Func { params, result });
+                    (self.add_field(si, VT::RefNull(sig)), sig)
+                });
+                self.u().scopes[si].slots.push(SlotFields {
+                    name,
+                    value,
+                    owner,
+                    fns,
+                });
             }
         }
         for ci in 0..n {
@@ -679,9 +728,11 @@ impl Lower<'_> {
                         .fold(BIT_ROUTE, |acc, p| acc | self.deps(cx, p))
                         | children
                             .iter()
-                            .fold(0, |acc, (_, c)| acc | self.views_deps(cx, c))
+                            .fold(0, |acc, f| acc | self.views_deps(cx, &f.views))
                 }
-                TView::Slot(_) => 0,
+                TView::Slot { value, .. } => {
+                    BIT_SLOT | value.as_ref().map_or(0, |v| self.deps(cx, v))
+                }
             };
         }
         m
@@ -1263,6 +1314,47 @@ impl Lower<'_> {
                     ));
                     first.push(IExpr::Return(Some(b(a))));
                 }
+                Root::Slot { frag, slot } => {
+                    // The functions are on the component scope, up the parent chain.
+                    let mut r = get(0);
+                    let mut cur = si;
+                    while let Some(p) = self.u().scopes[cur].parent {
+                        let cty = self.scope_ty(cur);
+                        r = un(UnOp::RefAsNonNull, IExpr::StructGet(cty, 0, b(r)));
+                        cur = p;
+                    }
+                    let rty = self.scope_ty(cur);
+                    let sf = self.u().scopes[cur].slots[*slot].clone();
+                    let call = |which: usize, args: Vec<IExpr>| {
+                        IExpr::CallRef(
+                            sf.fns[which].1,
+                            args,
+                            b(IExpr::StructGet(rty, sf.fns[which].0, b(r.clone()))),
+                        )
+                    };
+                    let f = IExpr::StructGet(ty, *frag, b(get(0)));
+                    let filled = un(UnOp::I32Eqz, un(UnOp::RefIsNull, f.clone()));
+                    mv.push(IExpr::If(
+                        None,
+                        b(filled.clone()),
+                        vec![call(SLOT_MOVE, vec![f.clone(), get(1), get(2)])],
+                        vec![],
+                    ));
+                    first.push(IExpr::If(
+                        None,
+                        b(filled),
+                        vec![
+                            set(1, call(SLOT_FIRST, vec![f])),
+                            IExpr::If(
+                                None,
+                                b(bin(Op::I32GeS, get(1), IExpr::I32(0))),
+                                vec![IExpr::Return(Some(b(get(1))))],
+                                vec![],
+                            ),
+                        ],
+                        vec![],
+                    ));
+                }
                 Root::Child { field, comp } => {
                     let cs = self.u().comp_scope[*comp];
                     let cfns = self.u().scopes[cs].fns;
@@ -1392,32 +1484,98 @@ impl Lower<'_> {
                 children,
                 ..
             } => self.view_component(g, comp, *child, props, events, children, pos),
-            TView::Slot(name) => self.view_slot(g, name, pos),
+            TView::Slot { name, value } => self.view_slot(g, name, value.as_ref(), pos),
         }
     }
 
-    /// Marks where the component's `slot` content goes; the user of the component mounts it.
-    fn view_slot(&mut self, g: &mut Gen, name: &str, pos: Pos) {
-        let ty = self.scope_ty(g.si);
-        let (_, anchor_f, parent_f) = *self.u().scopes[g.si]
+    /// Mounts the content the component's user gave for slot `name`, if any, through the
+    /// slot's functions (see `SlotFields`).
+    fn view_slot(&mut self, g: &mut Gen, name: &str, value: Option<&TExpr>, pos: Pos) {
+        let si = g.si;
+        let ty = self.scope_ty(si);
+        let root = self.comp_root_of(si);
+        let rty = self.scope_ty(root);
+        let k = self.u().scopes[root]
             .slots
             .iter()
-            .find(|s| s.0 == name)
+            .position(|s| s.name == name)
             .expect("slot fields reserved");
-        let nn = self.helper_new_node();
-        let a = g.mount.temp(VT::I32);
-        g.mb.push(set(a, IExpr::Call(nn, vec![])));
-        let c = self.op(&mut g.mount, opc::COMMENT, vec![get(a)], vec![]);
-        g.mb.push(c);
-        let ins = self.insert(&mut g.mount, pos, get(a));
-        g.mb.push(ins);
-        g.mb.push(IExpr::StructSet(ty, anchor_f, b(get(0)), b(get(a))));
-        g.mb.push(IExpr::StructSet(
-            ty,
-            parent_f,
-            b(get(0)),
-            b(Self::parent_node(pos)),
+        let sf = self.u().scopes[root].slots[k].clone();
+        let frag = self.add_field(si, VT::Any);
+        let fn_of = |r: IExpr, which: usize| IExpr::StructGet(rty, sf.fns[which].0, b(r));
+        let call = |r: IExpr, which: usize, args: Vec<IExpr>| {
+            IExpr::CallRef(sf.fns[which].1, args, b(fn_of(r, which)))
+        };
+        let frag_of = || IExpr::StructGet(ty, frag, b(get(0)));
+        let filled = |x: IExpr| un(UnOp::I32Eqz, un(UnOp::RefIsNull, x));
+
+        // mount: create the content's fragment and mount it here.
+        let r = g.mount.temp(VT::Ref(rty));
+        let path = self.scope_path(&g.mount, root);
+        let mut args = vec![IExpr::StructGet(rty, sf.owner, b(get(r)))];
+        if let (Some(v), Some(_)) = (value, sf.value) {
+            args.push(self.expr(&mut g.mount, v));
+        }
+        let (pn, an) = match pos {
+            Pos::Root => (get(1), get(2)),
+            Pos::Elem(p) => (get(p), IExpr::I32(0)),
+        };
+        g.mb.push(set(r, un(UnOp::RefAsNonNull, path)));
+        g.mb.push(IExpr::If(
+            None,
+            b(filled(fn_of(get(r), SLOT_NEW))),
+            vec![
+                IExpr::StructSet(ty, frag, b(get(0)), b(call(get(r), SLOT_NEW, args))),
+                call(get(r), SLOT_MOUNT, vec![frag_of(), pn, an]),
+            ],
+            vec![],
         ));
+
+        // update: when the user's values (or the passed value) may have changed.
+        let deps = BIT_SLOT | value.map_or(0, |v| self.deps(&g.update, v));
+        let r = g.update.temp(VT::Ref(rty));
+        let path = self.scope_path(&g.update, root);
+        let mut args = vec![frag_of()];
+        if let (Some(v), Some(_)) = (value, sf.value) {
+            args.push(self.expr(&mut g.update, v));
+        }
+        g.ub.push(IExpr::If(
+            None,
+            b(bin(Op::I32And, Self::dirty(deps), filled(frag_of()))),
+            vec![
+                set(r, un(UnOp::RefAsNonNull, path)),
+                call(get(r), SLOT_UPDATE, args),
+            ],
+            vec![],
+        ));
+
+        // destroy
+        let r = g.destroy.temp(VT::Ref(rty));
+        let path = self.scope_path(&g.destroy, root);
+        g.db.push(IExpr::If(
+            None,
+            b(filled(frag_of())),
+            vec![
+                set(r, un(UnOp::RefAsNonNull, path)),
+                call(get(r), SLOT_DESTROY, vec![frag_of(), get(1)]),
+            ],
+            vec![],
+        ));
+        if matches!(pos, Pos::Root) {
+            g.roots.push(Root::Slot { frag, slot: k });
+        }
+    }
+
+    /// `true` when the component's user filled slot number `i` (fallback content).
+    pub fn ui_slot_filled(&mut self, cx: &mut FnCx, i: usize) -> IExpr {
+        let root = self.comp_root_of(cx.scope.unwrap().scope);
+        let rty = self.scope_ty(root);
+        let (f, _) = self.u().scopes[root].slots[i].fns[SLOT_NEW];
+        let path = self.scope_path(cx, root);
+        un(
+            UnOp::I32Eqz,
+            un(UnOp::RefIsNull, IExpr::StructGet(rty, f, b(path))),
+        )
     }
 
     fn view_text(&mut self, g: &mut Gen, e: &TExpr, pos: Pos) {
@@ -2850,7 +3008,7 @@ impl Lower<'_> {
         child: usize,
         props: &[TExpr],
         events: &[(usize, usize)],
-        children: &[(String, Vec<TView>)],
+        children: &[TFill],
         pos: Pos,
     ) {
         let si = g.si;
@@ -2862,6 +3020,7 @@ impl Lower<'_> {
         let c = g.mount.temp(VT::Ref(cty));
         g.mb.push(set(c, IExpr::StructNewDefault(cty)));
         let mut prop_updates = Vec::new();
+        let mut slot_updates = Vec::new();
         let cm = g.update.temp(VT::I64);
         let cl = g.update.temp(VT::Ref(cty));
         for (i, p) in props.iter().enumerate() {
@@ -2917,62 +3076,49 @@ impl Lower<'_> {
             Pos::Elem(p) => (get(p), IExpr::I32(0)),
         };
         g.mb.push(IExpr::StructSet(ty, field, b(get(0)), b(get(c))));
+        // Slot content: a fragment of this scope per filled slot, which the child creates
+        // where its slot is (any number of times) through functions given here.
+        let mut fills = Vec::new();
+        for fill in children {
+            let k = self.u().scopes[cs]
+                .slots
+                .iter()
+                .position(|s| s.name == fill.name)
+                .expect("checked slot");
+            let sf = self.u().scopes[cs].slots[k].clone();
+            let ci = self.u().scopes[si].comp;
+            let bs = self.new_scope(ci, Some(si));
+            let bind = match (fill.bind, sf.value) {
+                (Some(l), Some(vt)) => {
+                    let f = self.add_field(bs, vt);
+                    self.u().scopes[bs].bound.insert(l, f);
+                    Some(f)
+                }
+                _ => None,
+            };
+            let wrappers = self.slot_wrappers(si, bs, &sf, bind);
+            g.mb.push(IExpr::StructSet(cty, sf.owner, b(get(c)), b(get(0))));
+            for (w, (f, _)) in wrappers.into_iter().zip(sf.fns) {
+                g.mb.push(IExpr::StructSet(cty, f, b(get(c)), b(IExpr::RefFunc(w))));
+            }
+            let mut probe = FnCx::new(vec![], comp.locals.clone(), vec![]);
+            probe.scope = Some(ScopeRef {
+                scope: bs,
+                local: 0,
+            });
+            let deps = self.views_deps(&probe, &fill.views);
+            slot_updates.push(IExpr::If(
+                None,
+                b(Self::dirty(deps)),
+                vec![set(cm, bin(Op::I64Or, get(cm), IExpr::I64(BIT_SLOT)))],
+                vec![],
+            ));
+            fills.push((bs, &fill.views));
+        }
         g.mb.push(IExpr::Call(
             FuncRef::Local(cfns.mount),
             vec![get(c), pn, an],
         ));
-        // Slot content: a fragment of this scope per slot, mounted at the child's slot anchor.
-        let mut fills = Vec::new();
-        for (name, children) in children {
-            let (_, anchor_f, parent_f) = *self.u().scopes[cs]
-                .slots
-                .iter()
-                .find(|s| s.0 == *name)
-                .expect("checked slot");
-            {
-                let ci = self.u().scopes[si].comp;
-                let bs = self.new_scope(ci, Some(si));
-                let bty = self.scope_ty(bs);
-                let bfns = self.u().scopes[bs].fns;
-                let bf = self.add_field(si, VT::Ref(bty));
-                let f = g.mount.temp(VT::Ref(bty));
-                g.mb.extend([
-                    set(f, IExpr::StructNewDefault(bty)),
-                    IExpr::StructSet(bty, 0, b(get(f)), b(get(0))),
-                    IExpr::Call(
-                        FuncRef::Local(bfns.mount),
-                        vec![
-                            get(f),
-                            IExpr::StructGet(cty, parent_f, b(get(c))),
-                            IExpr::StructGet(cty, anchor_f, b(get(c))),
-                        ],
-                    ),
-                    IExpr::StructSet(ty, bf, b(get(0)), b(get(f))),
-                ]);
-                let mut probe = FnCx::new(vec![], comp.locals.clone(), vec![]);
-                probe.scope = Some(ScopeRef {
-                    scope: bs,
-                    local: 0,
-                });
-                let deps = self.views_deps(&probe, children);
-                let frag = un(UnOp::RefAsNonNull, IExpr::StructGet(ty, bf, b(get(0))));
-                g.ub.push(IExpr::If(
-                    None,
-                    b(Self::dirty(deps)),
-                    vec![IExpr::Call(
-                        FuncRef::Local(bfns.update),
-                        vec![frag.clone(), get(1)],
-                    )],
-                    vec![],
-                ));
-                // The child removes the content's nodes with its own; release handlers only.
-                g.db.push(IExpr::Call(
-                    FuncRef::Local(bfns.destroy),
-                    vec![frag, IExpr::I32(0)],
-                ));
-                fills.push((bs, children));
-            }
-        }
         let mut ub = vec![
             set(
                 cl,
@@ -2981,6 +3127,7 @@ impl Lower<'_> {
             set(cm, bin(Op::I64And, get(1), IExpr::I64(BIT_ROUTE))),
         ];
         ub.extend(prop_updates);
+        ub.extend(slot_updates);
         ub.push(IExpr::If(
             None,
             b(bin(Op::I64Ne, get(cm), IExpr::I64(0))),
@@ -3004,6 +3151,93 @@ impl Lower<'_> {
         for (bs, children) in fills {
             self.gen_scope(bs, comp, children);
         }
+    }
+
+    /// The functions a child calls to create and manage the content `bs` (a fragment of scope
+    /// `si`) given for one of its slots, in `SlotFields` order; `bind` is the fragment field
+    /// holding the value the slot passes.
+    fn slot_wrappers(
+        &mut self,
+        si: usize,
+        bs: usize,
+        sf: &SlotFields,
+        bind: Option<u32>,
+    ) -> [u32; 6] {
+        let sty = self.scope_ty(si);
+        let bty = self.scope_ty(bs);
+        let bfns = self.u().scopes[bs].fns;
+        let frag = || IExpr::RefCast(bty, b(get(0)));
+        let set_value = |v: u32| match bind {
+            Some(f) => vec![IExpr::StructSet(bty, f, b(frag()), b(get(v)))],
+            None => vec![],
+        };
+        let has_value = sf.value.is_some();
+        let mut new = vec![
+            set(1 + has_value as u32, IExpr::StructNewDefault(bty)),
+            IExpr::StructSet(
+                bty,
+                0,
+                b(get(1 + has_value as u32)),
+                b(IExpr::RefCast(sty, b(get(0)))),
+            ),
+        ];
+        if let Some(f) = bind {
+            new.push(IExpr::StructSet(bty, f, b(get(2)), b(get(1))));
+        }
+        new.push(get(1 + has_value as u32));
+        let mut update = set_value(1);
+        // The content depends on the user's values, which the child cannot see: refresh all.
+        update.push(IExpr::Call(
+            FuncRef::Local(bfns.update),
+            vec![frag(), IExpr::I64(-1)],
+        ));
+        let bodies = [
+            (new, vec![VT::Ref(bty)]),
+            (
+                vec![IExpr::Call(
+                    FuncRef::Local(bfns.mount),
+                    vec![frag(), get(1), get(2)],
+                )],
+                vec![],
+            ),
+            (update, vec![]),
+            (
+                vec![IExpr::Call(
+                    FuncRef::Local(bfns.destroy),
+                    vec![frag(), get(1)],
+                )],
+                vec![],
+            ),
+            (
+                vec![IExpr::Call(
+                    FuncRef::Local(bfns.mv),
+                    vec![frag(), get(1), get(2)],
+                )],
+                vec![],
+            ),
+            (
+                vec![IExpr::Call(FuncRef::Local(bfns.first), vec![frag()])],
+                vec![],
+            ),
+        ];
+        let mut out = [0; 6];
+        for (i, (body, locals)) in bodies.into_iter().enumerate() {
+            let sig = sf.fns[i].1;
+            let TypeDef::Func { params, result } = self.m.types[sig as usize].clone() else {
+                unreachable!()
+            };
+            self.m.funcs.push(Func {
+                name: format!("slot_fill_{bs}_{i}"),
+                params,
+                result,
+                locals,
+                body,
+                export: None,
+            });
+            out[i] = self.m.funcs.len() as u32 - 1;
+            self.m.sig_override.push((out[i], sig));
+        }
+        out
     }
 
     /// A function computing the default value of property `i` of component `comp`.

@@ -1,0 +1,16 @@
+// error: slot `row` passes a value: `slot(row, value)`
+app "T"
+
+component List(items: [String]) {
+    slot row(String)
+
+    column {
+        for s in items {
+            slot(row)
+        }
+    }
+}
+
+component App {
+    List(items: [])
+}

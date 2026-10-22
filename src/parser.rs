@@ -1212,6 +1212,23 @@ impl<'a> Parser<'a> {
                 span: start.to(self.prev_span()),
             });
         }
+        // `slot name(Type)` declares a slot with a value; `slot` alone or `slot(...)` is a view.
+        if self.is_kw("slot")
+            && matches!(self.peek_at(1), Tok::Ident(_))
+            && !self.toks[self.pos + 1].nl
+        {
+            self.bump();
+            let name = self.ident()?;
+            self.expect("(")?;
+            let ty = self.type_expr()?;
+            self.expect(")")?;
+            self.stmt_end()?;
+            return Ok(View::SlotDecl {
+                name,
+                ty,
+                span: start.to(self.prev_span()),
+            });
+        }
         if self.is_kw("on") && matches!(self.peek_at(1), Tok::Ident(_)) {
             self.bump();
             let event = self.ident()?;

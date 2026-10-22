@@ -629,10 +629,14 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
         ("render.wasm", RENDER_WASM.to_vec()),
         ("vcwl.js", VCWL_JS.as_bytes().to_vec()),
         ("boot.js", BOOT_JS.as_bytes().to_vec()),
-        ("scene3d.js", SCENE3D_JS.as_bytes().to_vec()),
         // GitHub Pages: serve files as-is (no Jekyll processing).
         (".nojekyll", Vec::new()),
     ];
+    if app.scenes {
+        files.push(("scene3d.js", SCENE3D_JS.as_bytes().to_vec()));
+    } else {
+        let _ = std::fs::remove_file(out.join("scene3d.js"));
+    }
     if dev {
         files.push(("dev.js", DEV_JS.as_bytes().to_vec()));
     } else {

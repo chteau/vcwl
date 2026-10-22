@@ -45,6 +45,19 @@ pub struct AppOutput {
     pub fonts: Vec<ast::FontDecl>,
     /// Literal paths of every `routes` arm, in source order.
     pub routes: Vec<String>,
+    /// Some view shows a 3D `scene` (the build then ships `scene3d.js`).
+    pub scenes: bool,
+}
+
+fn has_scene(views: &[crate::check_ui::TView]) -> bool {
+    use crate::check_ui::TView;
+    views.iter().any(|v| match v {
+        TView::Element(e) => e.tag == "scene" || has_scene(&e.children),
+        TView::Switch { branches, .. } => branches.iter().any(|b| has_scene(b)),
+        TView::For { body, .. } => has_scene(body),
+        TView::Component { children, .. } => children.iter().any(|f| has_scene(&f.views)),
+        TView::Text(_) | TView::Slot { .. } => false,
+    })
 }
 
 fn collect_routes(views: &[crate::check_ui::TView], out: &mut Vec<String>) {
@@ -66,11 +79,11 @@ fn collect_routes(views: &[crate::check_ui::TView], out: &mut Vec<String>) {
             }
             TView::For { body, .. } => collect_routes(body, out),
             TView::Component { children, .. } => {
-                for (_, body) in children {
-                    collect_routes(body, out);
+                for f in children {
+                    collect_routes(&f.views, out);
                 }
             }
-            TView::Text(_) | TView::Slot(_) => {}
+            TView::Text(_) | TView::Slot { .. } => {}
         }
     }
 }
@@ -327,6 +340,7 @@ pub fn lower_app(
     for c in &app.comps {
         collect_routes(&c.body, &mut routes);
     }
+    let scenes = app.comps.iter().any(|c| has_scene(&c.body));
     let ui =
         crate::lower_ui::UiState::new(app.comps, app.sigs, sm.clone(), opts.dev, app.title.clone());
     lw.ui = Some(Box::new(ui));
@@ -337,5 +351,6 @@ pub fn lower_app(
         caps: app.caps,
         fonts: app.fonts,
         routes,
+        scenes,
     })
 }

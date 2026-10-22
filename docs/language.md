@@ -229,9 +229,43 @@ Panel {
 }
 ```
 
-Slots go inside an element, not inside `if`, `match`, `for`, `routes` or another component's
-content; each name (and the unnamed slot) at most once. Passing content for a slot the component
-does not have, or filling one twice, is a compile error.
+A slot can pass a value to the content filling it. The component declares the slot's type with
+`slot name(Type)` and gives the value with `slot(name, value)`; the user names it with
+`slot(name, x) { ... }`. Slots may sit inside `if`, `match` and `for`: the content is created
+once per place the slot appears, so a list component can let its user draw each row:
+
+```vcwl
+component Names(names: [String]) {
+    slot row(String)
+
+    list {
+        for s in names key s {
+            item {
+                slot(row, s)
+            }
+        }
+    }
+}
+
+Names(names: people) {
+    slot(row, who) {
+        button("{who}") {
+            on click {
+                picked = who     // the user's state and handlers, as with other slots
+            }
+        }
+    }
+}
+```
+
+A slot's body is its fallback, shown when the user gives no content for it:
+`slot(footer) { text("no footer") }`. A component can also forward its own slot into a child's
+content (`Card { slot }`); there, `slot(name)` directly inside the child's content fills the
+child's slot instead.
+
+Each slot name (and the unnamed slot) appears at most once in a component's view. Passing content
+for a slot the component does not have, filling one twice, naming the value of a slot that passes
+none, or leaving out the value of one that does, is a compile error.
 
 ### Views
 

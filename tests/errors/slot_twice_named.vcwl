@@ -1,4 +1,4 @@
-// error: slot `header` is declared twice
+// error: slot `header` appears twice
 app "T"
 
 component Panel {
