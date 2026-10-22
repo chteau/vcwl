@@ -1,0 +1,59 @@
+// vcwl-oauth: OAuth 2.0 / OpenID Connect sign-in in a popup (implemented in oauth.js).
+//
+//     on mount {
+//         oauth_provider("discord", "your-client-id", "")
+//     }
+//     ...
+//     on click {
+//         fetch oauth_sign_in("discord") {
+//             Ok(token) => { signed_in = true }
+//             Err(e) => { problem = e.message() }
+//         }
+//     }
+//
+// Functions marked "async" are called from an event handler with `fetch`; call
+// `oauth_sign_in` from a click so the browser lets the popup open.
+//
+// Providers: apple, discord, facebook, github, gitlab, google, linkedin, microsoft, reddit,
+// roblox, slack, spotify, twitch, x, and any other with `oauth_custom`. Some of them only hand
+// tokens to a server that knows the client secret; for those, set `oauth_token_proxy` (see the
+// README). The app's `network` capability must allow each provider's token and API hosts.
+
+export struct OAuthToken {
+    provider: String,
+    access_token: String,
+    token_type: String,
+    scope: String,
+    expires_at: Int,
+    refresh_token: String?,
+    id_token: String?,
+}
+
+export struct OAuthUser {
+    provider: String,
+    id: String,
+    name: String,
+    email: String?,
+    avatar: String?,
+}
+
+/// Configures a built-in provider with your app's client ID; `scopes` is space-separated ("" for
+/// the provider's sign-in defaults). Restores a stored token. Returns whether one is signed in.
+export extern fn oauth_provider(name: String, client_id: String, scopes: String) -> Bool
+/// Configures any other provider. `flow` is "pkce" (code exchanged in the browser), "implicit"
+/// (token in the redirect) or "proxy" (code exchanged by your `oauth_token_proxy`);
+/// `userinfo_url` is "" when the provider has none.
+export extern fn oauth_custom(name: String, authorize_url: String, token_url: String, userinfo_url: String, client_id: String, scopes: String, flow: String) -> Bool
+/// The redirect URI registered with the providers (default: this site's root, "/").
+export extern fn oauth_redirect_uri(uri: String)
+/// Your endpoint that exchanges codes for providers that need a client secret (see the README).
+export extern fn oauth_token_proxy(url: String)
+
+/// async: opens the provider's sign-in popup and returns the token.
+export extern fn oauth_sign_in(provider: String) -> OAuthToken
+/// The provider's access token, if signed in and not expired.
+export extern fn oauth_token(provider: String) -> String?
+/// async: the signed-in user's profile, from the provider's user API or its ID token.
+export extern fn oauth_user(provider: String) -> OAuthUser
+/// Forgets the provider's token (it is not revoked at the provider).
+export extern fn oauth_sign_out(provider: String)
