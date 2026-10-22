@@ -8,7 +8,7 @@ authors = ["VCWL contributors"]
 [grammars.vcwl]
 # The local repository until it is public; then its URL. `rev` is a commit holding the grammar.
 repository = "file:///mnt/data/Documents/Dev/vcwl"
-rev = "31bf3c7db620a51784d2b9d3ad1f5aedd1e186d9"
+rev = "6883e2f644ae15ff9ae07d96bbed99f6dffcb1f1"
 path = "editors/tree-sitter-vcwl"
 
 [language_servers.vcwl]
