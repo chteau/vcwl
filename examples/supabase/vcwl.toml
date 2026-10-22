@@ -1,0 +1,8 @@
+# vcwl-supabase demo: a todo list on a Supabase table. Set SUPABASE_URL and ANON_KEY in
+# src/main.vcwl, and create the table described in packages/supabase/README.md.
+name = "supabase-demo"
+entry = "src/main.vcwl"
+out = "dist"
+
+[dependencies]
+supabase = "../../packages/supabase"

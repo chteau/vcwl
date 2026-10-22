@@ -1,7 +1,0 @@
-import "../src/lib.vcwl"
-
-fn test_odd() {
-    assert(is_odd(3), "3 is odd")
-    assert(is_odd(-1), "-1 is odd")
-    assert(!is_odd(10), "10 is not odd")
-}

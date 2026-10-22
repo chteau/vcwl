@@ -1831,13 +1831,19 @@ impl Checker<'_> {
         };
         let (method, url, body, ty) = if let Some(id) = server_fn {
             // `fetch save_todo(t) { ... }`: a POST of the JSON arguments to the server.
-            if let Some(t) = &f.ty {
-                return Err(Diag::ty(
-                    t.span,
-                    "a server function's result type is known: remove `as ...`",
-                ));
-            }
             let sig = self.sigs[id].clone();
+            // A JavaScript function's result can be decoded as another type, checked at run
+            // time like a response: `fetch select("todos", "") as [Todo]`.
+            let ret = match &f.ty {
+                Some(t) if sig.ext => self.resolve_type(t)?,
+                Some(t) => {
+                    return Err(Diag::ty(
+                        t.span,
+                        "a server function's result type is known: remove `as ...`",
+                    ));
+                }
+                None => sig.ret.clone(),
+            };
             if f.args.len() != sig.params.len() {
                 return Err(Diag::ty(
                     f.span,
@@ -1865,7 +1871,7 @@ impl Checker<'_> {
                 span: f.method.span,
             };
             let body = self.server_args(args, f.span)?;
-            ("POST", url, Some(body), sig.ret)
+            ("POST", url, Some(body), ret)
         } else {
             let Some(m) = METHODS.iter().position(|m| *m == f.method.name) else {
                 let d = Diag::ty(

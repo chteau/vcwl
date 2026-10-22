@@ -1699,6 +1699,19 @@ impl<'a> Checker<'a> {
         if !user_fn && matches!(name, "env" | "load" | "save" | "remove") {
             return self.check_server_builtin(callee, type_args, args, span);
         }
+        if !user_fn && name == "to_json" {
+            let [arg] = args else {
+                return Err(Diag::ty(span, "`to_json` takes one value"));
+            };
+            let v = self.check_expr(&arg.value, None)?;
+            let ty = self.zonk(&v.ty);
+            let enc = self.json_encoder(&ty, arg.value.span)?;
+            return Ok(TExpr {
+                kind: TK::Call(enc, vec![], vec![v]),
+                ty: Type::Str,
+                span,
+            });
+        }
         match self.scopes[self.file].get(name).copied() {
             Some(Sym::Fn(id)) => self.call_fn(
                 id,

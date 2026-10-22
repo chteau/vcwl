@@ -172,6 +172,30 @@ pub fn packages(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// The JavaScript module `rel` named by `js` in the vcwl.toml of `dir`, and its file name in
+/// `dist/` (packages' modules are prefixed with the package name so they cannot collide).
+fn js_module(dir: &Path, rel: &str, package: Option<&str>) -> Result<(String, Vec<u8>), String> {
+    let path = dir.join(rel);
+    let file = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = match package {
+        Some(pkg) => format!("pkg-{pkg}-{file}"),
+        None => file.clone(),
+    };
+    if !(file.ends_with(".js") || file.ends_with(".mjs"))
+        || ["vcwl.js", "boot.js", "dev.js", "scene3d.js", "web.js"].contains(&name.as_str())
+    {
+        return Err(format!(
+            "{}: js = \"{rel}\" must name a .js or .mjs module (not a runtime file name)",
+            dir.join("vcwl.toml").display()
+        ));
+    }
+    let code = std::fs::read(&path).map_err(|e| format!("vcwl.toml: js = \"{rel}\": {e}"))?;
+    Ok((name, code))
+}
+
 pub fn compile_entry(entry: &Path, dev: bool) -> Result<(Output, SourceMap), String> {
     let mut sm = SourceMap::default();
     match compile(entry, &mut sm, &Options { dev }) {
@@ -660,32 +684,33 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
         }
     };
     let pages = pages(routing, &app.routes, &meta)?;
-    // JavaScript modules whose exports implement `extern fn`s: `@web`'s, then the app's own.
+    // JavaScript modules whose exports implement `extern fn`s: `@web`'s, the packages', then the
+    // app's own (later modules win on equal names).
     let mut js = Vec::new();
     if o.web {
         js.push("web.js".to_string());
     }
-    let own_js = match (&project, setting("js")) {
-        (Some(p), Some(rel)) => {
-            let path = p.root.join(&rel);
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if !(name.ends_with(".js") || name.ends_with(".mjs"))
-                || ["vcwl.js", "boot.js", "dev.js", "scene3d.js", "web.js"].contains(&name.as_str())
-            {
-                return Err(format!(
-                    "vcwl.toml: js = \"{rel}\" must name a .js or .mjs module (not a runtime file name)"
-                ));
+    let mut modules: Vec<(String, Vec<u8>)> = Vec::new();
+    if let Some(p) = &project {
+        for dir in packages(&p.root) {
+            let Ok(text) = std::fs::read_to_string(dir.join("vcwl.toml")) else {
+                continue;
+            };
+            if let Some(rel) = manifest_value(&text, "js") {
+                let pkg = manifest_value(&text, "name").unwrap_or_else(|| {
+                    dir.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                modules.push(js_module(&dir, &rel, Some(&pkg))?);
             }
-            let code =
-                std::fs::read(&path).map_err(|e| format!("vcwl.toml: js = \"{rel}\": {e}"))?;
-            js.push(name.clone());
-            Some((name, code))
         }
-        _ => None,
-    };
+        if let Some(rel) = setting("js") {
+            modules.push(js_module(&p.root, &rel, None)?);
+        }
+    }
+    js.extend(modules.iter().map(|(name, _)| name.clone()));
     let mut files: Vec<(&str, Vec<u8>)> = vec![
         ("app.wasm", app_wasm(&o.wasm, app, dev, routing, &js)),
         ("render.wasm", RENDER_WASM.to_vec()),
@@ -719,7 +744,7 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
             sizes.push((name.to_string(), data.len()));
         }
     }
-    if let Some((name, code)) = &own_js {
+    for (name, code) in &modules {
         std::fs::write(out.join(name), code)
             .map_err(|e| format!("{}: {e}", out.join(name).display()))?;
         sizes.push((name.clone(), code.len()));

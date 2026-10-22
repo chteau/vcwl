@@ -45,6 +45,10 @@ a server-side visit counter) and `examples/kit/demo` an app built from it:
 cd examples/kit/demo && vcwl serve
 ```
 
+A package can implement `extern fn`s in JavaScript with `js = "file.js"` in its vcwl.toml
+(`packages/supabase` does): the module ships with every app that uses the package, and the
+security review marks it as a danger.
+
 Only `export`ed items are visible to apps. Imports are not re-exported: an app imports each file
 it uses (or the package keeps its public items in its `lib` file).
 
@@ -53,7 +57,8 @@ it uses (or the package keeps its public items in its `lib` file).
 A registry is the `registry` branch of a git repository, in the spirit of Wally's index
 repository: version `v` of package `name` is the directory `packages/<name>/<v>/` on that branch,
 holding the package's files. This repository's own `registry` branch holds the packages in
-`packages/` (`is-even`, `is-odd`, which depends on it, `left-pad`, `strings-plus` and `vibes`).
+`packages/` (`is-even`, `is-odd`, which depends on it, `left-pad`, `strings-plus`, `vibes`, and
+`supabase`, a.k.a. vcwl-supabase).
 
 ```toml
 # vcwl.toml of the app
@@ -102,6 +107,7 @@ package's files for what it could do to the app that installs it:
 | `public/` files that run code on the app's origin (`.html`, `.js`, `.svg`, `.wasm`, ...) | danger |
 | `public/` files that change how the site is served (`_headers`, `_redirects`, `CNAME`, `.well-known/`, service workers, ...) | danger |
 | symbolic links | danger |
+| a JavaScript module (`js`), which runs in the app's pages with their full privileges | danger |
 | server functions (code that runs on the app's server) | notice |
 | requests (`fetch`), clipboard writes, navigation to other sites | notice |
 | large or hidden files | notice |

@@ -1,0 +1,58 @@
+// vcwl-supabase: Supabase auth and database from VCWL (implemented in supabase.js).
+//
+// Functions marked "async" are called from an event handler with `fetch`; the database ones
+// return whatever rows you ask for with `as`, checked at run time:
+//
+//     fetch db_select("todos", "select=*&done=eq.false&order=id") as [Todo] { ... }
+//
+// The app needs `network: allow("self", "<project>.supabase.co")`, and `storage: local` (or
+// `session`) to keep users signed in across reloads.
+
+export struct SupabaseUser {
+    id: String,
+    email: String?,
+}
+
+/// Connects to the project at `url` with its public anon key, and restores the session (from
+/// storage, or from the URL after an OAuth or magic-link sign-in). Returns whether a user is
+/// signed in.
+export extern fn supabase_init(url: String, anon_key: String) -> Bool
+
+// ----- auth -----
+
+/// The signed-in user, if any.
+export extern fn auth_user() -> SupabaseUser?
+/// The current access token (for your own requests), if signed in.
+export extern fn auth_token() -> String?
+/// async: creates an account. Depending on the project's settings, the user is signed in at
+/// once or must confirm their email first.
+export extern fn auth_sign_up(email: String, password: String) -> SupabaseUser
+/// async: signs in with an email and a password.
+export extern fn auth_sign_in(email: String, password: String) -> SupabaseUser
+/// async: emails a sign-in link that comes back to `redirect_to` ("" for the project's site URL).
+export extern fn auth_magic_link(email: String, redirect_to: String)
+/// Leaves for the provider's sign-in page ("github", "google", ...); the user comes back to
+/// `redirect_to` ("" for this page), signed in once `supabase_init` runs.
+export extern fn auth_oauth(provider: String, redirect_to: String)
+/// async: signs out.
+export extern fn auth_sign_out()
+
+// ----- database (PostgREST) -----
+
+/// async: rows of `table` matching a PostgREST `query` ("select=*&id=eq.3&order=name"); use
+/// `as [Row]`.
+export extern fn db_select(table: String, query: String)
+/// async: inserts `rows_json` (one row or an array, e.g. `to_json(todo)`) and returns the
+/// inserted rows; use `as [Row]`.
+export extern fn db_insert(table: String, rows_json: String)
+/// async: applies `patch_json` to the rows matching `filter` ("id=eq.3"); returns them.
+export extern fn db_update(table: String, filter: String, patch_json: String)
+/// async: deletes the rows matching `filter` ("id=eq.3"); returns them.
+export extern fn db_delete(table: String, filter: String)
+/// async: calls the Postgres function `name` with `args_json` ("" for none); use `as T`.
+export extern fn db_rpc(name: String, args_json: String)
+
+// ----- storage -----
+
+/// The public URL of `path` in a public `bucket`.
+export extern fn storage_public_url(bucket: String, path: String) -> String

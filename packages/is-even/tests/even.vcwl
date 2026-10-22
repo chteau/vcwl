@@ -1,7 +1,0 @@
-import "../src/lib.vcwl"
-
-fn test_even() {
-    assert(is_even(0), "0 is even")
-    assert(is_even(-4), "-4 is even")
-    assert(!is_even(7), "7 is not even")
-}

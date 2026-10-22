@@ -1,0 +1,178 @@
+app "Supabase todos" {
+    capabilities {
+        network: allow("self", "your-project.supabase.co")
+        storage: local
+    }
+}
+
+import "@supabase"
+
+struct Todo {
+    id: Int,
+    title: String,
+    done: Bool,
+}
+
+struct NewTodo {
+    title: String,
+}
+
+struct Done {
+    done: Bool,
+}
+
+fn project_url() -> String {
+    "https://your-project.supabase.co"
+}
+
+fn anon_key() -> String {
+    "your-anon-key"
+}
+
+component App {
+    state user: SupabaseUser? = None
+    state todos: [Todo] = []
+    state email: String = ""
+    state password: String = ""
+    state draft: String = ""
+    state error: String = ""
+
+    on mount {
+        if supabase_init(project_url(), anon_key()) {
+            user = auth_user()
+            fetch db_select("todos", "select=*&order=id") as [Todo] {
+                Ok(rows) => {
+                    todos = rows
+                }
+                Err(e) => {
+                    error = e.message()
+                }
+            }
+        }
+    }
+
+    column(gap: 12px) {
+        style {
+            max-width: 480px
+            margin: 40px auto
+            padding: 0 16px
+        }
+        heading("Todos, on someone else's Postgres", level: 1)
+        if error != "" {
+            paragraph(error)
+        }
+        match user {
+            None => form {
+                column(gap: 8px) {
+                    input(value: email, label: "Email") {
+                        on input(v) {
+                            email = v
+                        }
+                    }
+                    input(value: password, label: "Password", kind: "password") {
+                        on input(v) {
+                            password = v
+                        }
+                    }
+                    button("Sign in", submit: true)
+                    button("Sign in with GitHub") {
+                        on click {
+                            auth_oauth("github", "")
+                        }
+                    }
+                }
+                on submit {
+                    fetch auth_sign_in(email, password) {
+                        Ok(u) => {
+                            user = Some(u)
+                            error = ""
+                            fetch db_select("todos", "select=*&order=id") as [Todo] {
+                                Ok(rows) => {
+                                    todos = rows
+                                }
+                                Err(e) => {
+                                    error = e.message()
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error = e.message()
+                        }
+                    }
+                }
+            }
+            Some(u) => column(gap: 8px) {
+                row(gap: 8px, align: center) {
+                    text("Signed in as {u.email.unwrap_or(u.id)}")
+                    button("Sign out") {
+                        on click {
+                            fetch auth_sign_out() {
+                                Ok(_) => {
+                                    user = None
+                                    todos = []
+                                }
+                                Err(e) => {
+                                    error = e.message()
+                                }
+                            }
+                        }
+                    }
+                }
+                form {
+                    row(gap: 8px) {
+                        input(value: draft, label: "New todo") {
+                            on input(v) {
+                                draft = v
+                            }
+                        }
+                        button("Add", submit: true)
+                    }
+                    on submit {
+                        fetch db_insert("todos", to_json(NewTodo { title: draft })) as [Todo] {
+                            Ok(rows) => {
+                                todos = todos.concat(rows)
+                                draft = ""
+                            }
+                            Err(e) => {
+                                error = e.message()
+                            }
+                        }
+                    }
+                }
+                list {
+                    for t in todos key t.id {
+                        item {
+                            checkbox(label: t.title, checked: t.done) {
+                                on change(v) {
+                                    fetch db_update("todos", "id=eq.{t.id}", to_json(Done { done: v })) as [Todo] {
+                                        Ok(rows) => {
+                                            todos = todos.merge(rows)
+                                        }
+                                        Err(e) => {
+                                            error = e.message()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// `todos` with the rows that came back from an update in place of their old versions.
+fn merge(todos: [Todo], changed: [Todo]) -> [Todo] {
+    var out: [Todo] = []
+    for t in todos {
+        var now = t
+        for c in changed {
+            if c.id == t.id {
+                now = c
+            }
+        }
+        out = out.push(now)
+    }
+    out
+}

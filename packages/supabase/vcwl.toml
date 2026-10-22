@@ -1,0 +1,6 @@
+name = "supabase"
+version = "0.1.0"
+description = "vcwl-supabase: Supabase auth, database and storage URLs. Your backend is someone else's Postgres now."
+lib = "src/lib.vcwl"
+js = "supabase.js"
+registry = "../.."

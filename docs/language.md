@@ -526,11 +526,16 @@ extern fn wait_for(ms: Int) -> Bool
   result directly.
 - A function returning a Promise is called from an event handler with `fetch`, like a server
   function: `fetch wait_for(500) { Ok(b) => ... Err(e) => ... }`. A rejection reaches `Err` with
-  its message.
+  its message. `fetch rows("todos") as [Todo] { ... }` decodes the result as another type than
+  the declared one, checked when it arrives like a response (server functions' results cannot
+  be retyped).
+- `to_json(value)` encodes any serializable value as JSON text, for JavaScript functions that
+  take JSON.
 - Extern functions run in the browser: calling one from a `server fn` is an error.
 
-The app names its module in `vcwl.toml` with `js = "src/interop.js"`. It is copied to `dist`
-and loaded before the app starts; its default export (an object) and its named exports are
+The app names its module in `vcwl.toml` with `js = "src/interop.js"`; packages can too (their
+modules are loaded first, so the app's wins on equal names). It is copied to `dist` and loaded
+before the app starts; its default export (an object) and its named exports are
 the implementations, by name. `this` is `{ caps }`, the app's capabilities.
 
 #### `@web`

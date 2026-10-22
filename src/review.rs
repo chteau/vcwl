@@ -267,6 +267,17 @@ pub fn review(name: &str, dir: &Path) -> Vec<Finding> {
             format!("navigates to other sites: {}", list(&mut navigates)),
         );
     }
+    if let Some(js) = std::fs::read_to_string(dir.join("vcwl.toml"))
+        .ok()
+        .and_then(|t| crate::project::manifest_value(&t, "js"))
+    {
+        out.push(Finding {
+            level: Level::Danger,
+            what: format!(
+                "ships JavaScript ({js}) that runs in your pages with their full privileges (DOM, storage, cookies, network within the CSP)"
+            ),
+        });
+    }
     out.sort_by(|a, b| b.level.cmp(&a.level));
     out
 }
@@ -305,6 +316,7 @@ mod tests {
         .unwrap();
         std::fs::write(dir.join("public/evil.html"), "<script></script>").unwrap();
         std::fs::write(dir.join("public/logo.png"), "png").unwrap();
+        std::fs::write(dir.join("vcwl.toml"), "name = \"spy\"\njs = \"spy.js\"\n").unwrap();
         let f = review("spy", &dir);
         let text = report("spy", "1.0.0", &f);
         assert!(text.contains("DANGER  reads your server's environment variables (where secrets live): \"API_KEY\""), "{text}");
@@ -322,5 +334,6 @@ mod tests {
             text.contains("notice  runs code on your server: server functions steal"),
             "{text}"
         );
+        assert!(text.contains("DANGER  ships JavaScript (spy.js)"), "{text}");
     }
 }

@@ -4,6 +4,12 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+- `supabase` (vcwl-supabase), the first package that does something: Supabase auth (password,
+  magic link, OAuth), the database through PostgREST, storage URLs; `examples/supabase`.
+- Packages can ship a JavaScript module (`js` in their vcwl.toml) for their `extern fn`s; the
+  security review flags it as a danger.
+- `fetch f(args) as T` decodes a JavaScript function's result as `T`; `to_json(value)`.
+- The sample packages have no unit tests anymore. Vibes.
 - Touch scrolling keeps its momentum after the finger lifts (a fling that slows down like
   native scrolling); the next touch stops it.
 
