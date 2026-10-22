@@ -1,0 +1,9 @@
+import "../src/lib.vcwl"
+
+fn test_strings() {
+    assert(capitalize("vibes") == "Vibes", "capitalize")
+    assert(truncate("revolutionary", 6) == "revol…", "truncate")
+    assert(pluralize(1, "bug") == "1 bug" && pluralize(3, "bug") == "3 bugs", "pluralize")
+    assert(slugify("Hello, World!  VCWL 2") == "hello-world-vcwl-2", "slugify")
+    assert(zero_pad(7, 3) == "007", "zero_pad")
+}

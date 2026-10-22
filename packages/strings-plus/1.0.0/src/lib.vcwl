@@ -1,0 +1,39 @@
+import "@left-pad"
+
+/// `s` with its first letter in upper case.
+export fn capitalize(s: String) -> String {
+    if s.is_empty() { s } else { s.slice(0, 1).to_upper() + s.slice(1, s.len()) }
+}
+
+/// `s` cut to `max` characters, ending with "…" when it was longer.
+export fn truncate(s: String, max: Int) -> String {
+    if s.len() <= max { s } else { s.slice(0, max.max(1) - 1) + "…" }
+}
+
+/// "1 bug", "2 bugs".
+export fn pluralize(n: Int, word: String) -> String {
+    if n == 1 { "1 {word}" } else { "{n} {word}s" }
+}
+
+/// Lower case words joined by `-`: "Hello, World!" is "hello-world".
+export fn slugify(s: String) -> String {
+    var words: [String] = []
+    for w in s.to_lower().split(" ") {
+        var kept = ""
+        for i in 0..w.len() {
+            let c = w.slice(i, i + 1)
+            if "abcdefghijklmnopqrstuvwxyz0123456789".contains(c) {
+                kept = kept + c
+            }
+        }
+        if !kept.is_empty() {
+            words = words.push(kept)
+        }
+    }
+    words.join("-")
+}
+
+/// A number as a fixed-width string: `zero_pad(7, 3)` is "007".
+export fn zero_pad(n: Int, width: Int) -> String {
+    left_pad(n.to_string(), width, "0")
+}
