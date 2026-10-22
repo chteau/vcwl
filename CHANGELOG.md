@@ -2,6 +2,11 @@
 
 All notable changes. The project has no release yet; entries are grouped by milestone.
 
+## Unreleased
+
+- Touch scrolling keeps its momentum after the finger lifts (a fling that slows down like
+  native scrolling); the next touch stops it.
+
 ## 0.1.0 — 2026-10-22
 
 The first release.

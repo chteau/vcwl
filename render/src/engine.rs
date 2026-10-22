@@ -74,8 +74,14 @@ struct Down {
     touch: bool,
     /// Scroll container being dragged by touch, and the last pointer position.
     scroller: Option<(Id, f32, f32)>,
+    /// Drag velocity in px/ms (smoothed) and the time of the last move, for the fling.
+    vel: (f32, f32),
+    last: f64,
     moved: bool,
 }
+
+/// How fast a fling slows down: its velocity falls by e every this many milliseconds.
+const FLING_DECAY_MS: f64 = 325.0;
 
 pub struct Engine {
     pub tree: Tree,
@@ -111,6 +117,8 @@ pub struct Engine {
     anims: HashMap<Id, Vec<Anim>>,
     /// Smooth page scroll in progress: from, to, start time.
     page_scroll: Option<(f32, f32, f64)>,
+    /// A touch scroll continuing after the finger left: container, velocity (px/ms), last step.
+    fling: Option<(Id, f32, f32, f64)>,
 }
 
 impl Engine {
@@ -149,6 +157,7 @@ impl Engine {
             takeover: None,
             anims: HashMap::new(),
             page_scroll: None,
+            fling: None,
         }
     }
 
@@ -173,6 +182,7 @@ impl Engine {
             || self.style_dirty
             || !self.anims.is_empty()
             || self.page_scroll.is_some()
+            || self.fling.is_some()
     }
 
     pub fn apply(&mut self, buf: &[u8]) -> Result<(), String> {
@@ -354,6 +364,7 @@ impl Engine {
             self.scroll_by(0, 0.0, y);
         }
         self.step_page_scroll(now);
+        self.step_fling(now);
         if self.reveal(takeover.is_some()) {
             self.update_layout(m);
         }
@@ -421,9 +432,28 @@ impl Engine {
         self.paint_dirty = true;
     }
 
+    fn step_fling(&mut self, now: f64) {
+        let Some((id, vx, vy, last)) = self.fling else {
+            return;
+        };
+        let dt = (now - last).clamp(0.0, 50.0);
+        let before = self.scroll_of(id);
+        self.scroll_by(id, vx * dt as f32, vy * dt as f32);
+        let k = (-dt / FLING_DECAY_MS).exp() as f32;
+        let (vx, vy) = (vx * k, vy * k);
+        // Stops when slow, or against an edge.
+        self.fling =
+            (vx.hypot(vy) > 0.02 && self.scroll_of(id) != before).then_some((id, vx, vy, now));
+    }
+
+    fn scroll_of(&self, id: Id) -> (f32, f32) {
+        self.tree.n(id).lay.scroll
+    }
+
     /// Scrolls the page back to the top (after a route change).
     pub fn scroll_to_top(&mut self) {
         self.page_scroll = None;
+        self.fling = None;
         self.tree.m(0).lay.scroll = (0.0, 0.0);
         self.paint_dirty = true;
         self.sem_dirty = true;
@@ -886,6 +916,7 @@ impl Engine {
                 return;
             }
         }
+        self.fling = None;
         let Some(target) = self.hit(x, y) else { return };
         let scroller = if touch {
             self.scroller_at(x, y).map(|s| (s, x, y))
@@ -898,6 +929,8 @@ impl Engine {
             y,
             touch,
             scroller,
+            vel: (0.0, 0.0),
+            last: self.now,
             moved: false,
         });
         if !touch {
@@ -940,6 +973,13 @@ impl Engine {
                 d.moved = true;
             }
             if let Some((s, lx, ly)) = d.scroller {
+                let dt = (self.now - d.last).max(1.0) as f32;
+                // Recent moves count most, so a flick's speed is the speed at release.
+                d.vel = (
+                    0.8 * (lx - x) / dt + 0.2 * d.vel.0,
+                    0.8 * (ly - y) / dt + 0.2 * d.vel.1,
+                );
+                d.last = self.now;
                 d.scroller = Some((s, x, y));
                 self.scroll_by(s, lx - x, ly - y);
             }
@@ -974,6 +1014,12 @@ impl Engine {
         };
         if down.touch {
             if down.moved {
+                // A finger that stopped before lifting does not fling.
+                if let Some((s, _, _)) = down.scroller
+                    && self.now - down.last < 80.0
+                {
+                    self.fling = Some((s, down.vel.0, down.vel.1, self.now));
+                }
                 return;
             }
             self.press(down.target, x, y, m);
@@ -2105,6 +2151,44 @@ mod tests {
         e.wheel(10.0, 10.0, 0.0, 100.0);
         assert_eq!(e.tree.n(0).lay.scroll.1, 100.0);
         assert_eq!(e.abs(3).y, 100.0 - 100.0);
+    }
+
+    #[test]
+    fn touch_scroll_flings_after_release_and_a_touch_stops_it() {
+        let mut b = Buf::default();
+        b.create(1, "div").class(1, "page").insert(0, 1, 0);
+        let mut e = engine(&b, ".page{height:5000px}");
+        let drag = |e: &mut Engine, ys: &[f32], t0: f64| {
+            e.now = t0;
+            e.pointer_down(&mut Mono, 100.0, ys[0], true);
+            for (i, &y) in ys.iter().enumerate().skip(1) {
+                e.now = t0 + i as f64 * 16.0;
+                e.pointer_move(&mut Mono, 100.0, y);
+            }
+            e.pointer_up(&mut Mono, 100.0, *ys.last().unwrap());
+        };
+        // A flick upwards: 40 px per 16 ms.
+        drag(&mut e, &[500.0, 460.0, 420.0, 380.0], 0.0);
+        let released = e.tree.n(0).lay.scroll.1;
+        assert_eq!(released, 120.0);
+        assert!(e.dirty());
+        e.frame(&mut Mono, 64.0);
+        let after = e.tree.n(0).lay.scroll.1;
+        assert!(after > released + 30.0, "{after}");
+        let mut t = 64.0;
+        while e.dirty() && t < 5000.0 {
+            t += 16.0;
+            e.frame(&mut Mono, t);
+        }
+        let rest = e.tree.n(0).lay.scroll.1;
+        assert!(t < 5000.0 && rest > after, "the fling ends: {rest} at {t}");
+        // A new fling is stopped by the next touch.
+        drag(&mut e, &[500.0, 460.0, 420.0], t + 100.0);
+        e.now = t + 140.0;
+        e.pointer_down(&mut Mono, 100.0, 300.0, true);
+        let held = e.tree.n(0).lay.scroll.1;
+        e.frame(&mut Mono, t + 200.0);
+        assert_eq!(e.tree.n(0).lay.scroll.1, held);
     }
 
     #[test]

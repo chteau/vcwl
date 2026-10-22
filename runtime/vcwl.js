@@ -1115,7 +1115,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
         return;
       }
     }
-    input(() => r.pointer_move(...pos(e)));
+    input(() => r.pointer_move(...pos(e), win.performance.now()));
   });
   canvas.addEventListener("pointerup", (e) => {
     const p = press;

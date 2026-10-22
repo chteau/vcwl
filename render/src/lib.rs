@@ -151,8 +151,11 @@ mod wasm {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn pointer_move(x: f32, y: f32) {
-        with(|e| e.pointer_move(&mut Host, x, y));
+    pub extern "C" fn pointer_move(x: f32, y: f32, now: f64) {
+        with(|e| {
+            e.now = now;
+            e.pointer_move(&mut Host, x, y)
+        });
     }
 
     #[unsafe(no_mangle)]
