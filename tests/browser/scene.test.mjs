@@ -6,7 +6,7 @@ import { build, open, tree, click, waitFor, repo } from "./harness.mjs";
 let app;
 before(async () => {
   const dist = build(path.join(repo, "tests/browser/fixtures/scene"));
-  app = await open(dist, { viewport: { width: 1000, height: 1000 } });
+  app = await open(dist, { viewport: { width: 1000, height: 1200 } });
   await waitForColor(app.page, "box");
 });
 after(async () => app?.close());
@@ -24,6 +24,9 @@ const KINDS = {
   // Third scene: a glTF model with a red material and a green checker texture.
   red: "r > 150 && g < 70 && b < 70",
   green: "g > 150 && r < 100 && b < 100",
+  // Fourth scene: where the panes cross, the nearer one's color dominates the mix.
+  redOverBlue: "r > 60 && b > 30 && r > b * 1.5",
+  blueOverRed: "b > 60 && r > 30 && b > r * 1.5",
   any: "true",
 };
 
@@ -132,6 +135,14 @@ test("a translucent mesh lets what is behind it show through", async () => {
   assert.ok(before.n > 400, JSON.stringify(before));
   await click(page, 'button:text("Fade")');
   await waitForColor(page, "glass", (f) => f.n < before.n / 2, 5000, 1);
+});
+
+test("crossing translucent meshes blend in depth order at each pixel", async () => {
+  const { page } = app;
+  const red = await find(page, "redOverBlue", 3), blue = await find(page, "blueOverRed", 3);
+  // The red pane is in front on the left of the crossing, the blue one on the right.
+  assert.ok(red.n > 300 && blue.n > 300, JSON.stringify({ red, blue }));
+  assert.ok(red.x < blue.x - 20, JSON.stringify({ red, blue }));
 });
 
 test("keyboard: Tab reaches the orbiting scene and its clickable mesh", async () => {

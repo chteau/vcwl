@@ -21,7 +21,7 @@ void main() {
 }`;
 
 const FS = `
-precision mediump float;
+precision highp float;
 uniform vec3 color, ambient, eye, pickColor, highlight;
 uniform float shininess, opacity;
 uniform bool pick, textured;
@@ -32,6 +32,11 @@ uniform sampler2D tex, shadowMap;
 uniform samplerCube shadowCube;
 // A point light casting shadows: position and the distance its shadow map is scaled by (w > 0).
 uniform vec4 shadowPoint;
+// Depth peeling of translucent meshes: 1 writes the depth of the nearest surface behind the
+// previous layer's (in \`peelDepth\`), 2 draws the color of the surface at the layer's depth.
+uniform int peel;
+uniform sampler2D peelDepth;
+uniform vec2 viewport;
 varying vec3 vNormal, vWorld;
 varying vec2 vUv;
 varying vec4 vShadow;
@@ -58,6 +63,16 @@ float lit(float bias) {
 }
 void main() {
   if (pick) { gl_FragColor = vec4(pickColor, 1.0); return; }
+  if (peel > 0) {
+    float z = gl_FragCoord.z, layer = unpack(texture2D(peelDepth, gl_FragCoord.xy / viewport));
+    if (peel == 1) {
+      if (z <= layer + 1e-6) discard;
+      vec4 c = fract(z * vec4(1.0, 255.0, 65025.0, 16581375.0));
+      gl_FragColor = c - c.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+      return;
+    }
+    if (abs(z - layer) > 1e-6) discard;
+  }
   vec3 base = textured ? color * texture2D(tex, vUv).rgb : color;
   vec3 v = normalize(eye - vWorld);
   // Two-sided: light the side facing the camera, whatever the triangle winding.
@@ -97,6 +112,17 @@ void main() {
   vec4 c = fract(z * vec4(1.0, 255.0, 65025.0, 16581375.0));
   gl_FragColor = c - c.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
 }`;
+// Puts an image (premultiplied) over what is drawn, pixel for pixel.
+const QUAD_VS = `
+attribute vec3 position;
+void main() { gl_Position = vec4(position, 1.0); }`;
+const QUAD_FS = `
+precision mediump float;
+uniform sampler2D image;
+uniform vec2 viewport;
+void main() { gl_FragColor = texture2D(image, gl_FragCoord.xy / viewport); }`;
+// Translucent surfaces blended per pixel; those behind are dropped.
+const PEEL_LAYERS = 4;
 const SHADOW_SIZE = 1024;
 const CUBE_SIZE = 512;
 // Cube map faces in WebGL order (+X, -X, +Y, -Y, +Z, -Z): view direction and up vector.
@@ -486,8 +512,13 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     u.uv = gl.getAttribLocation(p, "uv");
     return u;
   };
-  const main = program(VS, FS, ["model", "viewProj", "lightViewProj", "normalMat", "color", "ambient", "eye", "pickColor", "highlight", "shininess", "opacity", "pick", "textured", "lightCount", "shadowLight", "lightPos", "lightColor", "tex", "shadowMap", "shadowCube", "shadowPoint"]);
+  const main = program(VS, FS, ["model", "viewProj", "lightViewProj", "normalMat", "color", "ambient", "eye", "pickColor", "highlight", "shininess", "opacity", "pick", "textured", "lightCount", "shadowLight", "lightPos", "lightColor", "tex", "shadowMap", "shadowCube", "shadowPoint", "peel", "peelDepth", "viewport"]);
   const depth = program(SHADOW_VS, SHADOW_FS, ["model", "lightViewProj", "point"]);
+  const quad = program(QUAD_VS, QUAD_FS, ["image", "viewport"]);
+  // One triangle covering the viewport.
+  const quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]), gl.STATIC_DRAW);
   gl.enable(gl.DEPTH_TEST);
 
   // Geometry by shape name or model URL; a model is `null` while it loads, `false` if it failed.
@@ -591,7 +622,7 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
   };
 
   const reduced = win.matchMedia?.("(prefers-reduced-motion: reduce)");
-  let pickTarget = null, shadowTarget = null, cubeTarget = null;
+  let pickTarget = null, shadowTarget = null, cubeTarget = null, peelTargets = null;
   const target = (w, h, filter) => {
     const fb = gl.createFramebuffer(), tex = gl.createTexture(), rb = gl.createRenderbuffer();
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -771,26 +802,19 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     gl.bindTexture(gl.TEXTURE_CUBE_MAP, shadows && caster.point ? cubeTarget.tex : null);
     gl.activeTexture(gl.TEXTURE0);
 
-    // Opaque meshes first, then translucent ones from far to near without writing depth.
+    // Opaque meshes first, then translucent ones by depth peeling.
     const draws = [];
     scene.items.forEach((it, i) => {
       const model = it.kind === 1 && geometry(it);
       if (!model) return;
-      const m = world[i], far = Math.hypot(m[12] - eye[0], m[13] - eye[1], m[14] - eye[2]);
       for (const g of model.parts) {
         const opacity = picking ? 1 : Math.max(0, Math.min(1, num(it.attrs.opacity, 1) * (g.color?.[3] ?? 1)));
-        if (opacity > 0) draws.push({ it, i, g, flip: model.flip, opacity, far });
+        if (opacity > 0) draws.push({ it, i, g, flip: model.flip, opacity });
       }
     });
     const solid = draws.filter((d) => d.opacity >= 1);
-    const glass = draws.filter((d) => d.opacity < 1).sort((a, b) => b.far - a.far);
-    for (const { it, i, g, flip, opacity } of [...solid, ...glass]) {
-      const blend = opacity < 1;
-      if (blend) {
-        gl.enable(gl.BLEND);
-        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-      }
-      gl.depthMask(!blend);
+    const glass = draws.filter((d) => d.opacity < 1);
+    const drawMesh = ({ it, i, g, flip, opacity }) => {
       bind(u, g);
       gl.uniformMatrix4fv(u.model, false, world[i]);
       gl.uniformMatrix3fv(u.normalMat, false, normalMatrix(world[i]));
@@ -812,9 +836,78 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
       const wire = it.attrs.wireframe === "true" && !picking;
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, wire ? g.edges : g.idx);
       gl.drawElements(wire ? gl.LINES : gl.TRIANGLES, wire ? g.edgeCount : g.count, g.type, 0);
-      if (blend) gl.disable(gl.BLEND);
+    };
+    solid.forEach(drawMesh);
+    if (glass.length) peel(solid, glass, drawMesh, w, h, out);
+  }
+
+  /**
+   * Blends the translucent meshes over the opaque ones in depth order per pixel, whatever their
+   * shapes: each pass peels the nearest surface left (depth into one texture, then its color
+   * under the layers accumulated so far), then the layers go over the scene drawn in `out`.
+   */
+  function peel(solid, glass, drawMesh, w, h, out) {
+    const u = main;
+    if (peelTargets?.w !== w || peelTargets?.h !== h) {
+      peelTargets = { w, h, depth: [target(w, h, gl.NEAREST), target(w, h, gl.NEAREST)], accum: target(w, h, gl.NEAREST) };
     }
-    gl.depthMask(true);
+    const { accum } = peelTargets;
+    let [next, prev] = peelTargets.depth;
+    const clear = (t, v, bits = gl.COLOR_BUFFER_BIT) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+      gl.clearColor(v, v, v, v);
+      gl.clear(bits);
+    };
+    // Nothing is accumulated yet, and every surface lies behind depth 0.
+    clear(accum, 0);
+    clear(prev, 0);
+    gl.uniform2f(u.viewport, w, h);
+    gl.uniform1i(u.peelDepth, 3);
+    for (let layer = 0; layer < PEEL_LAYERS; layer++) {
+      // Packed 1s unpack above any depth: where no surface is left, nothing more is peeled.
+      clear(next, 1, gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.uniform1i(u.peel, 0);
+      gl.colorMask(false, false, false, false);
+      solid.forEach(drawMesh);
+      gl.colorMask(true, true, true, true);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, prev.tex);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(u.peel, 1);
+      glass.forEach(drawMesh);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, accum.fb);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, next.tex);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE_MINUS_DST_ALPHA, gl.ONE);
+      gl.uniform1i(u.peel, 2);
+      glass.forEach(drawMesh);
+      gl.disable(gl.BLEND);
+      gl.enable(gl.DEPTH_TEST);
+      [prev, next] = [next, prev];
+    }
+    gl.uniform1i(u.peel, 0);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out);
+    gl.useProgram(quad.p);
+    for (const l of [main.nrm, main.uv]) if (l >= 0 && l !== quad.pos) gl.disableVertexAttribArray(l);
+    bind(quad, { pos: quadBuf });
+    gl.uniform1i(quad.image, 0);
+    gl.uniform2f(quad.viewport, w, h);
+    gl.bindTexture(gl.TEXTURE_2D, accum.tex);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.disable(gl.BLEND);
+    gl.enable(gl.DEPTH_TEST);
+    gl.bindTexture(gl.TEXTURE_2D, null);
   }
 
   return {

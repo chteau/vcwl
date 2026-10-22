@@ -75,5 +75,13 @@ component App {
             mesh(shape: "plane", size: vec3(6.0, 1.0, 6.0), position: vec3(0.0, -0.8, 0.0), color: "#8a8f9a", shininess: 0.0)
             mesh(model: "models/materials.glb", size: vec3(2.0, 2.0, 2.0), rotation: vec3(0.0, 20.0, 0.0))
         }
+        scene(label: "Two crossing panes of glass", camera: vec3(0.0, 0.0, 4.0), background: "#000000") {
+            style {
+                height: 180px
+            }
+            light(kind: "ambient", intensity: 1.0)
+            mesh(shape: "box", size: vec3(3.0, 1.5, 0.01), rotation: vec3(0.0, 35.0, 0.0), color: "#ff0000", opacity: 0.6)
+            mesh(shape: "box", size: vec3(3.0, 1.5, 0.01), rotation: vec3(0.0, -35.0, 0.0), color: "#0000ff", opacity: 0.6)
+        }
     }
 }
