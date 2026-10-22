@@ -45,7 +45,10 @@ and layout of the mirror's 2000+ DOM elements (about 11 ms when measured with fo
 the mirror script itself takes about 3.3 ms since Milestone 12, 4.5 before). Tried in Milestone 12
 and not kept, as they did not reduce the total: `contain: strict` and `content-visibility: auto`
 on mirror elements (the latter cut layout but raised style and removal time), `white-space: pre`,
-and positioning mirror elements relative to their parent instead of the viewport.
+and positioning mirror elements relative to their parent instead of the viewport. In Milestone 15, text runs laid out
+as inline, unpositioned spans (what plain text nodes would cost) left layout unchanged (6.2 → 6.1
+ms by Chrome's own layout timer), so the remaining cost is laying out the text itself, which the
+mirror needs to expose it.
 
 Changes in Milestone 9, each measured with this benchmark before being kept:
 

@@ -119,8 +119,11 @@ test("glTF materials give each part its base color or embedded texture", async (
 test("shadows darken the floor under the meshes", async () => {
   const { page } = app;
   const before = await find(page, "any", 1);
+  const point = await find(page, "any", 2);
   await click(page, 'button:text("Shadows")');
   await waitForColor(page, "any", (f) => f.light < before.light - 1, 5000, 1);
+  // The third scene's shadows come from a point light.
+  await waitForColor(page, "any", (f) => f.light < point.light - 1, 5000, 2);
 });
 
 test("a translucent mesh lets what is behind it show through", async () => {

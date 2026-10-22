@@ -66,10 +66,13 @@ component App {
             mesh(shape: "box", texture: "textures/checker.png", position: vec3(0.0, 0.0, -1.0))
             mesh(shape: "sphere", size: vec3(1.2, 1.2, 1.2), position: vec3(0.0, 0.3, 1.5), color: "#20c0ff", opacity: glass)
         }
-        scene(label: "A model with two materials", camera: vec3(0.0, 1.0, 3.0), background: "#15171c") {
+        scene(label: "A model with two materials", camera: vec3(0.0, 1.0, 3.0), background: "#15171c", shadows: shadows) {
             style {
                 height: 180px
             }
+            light(kind: "ambient", intensity: 0.3)
+            light(kind: "point", position: vec3(-1.5, 1.2, 0.5), intensity: 1.2)
+            mesh(shape: "plane", size: vec3(6.0, 1.0, 6.0), position: vec3(0.0, -0.8, 0.0), color: "#8a8f9a", shininess: 0.0)
             mesh(model: "models/materials.glb", size: vec3(2.0, 2.0, 2.0), rotation: vec3(0.0, 20.0, 0.0))
         }
     }

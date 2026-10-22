@@ -29,12 +29,25 @@ uniform int lightCount, shadowLight;
 uniform vec4 lightPos[8];
 uniform vec3 lightColor[8];
 uniform sampler2D tex, shadowMap;
+uniform samplerCube shadowCube;
+// A point light casting shadows: position and the distance its shadow map is scaled by (w > 0).
+uniform vec4 shadowPoint;
 varying vec3 vNormal, vWorld;
 varying vec2 vUv;
 varying vec4 vShadow;
 float unpack(vec4 c) { return dot(c, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0)); }
-// Fraction of light reaching this point from the shadow-casting light (3×3 PCF).
+// Fraction of light reaching this point from the shadow-casting light (3×3 PCF, or the eight
+// corners around the direction for a point light).
 float lit(float bias) {
+  if (shadowPoint.w > 0.0) {
+    vec3 d = vWorld - shadowPoint.xyz;
+    float here = length(d) / shadowPoint.w - bias * 2.0, sum = 0.0;
+    for (int k = 0; k < 8; k++) {
+      vec3 o = vec3(mod(float(k), 2.0), mod(floor(float(k) / 2.0), 2.0), floor(float(k) / 4.0)) * 2.0 - 1.0;
+      sum += here > unpack(textureCube(shadowCube, d + o * length(d) * 0.004)) ? 0.0 : 1.0;
+    }
+    return sum / 8.0;
+  }
   vec3 p = vShadow.xyz / vShadow.w * 0.5 + 0.5;
   if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0 || p.z > 1.0) return 1.0;
   float sum = 0.0;
@@ -64,18 +77,37 @@ void main() {
 }`;
 
 // Depth from the shadow-casting light, packed into RGBA (WebGL 1 has no depth textures
-// without an extension).
+// without an extension): window depth for a directional light, the distance to a point light
+// divided by `point.w` for one face of a point light's cube map.
 const SHADOW_VS = `
 attribute vec3 position;
 uniform mat4 model, lightViewProj;
-void main() { gl_Position = lightViewProj * model * vec4(position, 1.0); }`;
+varying vec3 vWorld;
+void main() {
+  vec4 w = model * vec4(position, 1.0);
+  vWorld = w.xyz;
+  gl_Position = lightViewProj * w;
+}`;
 const SHADOW_FS = `
 precision highp float;
+uniform vec4 point;
+varying vec3 vWorld;
 void main() {
-  vec4 c = fract(gl_FragCoord.z * vec4(1.0, 255.0, 65025.0, 16581375.0));
+  float z = point.w > 0.0 ? length(vWorld - point.xyz) / point.w : gl_FragCoord.z;
+  vec4 c = fract(z * vec4(1.0, 255.0, 65025.0, 16581375.0));
   gl_FragColor = c - c.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
 }`;
 const SHADOW_SIZE = 1024;
+const CUBE_SIZE = 512;
+// Cube map faces in WebGL order (+X, -X, +Y, -Y, +Z, -Z): view direction and up vector.
+const CUBE_FACES = [
+  [[1, 0, 0], [0, -1, 0]],
+  [[-1, 0, 0], [0, -1, 0]],
+  [[0, 1, 0], [0, 0, 1]],
+  [[0, -1, 0], [0, 0, -1]],
+  [[0, 0, 1], [0, -1, 0]],
+  [[0, 0, -1], [0, -1, 0]],
+];
 
 // ----- matrices (column-major, as WebGL expects) -----
 
@@ -109,9 +141,9 @@ const norm = (a) => {
 };
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
-function lookAt(eye, target) {
+function lookAt(eye, target, up = null) {
   const z = norm(sub(eye, target));
-  const x = norm(cross(Math.abs(z[1]) > 0.999 ? [0, 0, 1] : [0, 1, 0], z));
+  const x = norm(cross(up ?? (Math.abs(z[1]) > 0.999 ? [0, 0, 1] : [0, 1, 0]), z));
   const y = cross(z, x);
   return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, eye), -dot(y, eye), -dot(z, eye), 1]);
 }
@@ -454,8 +486,8 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     u.uv = gl.getAttribLocation(p, "uv");
     return u;
   };
-  const main = program(VS, FS, ["model", "viewProj", "lightViewProj", "normalMat", "color", "ambient", "eye", "pickColor", "highlight", "shininess", "opacity", "pick", "textured", "lightCount", "shadowLight", "lightPos", "lightColor", "tex", "shadowMap"]);
-  const depth = program(SHADOW_VS, SHADOW_FS, ["model", "lightViewProj"]);
+  const main = program(VS, FS, ["model", "viewProj", "lightViewProj", "normalMat", "color", "ambient", "eye", "pickColor", "highlight", "shininess", "opacity", "pick", "textured", "lightCount", "shadowLight", "lightPos", "lightColor", "tex", "shadowMap", "shadowCube", "shadowPoint"]);
+  const depth = program(SHADOW_VS, SHADOW_FS, ["model", "lightViewProj", "point"]);
   gl.enable(gl.DEPTH_TEST);
 
   // Geometry by shape name or model URL; a model is `null` while it loads, `false` if it failed.
@@ -559,7 +591,7 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
   };
 
   const reduced = win.matchMedia?.("(prefers-reduced-motion: reduce)");
-  let pickTarget = null, shadowTarget = null;
+  let pickTarget = null, shadowTarget = null, cubeTarget = null;
   const target = (w, h, filter) => {
     const fb = gl.createFramebuffer(), tex = gl.createTexture(), rb = gl.createRenderbuffer();
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -609,25 +641,8 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     }
   };
 
-  /** Renders the depth seen from a directional light; returns its view-projection matrix. */
-  function shadowPass(scene, world, center, dir) {
-    // An orthographic box around everything drawn.
-    let r = 1;
-    scene.items.forEach((it, i) => {
-      if (it.kind !== 1) return;
-      const m = world[i], s = Math.hypot(m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]) / 2;
-      r = Math.max(r, Math.hypot(m[12] - center[0], m[13] - center[1], m[14] - center[2]) + s);
-    });
-    const d = norm(dir), eye = center.map((c, k) => c + d[k] * r * 2);
-    const vp = mul(ortho(r, 0.01, r * 4), lookAt(eye, center));
-    shadowTarget ??= target(SHADOW_SIZE, SHADOW_SIZE, gl.NEAREST);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowTarget.fb);
-    gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
-    gl.clearColor(1, 1, 1, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.useProgram(depth.p);
-    for (const l of [main.nrm, main.uv]) if (l >= 0 && l !== depth.pos) gl.disableVertexAttribArray(l);
-    gl.uniformMatrix4fv(depth.lightViewProj, false, vp);
+  /** Draws every opaque enough mesh with the depth program (its uniforms already set). */
+  function depthMeshes(scene, world) {
     scene.items.forEach((it, i) => {
       const m = it.kind === 1 && num(it.attrs.opacity, 1) > 0.5 && geometry(it);
       if (!m) return;
@@ -638,13 +653,76 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
         gl.drawElements(gl.TRIANGLES, g.count, g.type, 0);
       }
     });
-    return vp;
+  }
+
+  /** Distance from `from` that holds every mesh of the scene. */
+  function reach(scene, world, from) {
+    let r = 1;
+    scene.items.forEach((it, i) => {
+      if (it.kind !== 1) return;
+      const m = world[i], s = Math.hypot(m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]) / 2;
+      r = Math.max(r, Math.hypot(m[12] - from[0], m[13] - from[1], m[14] - from[2]) + s);
+    });
+    return r;
+  }
+
+  function startDepth(fb, size, point) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.viewport(0, 0, size, size);
+    gl.useProgram(depth.p);
+    for (const l of [main.nrm, main.uv]) if (l >= 0 && l !== depth.pos) gl.disableVertexAttribArray(l);
+    gl.uniform4fv(depth.point, point);
+  }
+
+  /**
+   * Renders the shadow map of the casting light. A directional light gets an orthographic
+   * view of a box around the scene, and its view-projection matrix is returned; a point light
+   * gets a cube map of distances, and `[x, y, z, scale]` is returned in `point`.
+   */
+  function shadowPass(scene, world, center, light) {
+    if (light.point) {
+      const far = reach(scene, world, light.at) * 1.5;
+      const point = [...light.at, far];
+      if (!cubeTarget) {
+        const tex = gl.createTexture(), fb = gl.createFramebuffer(), rb = gl.createRenderbuffer();
+        gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex);
+        for (let f = 0; f < 6; f++) gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, gl.RGBA, CUBE_SIZE, CUBE_SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_CUBE_MAP, k, v);
+        gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
+        gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, CUBE_SIZE, CUBE_SIZE);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
+        cubeTarget = { tex, fb };
+      }
+      startDepth(cubeTarget.fb, CUBE_SIZE, point);
+      gl.clearColor(1, 1, 1, 1);
+      const proj = perspective(90, 1, 0.05, far);
+      CUBE_FACES.forEach(([dir, up], f) => {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, cubeTarget.tex, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.uniformMatrix4fv(depth.lightViewProj, false, mul(proj, lookAt(light.at, light.at.map((c, k) => c + dir[k]), up)));
+        depthMeshes(scene, world);
+      });
+      return { vp: ident(), point };
+    }
+    // An orthographic box around everything drawn.
+    const r = reach(scene, world, center);
+    const d = norm(light.at), eye = center.map((c, k) => c + d[k] * r * 2);
+    const vp = mul(ortho(r, 0.01, r * 4), lookAt(eye, center));
+    shadowTarget ??= target(SHADOW_SIZE, SHADOW_SIZE, gl.NEAREST);
+    startDepth(shadowTarget.fb, SHADOW_SIZE, [0, 0, 0, 0]);
+    gl.clearColor(1, 1, 1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.uniformMatrix4fv(depth.lightViewProj, false, vp);
+    depthMeshes(scene, world);
+    return { vp, point: [0, 0, 0, 0] };
   }
 
   function render(scene, view, w, h, t, out, picking, focus) {
     const { world, eye, target: center, fov } = layout(scene, view, t);
     // Lights: without any, a soft ambient light and one from above.
-    let ambient = [0, 0, 0], shadowLight = -1, shadowDir = null;
+    let ambient = [0, 0, 0], shadowLight = -1, caster = null;
     const pos = [], col = [];
     const lights = scene.items.flatMap((it, i) => (it.kind === 2 ? [[it, [world[i][12], world[i][13], world[i][14]]]] : []));
     const defaults = [[{ attrs: { kind: "ambient", intensity: "0.35" } }, null], [{ attrs: {} }, [3, 5, 4]]];
@@ -653,16 +731,17 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
       const kind = it.attrs.kind ?? "directional";
       if (kind === "ambient") ambient = ambient.map((v, i) => v + c[i]);
       else if (pos.length < 32) {
-        if (kind === "directional" && !shadowDir) {
+        // The first directional or point light casts the shadows.
+        if (!caster) {
           shadowLight = pos.length / 4;
-          shadowDir = at;
+          caster = { at, point: kind === "point" };
         }
         pos.push(...at, kind === "point" ? 1 : 0);
         col.push(c[0], c[1], c[2]);
       }
     }
-    const shadows = !picking && scene.attrs.shadows === "true" && shadowDir;
-    const lightVP = shadows ? shadowPass(scene, world, center, shadowDir) : ident();
+    const shadows = !picking && scene.attrs.shadows === "true" && caster;
+    const shadow = shadows ? shadowPass(scene, world, center, caster) : { vp: ident(), point: [0, 0, 0, 0] };
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, out);
     gl.viewport(0, 0, w, h);
@@ -672,7 +751,8 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     const u = main;
     gl.useProgram(u.p);
     gl.uniformMatrix4fv(u.viewProj, false, mul(perspective(fov, w / h, 0.05, 500), lookAt(eye, center)));
-    gl.uniformMatrix4fv(u.lightViewProj, false, lightVP);
+    gl.uniformMatrix4fv(u.lightViewProj, false, shadow.vp);
+    gl.uniform4fv(u.shadowPoint, shadow.point);
     gl.uniform3fv(u.eye, eye);
     gl.uniform1i(u.pick, picking ? 1 : 0);
     gl.uniform3fv(u.ambient, ambient);
@@ -684,8 +764,11 @@ export function createScenes(doc, { resolve = (u) => u, changed = () => {} } = {
     }
     gl.uniform1i(u.tex, 0);
     gl.uniform1i(u.shadowMap, 1);
+    gl.uniform1i(u.shadowCube, 2);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, shadows ? shadowTarget.tex : null);
+    gl.bindTexture(gl.TEXTURE_2D, shadows && !caster.point ? shadowTarget.tex : null);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, shadows && caster.point ? cubeTarget.tex : null);
     gl.activeTexture(gl.TEXTURE0);
 
     // Opaque meshes first, then translucent ones from far to near without writing depth.
