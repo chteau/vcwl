@@ -1,0 +1,4 @@
+name = "left-pad"
+version = "1.0.0"
+description = "Pads strings on the left. Unpublishing it will not break the internet, we checked."
+registry = "../.."

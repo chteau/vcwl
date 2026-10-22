@@ -1,0 +1,8 @@
+/// `s` with copies of `fill` added in front until it is `width` characters long.
+export fn left_pad(s: String, width: Int, fill: String) -> String {
+    var out = s
+    while out.len() < width && !fill.is_empty() {
+        out = fill + out
+    }
+    out
+}
