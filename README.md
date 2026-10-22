@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://chteau.github.io/vcwl/">Website</a> ·
-  <a href="https://chteau.github.io/vcwl/docs/install/">Docs</a> ·
+  <a href="https://vcwl.chteau.bzh/">Website</a> ·
+  <a href="https://vcwl.chteau.bzh/docs/install/">Docs</a> ·
   <a href="https://github.com/chteau/vcwl/releases/latest">Download</a> ·
   <a href="CHANGELOG.md">Changelog</a>
 </p>
@@ -51,7 +51,7 @@ component App {
 }
 ```
 
-The [website](https://chteau.github.io/vcwl/) is itself written in VCWL, docs included.
+The [website](https://vcwl.chteau.bzh/) is itself written in VCWL, docs included.
 
 ## Install
 
@@ -112,7 +112,7 @@ an application secure.
 
 ## Documentation
 
-- [The website's docs](https://chteau.github.io/vcwl/docs/install/), for a guided tour
+- [The website's docs](https://vcwl.chteau.bzh/docs/install/), for a guided tour
 - [Language reference](docs/language.md)
 - [Packages](docs/packages.md) · [Editors](docs/editors.md) · [Deploying](docs/deploy.md)
 - [Architecture](docs/architecture.md) and [decision records](docs/adr/)

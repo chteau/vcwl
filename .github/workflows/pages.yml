@@ -1,4 +1,6 @@
-# Builds the satirical project site (site/, written in VCWL) and publishes it to GitHub Pages.
+# Builds the project website (site/, written in VCWL) and publishes it: to Netlify at
+# https://vcwl.chteau.bzh (the canonical address, when the NETLIFY_AUTH_TOKEN secret is set) and
+# to GitHub Pages under /vcwl/ as a mirror.
 name: pages
 on:
   push:
@@ -17,14 +19,26 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: 04133608-c139-456b-937f-9128b07a5074
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - run: cargo build --release
-      - run: ../target/release/vcwl build
+      - name: Deploy to Netlify
+        if: env.NETLIFY_AUTH_TOKEN != ''
         working-directory: site
+        run: |
+          ../target/release/vcwl build
+          npx --yes netlify-cli@27 deploy --prod --dir dist --site "$NETLIFY_SITE_ID" --message "$GITHUB_SHA"
+      - name: Build the GitHub Pages mirror
+        working-directory: site
+        run: |
+          sed -i 's|^url = .*|url = "https://chteau.github.io/vcwl/"|' vcwl.toml
+          ../target/release/vcwl build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/dist
