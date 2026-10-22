@@ -64,10 +64,13 @@ fn collect_routes(views: &[crate::check_ui::TView], out: &mut Vec<String>) {
                     collect_routes(b, out);
                 }
             }
-            TView::For { body, .. } | TView::Component { children: body, .. } => {
-                collect_routes(body, out)
+            TView::For { body, .. } => collect_routes(body, out),
+            TView::Component { children, .. } => {
+                for (_, body) in children {
+                    collect_routes(body, out);
+                }
             }
-            TView::Text(_) | TView::Slot => {}
+            TView::Text(_) | TView::Slot(_) => {}
         }
     }
 }

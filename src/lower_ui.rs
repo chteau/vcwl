@@ -86,8 +86,8 @@ pub struct Scope {
     pub bound: HashMap<LocalId, u32>,
     pub key_field: Option<u32>,
     pub fns: ScopeFns,
-    /// Component scopes with a `slot`: fields holding its anchor node and that node's parent.
-    pub slot: Option<(u32, u32)>,
+    /// Component scopes' slots: name, then fields holding its anchor node and that node's parent.
+    pub slots: Vec<(String, u32, u32)>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -276,10 +276,10 @@ impl Lower<'_> {
                 events.push((f, s, sig));
             }
             self.u().scopes[si].comp_fields = CompFields { dead, events };
-            if self.u().sigs[ci].has_slot {
+            for name in self.u().sigs[ci].slots.clone() {
                 let anchor = self.add_field(si, VT::I32);
                 let parent = self.add_field(si, VT::I32);
-                self.u().scopes[si].slot = Some((anchor, parent));
+                self.u().scopes[si].slots.push((name, anchor, parent));
             }
         }
         for ci in 0..n {
@@ -334,7 +334,7 @@ impl Lower<'_> {
             bound: HashMap::new(),
             key_field: None,
             fns,
-            slot: None,
+            slots: Vec::new(),
         });
         u.scopes.len() - 1
     }
@@ -677,9 +677,11 @@ impl Lower<'_> {
                     props
                         .iter()
                         .fold(BIT_ROUTE, |acc, p| acc | self.deps(cx, p))
-                        | self.views_deps(cx, children)
+                        | children
+                            .iter()
+                            .fold(0, |acc, (_, c)| acc | self.views_deps(cx, c))
                 }
-                TView::Slot => 0,
+                TView::Slot(_) => 0,
             };
         }
         m
@@ -1390,14 +1392,18 @@ impl Lower<'_> {
                 children,
                 ..
             } => self.view_component(g, comp, *child, props, events, children, pos),
-            TView::Slot => self.view_slot(g, pos),
+            TView::Slot(name) => self.view_slot(g, name, pos),
         }
     }
 
     /// Marks where the component's `slot` content goes; the user of the component mounts it.
-    fn view_slot(&mut self, g: &mut Gen, pos: Pos) {
+    fn view_slot(&mut self, g: &mut Gen, name: &str, pos: Pos) {
         let ty = self.scope_ty(g.si);
-        let (anchor_f, parent_f) = self.u().scopes[g.si].slot.expect("slot fields reserved");
+        let (_, anchor_f, parent_f) = *self.u().scopes[g.si]
+            .slots
+            .iter()
+            .find(|s| s.0 == name)
+            .expect("slot fields reserved");
         let nn = self.helper_new_node();
         let a = g.mount.temp(VT::I32);
         g.mb.push(set(a, IExpr::Call(nn, vec![])));
@@ -2844,7 +2850,7 @@ impl Lower<'_> {
         child: usize,
         props: &[TExpr],
         events: &[(usize, usize)],
-        children: &[TView],
+        children: &[(String, Vec<TView>)],
         pos: Pos,
     ) {
         let si = g.si;
@@ -2915,9 +2921,15 @@ impl Lower<'_> {
             FuncRef::Local(cfns.mount),
             vec![get(c), pn, an],
         ));
-        // Slot content: a fragment of this scope, mounted at the child's slot anchor.
-        let slot = match self.u().scopes[cs].slot {
-            Some((anchor_f, parent_f)) if !children.is_empty() => {
+        // Slot content: a fragment of this scope per slot, mounted at the child's slot anchor.
+        let mut fills = Vec::new();
+        for (name, children) in children {
+            let (_, anchor_f, parent_f) = *self.u().scopes[cs]
+                .slots
+                .iter()
+                .find(|s| s.0 == *name)
+                .expect("checked slot");
+            {
                 let ci = self.u().scopes[si].comp;
                 let bs = self.new_scope(ci, Some(si));
                 let bty = self.scope_ty(bs);
@@ -2958,10 +2970,9 @@ impl Lower<'_> {
                     FuncRef::Local(bfns.destroy),
                     vec![frag, IExpr::I32(0)],
                 ));
-                Some(bs)
+                fills.push((bs, children));
             }
-            _ => None,
-        };
+        }
         let mut ub = vec![
             set(
                 cl,
@@ -2990,7 +3001,7 @@ impl Lower<'_> {
         if matches!(pos, Pos::Root) {
             g.roots.push(Root::Child { field, comp: child });
         }
-        if let Some(bs) = slot {
+        for (bs, children) in fills {
             self.gen_scope(bs, comp, children);
         }
     }

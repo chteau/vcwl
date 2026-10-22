@@ -204,8 +204,34 @@ Card(title: "Inbox") {
 }
 ```
 
-`slot` may appear once, inside an element, and not inside `if`, `match`, `for`, `routes` or
-another component's content. Passing content to a component without a slot is a compile error.
+Named slots take several pieces of content. `slot(name)` marks where each goes; at the use site,
+`slot(name) { ... }` blocks fill them, in any order, and the remaining content goes to the
+unnamed `slot`. A slot that is not filled stays empty:
+
+```vcwl
+component Panel {
+    section {
+        header {
+            slot(header)
+        }
+        slot
+        footer {
+            slot(footer)
+        }
+    }
+}
+
+Panel {
+    slot(header) {
+        heading("Inbox", level: 3)
+    }
+    text("{unread} unread")
+}
+```
+
+Slots go inside an element, not inside `if`, `match`, `for`, `routes` or another component's
+content; each name (and the unnamed slot) at most once. Passing content for a slot the component
+does not have, or filling one twice, is a compile error.
 
 ### Views
 

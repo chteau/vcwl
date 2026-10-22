@@ -15,6 +15,18 @@ component Card(title: String) {
     }
 }
 
+component Panel {
+    section {
+        header {
+            slot(header)
+        }
+        slot
+        footer {
+            slot(footer)
+        }
+    }
+}
+
 component App {
     state n: Int = 0
     state open: Bool = true
@@ -43,6 +55,20 @@ component App {
         button("Reverse") {
             on click {
                 items = [items[1], items[0]]
+            }
+        }
+        Panel {
+            text("body {n}")
+            slot(footer) {
+                text("foot {n}")
+            }
+            slot(header) {
+                heading("Head", level: 3)
+            }
+        }
+        Panel {
+            slot(header) {
+                text("only head")
             }
         }
     }

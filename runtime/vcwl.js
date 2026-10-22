@@ -757,13 +757,32 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
 
   // Shared styles come from one constructed sheet when the browser has them, so mirror
   // elements only carry their position inline.
-  let boxClass = "";
+  let boxClass = "", sheet = null;
   try {
-    const sheet = new win.CSSStyleSheet();
+    sheet = new win.CSSStyleSheet();
     sheet.replaceSync(`.vcwl-m{${BOX}}`);
     doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
     boxClass = "vcwl-m";
-  } catch {}
+  } catch {
+    sheet = null;
+  }
+  // Fonts are shared by many elements: one rule each is parsed once, not once per element.
+  const fontClasses = new Map();
+  const setFont = (el, v) => {
+    let c = v && sheet ? fontClasses.get(v) : "";
+    if (c === undefined) {
+      c = "vcwl-f" + fontClasses.size;
+      try {
+        sheet.insertRule(`.${c}{font:${v}}`, sheet.cssRules.length);
+      } catch {
+        c = null; // not a single valid rule: set inline
+      }
+      fontClasses.set(v, c);
+    }
+    el.className = c ? `${boxClass} ${c}` : boxClass;
+    if (c === null || (v && !sheet)) el.style.font = v;
+    else if (el.style.font) el.style.font = "";
+  };
   const protos = new Map();
 
   function mirrorElement(tag) {
@@ -786,7 +805,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     for (const k of Object.keys(m.attrs)) {
       if (k in attrs) continue;
       if (k === "text") el.textContent = "";
-      else if (k === "font") el.style.font = "";
+      else if (k === "font") setFont(el, "");
       else el.removeAttribute(k === "alt" ? "aria-label" : k);
     }
     for (const [k, v] of Object.entries(attrs)) {
@@ -796,7 +815,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
           el.textContent = v;
           break;
         case "font":
-          el.style.font = v;
+          setFont(el, v);
           break;
         case "label":
           el.textContent = v;

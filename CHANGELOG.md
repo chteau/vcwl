@@ -4,6 +4,14 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 12 — named slots, a cheaper mirror, more 3D
+
+- Named slots: `slot(name)` in a component's view, `slot(name) { ... }` at the use site; other
+  content still goes to the unnamed `slot`.
+- Accessibility mirror: fonts of mirror elements come from one shared rule per font instead of an
+  inline `font` on each element (mirror script time when creating 1000 rows 4.5 → 3.3 ms, median
+  of 20 rounds; browser style and layout of the mirror unchanged).
+
 ### Milestone 11 — built-in 3D
 
 - `scene`, `mesh`, `group` and `light` elements ([ADR 15](docs/adr/0015-built-in-3d.md)): boxes,

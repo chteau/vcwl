@@ -1,0 +1,16 @@
+// error: component `Panel` has no slot `heder`
+app "T"
+
+component Panel {
+    column {
+        slot(header)
+    }
+}
+
+component App {
+    Panel {
+        slot(heder) {
+            text("x")
+        }
+    }
+}

@@ -47,6 +47,15 @@ test("removing the component releases the content's handlers", async () => {
   assert.equal(await page.evaluate(() => window.vcwl.liveListeners()), before - 2);
 });
 
+test("named slots place each block where the component puts it, following the user's state", async () => {
+  const t = await tree(app.page);
+  const parts = (s) => ["header", "footer"].map((tag) => t.text(s.children.find((c) => c.tag === tag))).concat(t.text(s));
+  const [a, b] = t.all("section").map(parts);
+  // n is 1 after the earlier test's click.
+  assert.deepEqual(a, ["Head", "foot 1", "Headbody 1foot 1"]);
+  assert.deepEqual(b, ["only head", "", "only head"]);
+});
+
 test("no console errors", () => {
   assert.deepEqual(app.errors, []);
 });

@@ -1,0 +1,13 @@
+// error: slot `header` is declared twice
+app "T"
+
+component Panel {
+    column {
+        slot(header)
+        slot(header)
+    }
+}
+
+component App {
+    Panel
+}

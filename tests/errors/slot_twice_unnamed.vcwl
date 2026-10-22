@@ -1,4 +1,4 @@
-// error: a component can have only one `slot`
+// error: a component can have only one unnamed `slot`
 app "T"
 
 component Card {

@@ -1,0 +1,19 @@
+// error: slot `header` is filled twice
+app "T"
+
+component Panel {
+    column {
+        slot(header)
+    }
+}
+
+component App {
+    Panel {
+        slot(header) {
+            text("a")
+        }
+        slot(header) {
+            text("b")
+        }
+    }
+}
