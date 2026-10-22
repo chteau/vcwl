@@ -22,7 +22,8 @@ packages (the registry is the `registry` branch of a git repository):
   remove <name>          remove a dependency
   install                install registry dependencies into vcwl_packages/ (writes vcwl.lock)
   publish [--dry-run]    publish this package to the registry
-  search [word]          list registry packages";
+  search [word]          list registry packages
+  audit                  security review of the installed packages";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -42,7 +43,7 @@ fn main() -> ExitCode {
         "serve" => vcwl::server::run(rest),
         "test" => vcwl::testrunner::run(rest),
         "fmt" => vcwl::fmt::run(rest),
-        "install" | "add" | "remove" | "publish" | "search" => vcwl::pkg::run(cmd, rest),
+        "install" | "add" | "remove" | "publish" | "search" | "audit" => vcwl::pkg::run(cmd, rest),
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             Ok(())

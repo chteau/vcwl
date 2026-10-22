@@ -43,6 +43,10 @@ enforce.
   client module contains no server code. This isolates server code from the server process; it
   does not make the functions themselves correct, and they have no authentication built in: any
   visitor of the site can call them with any arguments of the right types.
+- Registry packages are reviewed before installation (environment variables, store keys outside
+  the package's prefix, active `public/` files, symbolic links block installation until the app
+  trusts that version; paths leaving the package are refused). See
+  [packages](packages.md#security-review) for what the review does and does not cover.
 
 ## Not enforced or not yet implemented
 

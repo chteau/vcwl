@@ -321,6 +321,12 @@ impl Registry {
                 .ok_or("bad git output")?;
             let body = &data[nl + 1..nl + 1 + size];
             at = nl + 2 + size;
+            // A registry branch is not trusted to keep files inside the package.
+            if rel.split('/').any(|p| {
+                p.is_empty() || p == ".." || p == "." || p.contains('\\') || p.contains(':')
+            }) {
+                return Err(format!("{name} {v}: refusing the file path `{rel}`"));
+            }
             let path = dest.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
             std::fs::write(&path, body).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -398,7 +404,7 @@ fn resolve(
         for (dep, r) in registry_deps(&manifest)? {
             queue.push((dep, r, format!("{name} {v}")));
         }
-        chosen.insert(name.clone(), (v, format!("{by}")));
+        chosen.insert(name.clone(), (v, by));
     }
     Ok(chosen.into_iter().map(|(k, (v, _))| (k, v)).collect())
 }
@@ -421,6 +427,8 @@ pub fn install(root: &Path, quiet: bool) -> Result<BTreeMap<String, Version>, St
             reg.url
         ));
     }
+    let trusted: BTreeMap<String, String> =
+        manifest_table(&manifest, "trust").into_iter().collect();
     let picked = resolve(&reg, deps, &read_lock(root))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for (name, v) in &picked {
@@ -429,10 +437,35 @@ pub fn install(root: &Path, quiet: bool) -> Result<BTreeMap<String, Version>, St
         if std::fs::read_to_string(&stamp).ok().as_deref() == Some(&v.to_string()) {
             continue;
         }
-        reg.extract(name, *v, &dest)?;
+        // Unpacked beside the others and reviewed before it takes its place.
+        let staging = dir.join(format!(".{name}.review"));
+        reg.extract(name, *v, &staging)?;
+        let findings = crate::review::review(name, &staging);
+        let dangers = findings
+            .iter()
+            .any(|f| f.level == crate::review::Level::Danger);
+        if dangers && trusted.get(name) != Some(&v.to_string()) {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!(
+                "refusing to install {name} {v}: the security review found\n{}\nRead the package (`git show {BRANCH}:packages/{name}/{v}/` in the registry). To install it anyway,\nadd to vcwl.toml:\n\n[trust]\n{name} = \"{v}\"\n",
+                crate::review::report(name, &v.to_string(), &findings).trim_end()
+            ));
+        }
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::rename(&staging, &dest).map_err(|e| format!("{}: {e}", dest.display()))?;
         std::fs::write(&stamp, v.to_string()).map_err(|e| e.to_string())?;
         if !quiet {
             println!("  installed {name} {v}");
+            if !findings.is_empty() {
+                print!(
+                    "{}",
+                    crate::review::report(name, &v.to_string(), &findings).replacen(
+                        &format!("  {name} {v}:\n"),
+                        "",
+                        1
+                    )
+                );
+            }
         }
     }
     // Packages no longer needed.
@@ -669,8 +702,18 @@ pub fn publish(root: &Path, dry_run: bool) -> Result<String, String> {
     })();
     let _ = std::fs::remove_file(&index);
     result?;
+    // What installers' reviews will say about it.
+    let findings = crate::review::review(&name, root);
     Ok(format!(
-        "published {name} {version} to {} ({} files)",
+        "{}published {name} {version} to {} ({} files)",
+        if findings.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "security review (shown to everyone who installs it):\n{}",
+                crate::review::report(&name, &version.to_string(), &findings)
+            )
+        },
         manifest_value(&manifest, "registry").unwrap_or_else(|| reg.url.clone()),
         files.len()
     ))
@@ -753,6 +796,34 @@ pub fn run(cmd: &str, rest: &[String]) -> Result<(), String> {
             let (root, _) = project_root()?;
             println!("{}", publish(&root, rest.iter().any(|a| a == "--dry-run"))?);
             Ok(())
+        }
+        "audit" => {
+            let (root, manifest) = project_root()?;
+            let trusted: BTreeMap<String, String> =
+                manifest_table(&manifest, "trust").into_iter().collect();
+            let mut blocked = Vec::new();
+            for (name, v) in read_lock(&root) {
+                let findings = crate::review::review(&name, &root.join(PACKAGES_DIR).join(&name));
+                print!(
+                    "{}",
+                    crate::review::report(&name, &v.to_string(), &findings)
+                );
+                if findings
+                    .iter()
+                    .any(|f| f.level == crate::review::Level::Danger)
+                    && trusted.get(&name) != Some(&v.to_string())
+                {
+                    blocked.push(name);
+                }
+            }
+            if blocked.is_empty() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "untrusted packages with dangers: {}",
+                    blocked.join(", ")
+                ))
+            }
         }
         "search" => {
             let (root, manifest) = project_root()?;

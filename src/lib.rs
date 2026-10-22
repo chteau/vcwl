@@ -19,6 +19,7 @@ pub mod opt;
 pub mod parser;
 pub mod pkg;
 pub mod project;
+pub mod review;
 pub mod server;
 pub mod sha256;
 pub mod style;

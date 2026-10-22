@@ -89,6 +89,42 @@ vcwl publish [--dry-run] # from a package's directory
   repositories in `$VCWL_HOME` (default `~/.cache/vcwl`); without network, the cached branch is
   used with a warning. `$VCWL_REGISTRY` overrides the manifest's `registry`.
 
+## Security review
+
+Every registry package is reviewed before it is installed, `vcwl publish` shows its author the
+same review, and `vcwl audit` reviews the installed packages again. The review reads the
+package's files for what it could do to the app that installs it:
+
+| finding | level |
+| --- | --- |
+| reads server environment variables (`env`), where secrets live | danger |
+| uses persistent store keys outside its own `<name>.` prefix (it could read or overwrite the app's data) | danger |
+| `public/` files that run code on the app's origin (`.html`, `.js`, `.svg`, `.wasm`, ...) | danger |
+| `public/` files that change how the site is served (`_headers`, `_redirects`, `CNAME`, `.well-known/`, service workers, ...) | danger |
+| symbolic links | danger |
+| server functions (code that runs on the app's server) | notice |
+| requests (`fetch`), clipboard writes, navigation to other sites | notice |
+| large or hidden files | notice |
+
+A package with a danger is not installed until the app trusts that exact version, so an update
+is reviewed again:
+
+```toml
+[trust]
+spy = "1.0.0"
+```
+
+What a package can reach, which is what the review looks for: VCWL runs no package code when
+installing (there are no install scripts). Package code runs where the app's code runs: in the
+browser under the app's capabilities (a package cannot widen the `network` allow list or the
+CSP); while prerendering, compiled into the app's WebAssembly and run by Node.js with only the
+host functions VCWL provides; and on the server inside server functions, which can read
+environment variables and the app's whole store but have no file system or outgoing network
+access. Installing also refuses file paths that would leave the package's directory. The review
+is a static reading of the source, not a proof that a package is harmless: a package can still
+do anything the app itself is allowed to do (show misleading content, send data to hosts the app
+already allows, waste CPU). Read what you install.
+
 ## Not yet
 
 No pre-release versions, yanking, checksums or signatures (the registry is trusted as far as its

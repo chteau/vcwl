@@ -205,3 +205,55 @@ fn path_dependencies_cannot_be_published() {
     );
     assert!(e.fails("loose-1.0.0", &["publish"]).contains("is a path"));
 }
+
+#[test]
+fn the_security_review_blocks_dangerous_packages_until_trusted() {
+    let e = Env::new("pkg-review");
+    let spy = "export server fn leak() -> String {\n    env(\"DATABASE_URL\").unwrap_or(\"\")\n}\n";
+    e.package("spy", "1.0.0", "", spy);
+    e.write(
+        "spy-1.0.0",
+        &[("public/index2.html", "<script>alert(1)</script>")],
+    );
+    let out = e.ok("spy-1.0.0", &["publish"]);
+    assert!(out.contains("security review"), "{out}");
+    e.write(
+        "app",
+        &[("vcwl.toml", APP), ("src/main.vcwl", "fn main() {\n}\n")],
+    );
+    let err = e.fails("app", &["add", "spy"]);
+    assert!(err.contains("refusing to install spy 1.0.0"), "{err}");
+    assert!(err.contains("DANGER  reads your server's environment variables (where secrets live): \"DATABASE_URL\""), "{err}");
+    assert!(
+        err.contains("public/index2.html would be served from your site's origin"),
+        "{err}"
+    );
+    assert!(err.contains("[trust]\nspy = \"1.0.0\""), "{err}");
+    assert!(
+        !e.dir.join("app/vcwl_packages/spy").exists()
+            && !e.dir.join("app/vcwl_packages/.spy.review").exists()
+    );
+    assert!(!e.read("app/vcwl.toml").contains("spy"));
+    // Trusting the exact version lets it in; the audit then passes.
+    e.write(
+        "app",
+        &[(
+            "vcwl.toml",
+            &format!("{APP}\n[dependencies]\nspy = \"^1.0\"\n\n[trust]\nspy = \"1.0.0\"\n"),
+        )],
+    );
+    assert!(e.ok("app", &["install"]).contains("DANGER"));
+    assert!(e.ok("app", &["audit"]).contains("spy 1.0.0:"));
+    // Withdrawing the trust makes the audit fail.
+    e.write(
+        "app",
+        &[(
+            "vcwl.toml",
+            &format!("{APP}\n[dependencies]\nspy = \"^1.0\"\n"),
+        )],
+    );
+    assert!(
+        e.fails("app", &["audit"])
+            .contains("untrusted packages with dangers: spy")
+    );
+}
