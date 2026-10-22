@@ -688,6 +688,12 @@ fn defaults(n: &Node, s: &mut Style) {
             InlineBlock
         }
         "img" => InlineBlock,
+        // A 3D scene is a box of the page; its content is drawn by the host (`Engine::scene`).
+        "scene" => {
+            s.height = px(300.0);
+            Block
+        }
+        "mesh" | "light" | "group" => None,
         "hr" => {
             s.border[0] = Border {
                 width: 1.0,

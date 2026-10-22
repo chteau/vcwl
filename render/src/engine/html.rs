@@ -14,7 +14,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 .v-col{display:flex;flex-direction:column}.v-row{display:flex}\
 .v-stack{display:grid}.v-stack>*{grid-area:1/1}.v-grid{display:grid}\
 .v-scroll{overflow:auto}.v-list{margin:0;padding-left:1.25em}\
-.v-check{display:inline-flex;gap:.5em;align-items:center;cursor:pointer}";
+.v-check{display:inline-flex;gap:.5em;align-items:center;cursor:pointer}\
+.v-scene{display:block;height:300px;background:#111}";
 
 /// Attributes copied besides `aria-*`.
 const ATTRS: &[&str] = &[
@@ -96,7 +97,9 @@ impl Engine {
             Kind::Text => return escape(out, &n.text, false),
             Kind::Element => {}
         }
-        let tag = if is_name(&n.tag, "") {
+        // A 3D scene is drawn by the host: the static page shows a placeholder of its size.
+        let scene = n.tag == "scene";
+        let tag = if is_name(&n.tag, "") && !scene {
             n.tag.as_str()
         } else {
             "div"
@@ -104,6 +107,9 @@ impl Engine {
         out.push('<');
         out.push_str(tag);
         let mut classes = n.classes.clone();
+        if scene {
+            classes.insert(0, "v-scene".into());
+        }
         let mut bound = String::new();
         for (k, v) in &n.attrs {
             if let Some((prop, unit)) = k.strip_prefix("style:").and_then(|r| r.split_once(':')) {
@@ -165,7 +171,7 @@ impl Engine {
         }
         if tag == "textarea" {
             escape(out, &n.value, false);
-        } else {
+        } else if !scene {
             for &c in &n.children {
                 self.node_html(c, root, out, css);
             }

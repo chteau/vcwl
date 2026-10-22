@@ -26,6 +26,8 @@ pub mod op {
     pub const GRADIENT: u32 = 11;
     pub const LINE: u32 = 12;
     pub const INSET_SHADOW: u32 = 13;
+    /// A 3D scene: node id, content rectangle, corner radii.
+    pub const SCENE: u32 = 14;
 }
 
 /// A painted box, in viewport coordinates, clipped by its scroll ancestors.
@@ -309,6 +311,19 @@ impl<'a> Painter<'a> {
             "input" | "textarea" => self.field(id, n, b),
             "select" => self.select(n, b),
             "img" => self.image(n, b),
+            "scene" => {
+                let lay = &n.lay;
+                let c = Rect {
+                    x: b.x + lay.border[3] + lay.padding[3],
+                    y: b.y + lay.border[0] + lay.padding[0],
+                    ..lay.content_box()
+                };
+                let radii = n.style.radius.map(|v| (v - lay.border[0]).max(0.0));
+                self.out.push(op::SCENE);
+                self.out.push(id);
+                self.rect(c);
+                self.out.extend(radii.map(f32::to_bits));
+            }
             _ => {}
         }
         for f in &lay.frags {

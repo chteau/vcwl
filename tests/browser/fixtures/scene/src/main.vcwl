@@ -1,0 +1,45 @@
+// Browser-test fixture: a 3D scene with lights, groups, state-bound meshes and clicks.
+app "Scene"
+
+component App {
+    state hits: Int = 0
+    state wire: Bool = false
+    state x: Float = -1.6
+
+    column(gap: 8px) {
+        style {
+            padding: 16px
+        }
+        paragraph("Hits: {hits}")
+        scene(label: "A box, a sphere and a ring", camera: vec3(0.0, 1.5, 5.0), background: "#15171c", orbit: true) {
+            style {
+                height: 360px
+                radius: 12px
+            }
+            light(kind: "ambient", intensity: 0.3)
+            light(position: vec3(3.0, 5.0, 4.0), intensity: 0.9)
+            mesh(shape: "plane", size: vec3(8.0, 1.0, 8.0), position: vec3(0.0, -0.75, 0.0), color: "#2a2f3a")
+            mesh(shape: "box", position: vec3(x, 0.0, 0.0), rotation: vec3(20.0, 30.0, 0.0), color: "#d16a47", wireframe: wire) {
+                on click {
+                    hits += 1
+                }
+            }
+            mesh(shape: "sphere", position: vec3(0.0, 0.0, 0.0), color: "#4f8cff")
+            group(position: vec3(1.6, 0.0, 0.0), spin: vec3(0.0, 90.0, 0.0)) {
+                mesh(shape: "torus", size: vec3(1.4, 1.4, 1.4), rotation: vec3(90.0, 0.0, 0.0), color: "#b6ff6c")
+            }
+        }
+        row(gap: 8px) {
+            button("Wireframe") {
+                on click {
+                    wire = !wire
+                }
+            }
+            button("Move") {
+                on click {
+                    x = x + 0.4
+                }
+            }
+        }
+    }
+}

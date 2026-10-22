@@ -1630,6 +1630,43 @@ impl Engine {
 }
 
 impl Engine {
+    /// The content of 3D scene `id` for the host to draw: the scene's attributes, then each
+    /// `group`, `mesh` and `light` in tree order as kind (0 group, 1 mesh, 2 light), index of
+    /// its parent group in this list (-1: the scene), node id, 1 if it listens for clicks, and
+    /// its attributes.
+    pub fn scene(&self, id: Id) -> Vec<u8> {
+        let mut w = Writer(Vec::new());
+        let Some(n) = self.tree.get(id).filter(|n| n.is("scene")) else {
+            return w.0;
+        };
+        let attrs = |w: &mut Writer, n: &crate::dom::Node| {
+            w.int(n.attrs.len() as i32);
+            for (k, v) in &n.attrs {
+                w.str(k).str(v);
+            }
+        };
+        attrs(&mut w, n);
+        let mut count = 0;
+        let mut stack: Vec<(Id, i32)> = n.children.iter().rev().map(|&c| (c, -1)).collect();
+        while let Some((c, parent)) = stack.pop() {
+            let n = self.tree.n(c);
+            let kind = match n.tag.as_str() {
+                "group" => 0,
+                "mesh" => 1,
+                "light" => 2,
+                _ => continue,
+            };
+            w.int(kind).int(parent).int(c as i32);
+            w.int(n.listeners.iter().any(|l| l.event == "click") as i32);
+            attrs(&mut w, n);
+            if kind == 0 {
+                stack.extend(n.children.iter().rev().map(|&k| (k, count)));
+            }
+            count += 1;
+        }
+        w.0
+    }
+
     /// The element under a viewport point, as the pointer would find it, or -1 (dev tools).
     pub fn node_at(&self, x: f32, y: f32) -> i64 {
         self.hit(x, y).map_or(-1, |id| id as i64)
@@ -2090,6 +2127,67 @@ mod tests {
             &[out::EMIT.to_le_bytes(), 1i32.to_le_bytes()].concat()[..]
         );
         assert!(e.poll().is_empty());
+    }
+
+    #[test]
+    fn scenes_paint_a_box_and_describe_their_content() {
+        let mut b = Buf::default();
+        b.create(1, "scene")
+            .attr(1, "aria-label", "Cube")
+            .attr(1, "camera", "0 1 5")
+            .insert(0, 1, 0);
+        b.create(2, "group")
+            .attr(2, "position", "1 0 0")
+            .insert(1, 2, 0);
+        b.create(3, "mesh")
+            .attr(3, "shape", "box")
+            .listen(3, 7, "click")
+            .insert(2, 3, 0);
+        b.create(4, "light")
+            .attr(4, "kind", "ambient")
+            .insert(1, 4, 0);
+        b.create(5, "div").class(5, "after").insert(0, 5, 0);
+        let mut e = Engine::new(".after{height:10px}", 800.0, 600.0);
+        e.apply(&b.0).unwrap();
+        let list = e.frame(&mut Mono, 0.0).unwrap();
+        let at = list
+            .iter()
+            .position(|&w| w == paint::op::SCENE)
+            .expect("scene painted");
+        assert_eq!(list[at + 1], 1);
+        let f = |i: usize| f32::from_bits(list[at + i]);
+        assert_eq!((f(2), f(3), f(4), f(5)), (0.0, 0.0, 800.0, 300.0));
+        assert_eq!(e.abs(5).y, 300.0, "3D content takes no space");
+        let d = e.scene(1);
+        let rd = |q: &mut usize| {
+            let v = i32::from_le_bytes(d[*q..*q + 4].try_into().unwrap());
+            *q += 4;
+            v
+        };
+        let rs = |q: &mut usize| {
+            let n = rd(q) as usize;
+            let s = String::from_utf8(d[*q..*q + n].to_vec()).unwrap();
+            *q += (n + 3) & !3;
+            s
+        };
+        let mut q = 0;
+        let attrs = |q: &mut usize| -> Vec<String> {
+            (0..rd(q)).map(|_| format!("{}={}", rs(q), rs(q))).collect()
+        };
+        assert_eq!(attrs(&mut q), ["aria-label=Cube", "camera=0 1 5"]);
+        let mut items = Vec::new();
+        while q < d.len() {
+            let head = [rd(&mut q), rd(&mut q), rd(&mut q), rd(&mut q)];
+            items.push((head, attrs(&mut q)));
+        }
+        assert_eq!(
+            items,
+            vec![
+                ([0, -1, 2, 0], vec!["position=1 0 0".to_string()]),
+                ([1, 0, 3, 1], vec!["shape=box".to_string()]),
+                ([2, -1, 4, 0], vec!["kind=ambient".to_string()]),
+            ]
+        );
     }
 
     #[test]

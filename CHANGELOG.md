@@ -4,6 +4,15 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 11 — built-in 3D
+
+- `scene`, `mesh`, `group` and `light` elements ([ADR 15](docs/adr/0015-built-in-3d.md)): boxes,
+  spheres, planes, cylinders, cones and tori with colors, shininess and wireframe; directional,
+  point and ambient lights; nested groups; `spin` animation (off with reduced motion); orbiting
+  camera; `on click` on meshes via a GPU pick pass; arguments bound to state. Drawn by
+  `scene3d.js` with WebGL, loaded only when an app shows a scene. `Vec3` and `vec3()` in the
+  prelude.
+
 ### Milestone 10 — real URLs, dev tools and server functions
 
 - `routing = "path"` ([ADR 13](docs/adr/0013-path-routing.md)): History API navigation, one page

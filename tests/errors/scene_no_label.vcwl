@@ -1,0 +1,8 @@
+// error: `scene` requires a `label` argument
+app "T"
+
+component App {
+    scene() {
+        mesh(shape: "box")
+    }
+}

@@ -525,3 +525,20 @@ fn server_save_text(key: String, value: String) {
 fn server_remove(key: String) {
     __store_delete(key)
 }
+
+// ----- 3D -----
+
+/// A point or direction in 3D (scene, mesh, light and group arguments).
+export struct Vec3 {
+    x: Float,
+    y: Float,
+    z: Float,
+}
+
+export fn vec3(x: Float, y: Float, z: Float) -> Vec3 {
+    Vec3 { x: x, y: y, z: z }
+}
+
+fn vec3_text(v: Vec3) -> String {
+    "{v.x} {v.y} {v.z}"
+}

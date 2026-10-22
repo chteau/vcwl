@@ -113,7 +113,7 @@ const FETCH_OK = 0, FETCH_NETWORK = 1, FETCH_TIMEOUT = 2, FETCH_STATUS = 3, FETC
 // Work items produced by the renderer (`render/src/engine.rs`, `out`).
 export const OUT = { EMIT: 1, TITLE: 2, NAVIGATE: 3, OPEN: 4, WARN: 5, FETCH: 6, LOAD_IMAGE: 7, CURSOR: 8, COPY: 9 };
 // Display list opcodes (`render/src/paint.rs`, `op`).
-const PAINT = { FILL: 1, STROKE: 2, TEXT: 3, FONT: 4, CLIP: 5, RESTORE: 6, ALPHA: 7, TRANSFORM: 8, IMAGE: 9, SHADOW: 10, GRADIENT: 11, LINE: 12, INSET_SHADOW: 13 };
+const PAINT = { FILL: 1, STROKE: 2, TEXT: 3, FONT: 4, CLIP: 5, RESTORE: 6, ALPHA: 7, TRANSFORM: 8, IMAGE: 9, SHADOW: 10, GRADIENT: 11, LINE: 12, INSET_SHADOW: 13, SCENE: 14 };
 const SAFE_URL = /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
 
 /** Rejects `javascript:` and other script-capable URLs. */
@@ -444,6 +444,43 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     }
   };
 
+  // ----- 3D scenes (runtime/scene3d.js, loaded when a page first paints one) -----
+
+  let scenes3d, sceneLoop = 0, sceneRects = [];
+  const sceneData = new Map();
+  /** A scene's description from the renderer, parsed again only when it changed. */
+  function sceneOf(id) {
+    const n = r.scene(id);
+    const bytes = new Uint8Array(r.memory.buffer, r.out_ptr(), n);
+    let d = sceneData.get(id);
+    if (!d) sceneData.set(id, (d = { bytes: null, scene: null, view: { yaw: 0, pitch: 0 }, start: win.performance.now() }));
+    if (!d.bytes || d.bytes.length !== n || d.bytes.some((v, i) => v !== bytes[i])) {
+      d.bytes = bytes.slice();
+      const b = reader({ buffer: d.bytes.buffer }, 0, n);
+      const attrs = () => {
+        const o = {};
+        for (let k = b.int(); k > 0; k--) o[b.str()] = b.str();
+        return o;
+      };
+      const scene = { attrs: attrs(), items: [] };
+      while (b.more()) scene.items.push({ kind: b.int(), parent: b.int(), id: b.int(), clickable: b.int() === 1, attrs: attrs() });
+      d.scene = scene;
+    }
+    return d;
+  }
+  function loadScenes() {
+    if (scenes3d !== undefined) return;
+    scenes3d = null;
+    import(new URL("scene3d.js", import.meta.url).href)
+      .then((m) => (scenes3d = m.createScenes(doc) ?? false))
+      .catch((e) => {
+        scenes3d = false;
+        console.warn("[vcwl] 3D scenes are not available: " + (e.message ?? e));
+      })
+      .finally(() => !host.dead && replay());
+  }
+  const sceneTime = (d) => (win.performance.now() - d.start) / 1000;
+
   let last = new Uint8Array(0);
   function replay() {
     const mem = { buffer: last.buffer };
@@ -467,6 +504,8 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     ctx.textBaseline = "alphabetic";
     ctx.lineCap = "butt";
     const r4 = () => [b.f32(), b.f32(), b.f32(), b.f32()];
+    let animate = false;
+    sceneRects = [];
     // Canvas state setters parse their value each time: skip the ones that would not change it.
     // `restore()` brings back an earlier state, so the cache is dropped there.
     let fill = 0xffffffff, font, spacing = "0px";
@@ -598,9 +637,41 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
           ctx.stroke();
           break;
         }
+        case PAINT.SCENE: {
+          const id = b.u32(), [x0, y0, w, h] = r4(), radii = r4();
+          if (w <= 0 || h <= 0) break;
+          sceneRects.push({ id, x: x0, y: y0, w, h });
+          const d = sceneOf(id);
+          ctx.save();
+          shape(ctx, x0, y0, w, h, radii);
+          ctx.clip();
+          if (scenes3d) {
+            ctx.drawImage(scenes3d.draw(d.scene, d.view, Math.round(w * dpr), Math.round(h * dpr), sceneTime(d)), x0, y0, w, h);
+            animate ||= scenes3d.animated(d.scene);
+          } else {
+            // Until the 3D module is loaded, or without WebGL: the background and the label.
+            ctx.fillStyle = "#111";
+            ctx.fillRect(x0, y0, w, h);
+            if (scenes3d === false) {
+              ctx.fillStyle = "#bbb";
+              ctx.font = "14px system-ui, sans-serif";
+              ctx.fillText(d.scene.attrs["aria-label"] ?? "3D scene", x0 + 12, y0 + 24);
+            }
+            loadScenes();
+          }
+          ctx.restore();
+          fill = font = spacing = undefined;
+          break;
+        }
         default:
           throw new Error("corrupt display list");
       }
+    }
+    if (animate && !sceneLoop) {
+      sceneLoop = win.requestAnimationFrame(() => {
+        sceneLoop = 0;
+        if (!host.dead) replay();
+      });
     }
     if (host.error) drawError(ctx, win.innerWidth, win.innerHeight, host.error);
   }
@@ -910,13 +981,41 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   // ----- input -----
 
   const pos = (e) => [e.clientX, e.clientY];
+  // A press on a 3D scene: dragging turns an `orbit` scene's camera (the renderer does not see
+  // it); a click without dragging picks the mesh under the pointer and clicks it.
+  let press = null;
+  const sceneAt = (x, y) => sceneRects.findLast((s) => x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h);
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture?.(e.pointerId);
     e.preventDefault();
+    const s = sceneAt(e.clientX, e.clientY), d = s && sceneData.get(s.id);
+    press = d ? { s, d, x: e.clientX, y: e.clientY, yaw: d.view.yaw, pitch: d.view.pitch, moved: false, orbit: d.scene.attrs.orbit === "true" } : null;
+    if (press?.orbit) return;
     input(() => r.pointer_down(...pos(e), e.pointerType === "touch" ? 1 : 0, win.performance.now()));
   });
-  canvas.addEventListener("pointermove", (e) => input(() => r.pointer_move(...pos(e))));
-  canvas.addEventListener("pointerup", (e) => input(() => r.pointer_up(...pos(e), win.performance.now())));
+  canvas.addEventListener("pointermove", (e) => {
+    if (press) {
+      const dx = e.clientX - press.x, dy = e.clientY - press.y;
+      press.moved ||= Math.hypot(dx, dy) > 4;
+      if (press.orbit) {
+        press.d.view.yaw = press.yaw - dx * 0.01;
+        press.d.view.pitch = press.pitch + dy * 0.01;
+        replay();
+        return;
+      }
+    }
+    input(() => r.pointer_move(...pos(e)));
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    const p = press;
+    press = null;
+    if (p && !p.moved && scenes3d) {
+      const id = scenes3d.pick(p.d.scene, p.d.view, Math.round(p.s.w * dpr), Math.round(p.s.h * dpr), sceneTime(p.d), (e.clientX - p.s.x) * dpr, (e.clientY - p.s.y) * dpr);
+      if (id >= 0) input(() => r.activate_node(id));
+    }
+    if (p?.orbit) return;
+    input(() => r.pointer_up(...pos(e), win.performance.now()));
+  });
   canvas.addEventListener("pointercancel", () => input(() => r.leave()));
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();

@@ -269,6 +269,11 @@ mod wasm {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn scene(id: u32) -> usize {
+        output(with(|e| e.scene(id)))
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn inspect(id: u32) -> usize {
         output(with(|e| e.inspect(id)).into_bytes())
     }

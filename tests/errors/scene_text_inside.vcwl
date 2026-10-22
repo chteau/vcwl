@@ -1,0 +1,8 @@
+// error: `text` cannot be inside a `scene`
+app "T"
+
+component App {
+    scene(label: "s") {
+        text("x")
+    }
+}

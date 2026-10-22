@@ -49,6 +49,8 @@ Working end to end, tested in Node.js and headless Chrome:
   server functions and assets: the basis for frameworks ([docs](docs/packages.md));
 - components with child content (`slot`), web fonts (`font "X" from "fonts/x.woff2"`), and
   build-time prerendering of every route to static HTML for first paint and crawlers;
+- 3D scenes (`scene { mesh(...) light(...) group { ... } }`) drawn with WebGL, with clickable
+  meshes, an orbit camera and state-bound properties;
 - tooling: `vcwl new | dev | build | check | test | fmt | run | compile | clean`.
 
 ## Quick start

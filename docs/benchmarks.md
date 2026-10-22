@@ -102,8 +102,9 @@ preloads `vcwl.js`, `render.wasm` and `app.wasm` so they download in parallel.
 | file | todo example | rows benchmark |
 | --- | ---: | ---: |
 | app.wasm (includes styles) | 17,291 / 6,598 | 5,740 / 2,651 |
-| render.wasm (same for every app) | 311,430 / 132,961 | 311,430 / 132,961 |
-| vcwl.js (host) | 39,560 / 12,781 | 39,560 / 12,781 |
+| render.wasm (same for every app) | 314,278 / 134,052 | 314,278 / 134,052 |
+| vcwl.js (host) | 45,440 / 14,657 | 45,440 / 14,657 |
+| scene3d.js (only fetched by apps showing a `scene`) | 15,766 / 5,679 | — |
 | index.html + boot.js | 622 / 474 | 623 / 477 |
 
 `render.wasm` is mostly Rust's standard library (allocator, formatting, Unicode case mapping,

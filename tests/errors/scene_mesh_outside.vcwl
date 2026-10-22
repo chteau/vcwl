@@ -1,0 +1,6 @@
+// error: `mesh` can only be used inside a `scene`
+app "T"
+
+component App {
+    mesh(shape: "box")
+}

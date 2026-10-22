@@ -157,6 +157,9 @@ enum ArgTy {
     Str,
     Bool,
     Int,
+    Float,
+    /// The prelude's `Vec3`, passed as `"x y z"`.
+    Vec3,
 }
 
 struct Spec {
@@ -260,6 +263,75 @@ fn spec(name: &str) -> Option<Spec> {
                 ("id", ArgTy::Str, AttrKind::Attr("id")),
             ],
             ..texty("a")
+        },
+        // 3D: a `scene` is a box of the page drawn with WebGL; `mesh`, `light` and `group`
+        // describe its content and exist only inside it.
+        "scene" => Spec {
+            tag: "scene",
+            base_class: "",
+            text_arg: false,
+            children: true,
+            layout: false,
+            args: &[
+                ("label", ArgTy::Str, AttrKind::Attr("aria-label")),
+                ("camera", ArgTy::Vec3, AttrKind::Attr("camera")),
+                ("target", ArgTy::Vec3, AttrKind::Attr("target")),
+                ("fov", ArgTy::Float, AttrKind::Attr("fov")),
+                ("background", ArgTy::Str, AttrKind::Attr("background")),
+                ("orbit", ArgTy::Bool, AttrKind::Attr("orbit")),
+                ("id", ArgTy::Str, AttrKind::Attr("id")),
+            ],
+            events: &[],
+            required: &["label"],
+        },
+        "mesh" => Spec {
+            tag: "mesh",
+            base_class: "",
+            text_arg: false,
+            children: false,
+            layout: false,
+            args: &[
+                ("shape", ArgTy::Str, AttrKind::Attr("shape")),
+                ("size", ArgTy::Vec3, AttrKind::Attr("size")),
+                ("position", ArgTy::Vec3, AttrKind::Attr("position")),
+                ("rotation", ArgTy::Vec3, AttrKind::Attr("rotation")),
+                ("spin", ArgTy::Vec3, AttrKind::Attr("spin")),
+                ("color", ArgTy::Str, AttrKind::Attr("color")),
+                ("shininess", ArgTy::Float, AttrKind::Attr("shininess")),
+                ("wireframe", ArgTy::Bool, AttrKind::Attr("wireframe")),
+            ],
+            events: CLICK,
+            required: &[],
+        },
+        "group" => Spec {
+            tag: "group",
+            base_class: "",
+            text_arg: false,
+            children: true,
+            layout: false,
+            args: &[
+                ("position", ArgTy::Vec3, AttrKind::Attr("position")),
+                ("rotation", ArgTy::Vec3, AttrKind::Attr("rotation")),
+                ("scale", ArgTy::Vec3, AttrKind::Attr("size")),
+                ("spin", ArgTy::Vec3, AttrKind::Attr("spin")),
+            ],
+            events: &[],
+            required: &[],
+        },
+        "light" => Spec {
+            tag: "light",
+            base_class: "",
+            text_arg: false,
+            children: false,
+            layout: false,
+            args: &[
+                ("kind", ArgTy::Str, AttrKind::Attr("kind")),
+                ("position", ArgTy::Vec3, AttrKind::Attr("position")),
+                ("color", ArgTy::Str, AttrKind::Attr("color")),
+                ("intensity", ArgTy::Float, AttrKind::Attr("intensity")),
+            ],
+            events: &[],
+            required: &[],
         },
         "image" => Spec {
             tag: "img",
@@ -385,6 +457,10 @@ pub const ELEMENTS: &[&str] = &[
     "heading",
     "button",
     "link",
+    "scene",
+    "mesh",
+    "group",
+    "light",
     "image",
     "input",
     "textarea",
@@ -630,6 +706,7 @@ impl Checker<'_> {
         }
         // Pass 2: views and handlers.
         let mut cx = ViewCx {
+            in_scene: false,
             sigs,
             sheet,
             handlers: Vec::new(),
@@ -1023,6 +1100,19 @@ impl Checker<'_> {
         if name.starts_with(char::is_uppercase) {
             return self.check_component_use(el, cx);
         }
+        let three_d = matches!(name, "mesh" | "light" | "group");
+        if three_d && !cx.in_scene {
+            return Err(Diag::ty(
+                el.name.span,
+                format!("`{name}` can only be used inside a `scene`"),
+            ));
+        }
+        if cx.in_scene && !three_d {
+            return Err(
+                Diag::ty(el.name.span, format!("`{name}` cannot be inside a `scene`"))
+                    .help("a scene holds `mesh`, `light` and `group` elements"),
+            );
+        }
         if name == "slot" {
             if !el.args.is_empty() || !el.children.is_empty() {
                 return Err(Diag::ty(el.span, "`slot` takes no arguments or body"));
@@ -1177,9 +1267,20 @@ impl Checker<'_> {
                                 ArgTy::Str => Type::Str,
                                 ArgTy::Bool => Type::Bool,
                                 ArgTy::Int => Type::Int,
+                                ArgTy::Float => Type::Float,
+                                ArgTy::Vec3 => Type::Adt(self.prelude_adt("Vec3"), vec![]),
                             };
                             let mut t = self.render_expr(&arg.value, Some(&want))?;
-                            if ty == ArgTy::Int
+                            self.coerce(&t.ty, &want, arg.value.span)?;
+                            if ty == ArgTy::Vec3 {
+                                let f = self.prelude_fn("vec3_text").unwrap();
+                                let span = t.span;
+                                t = TExpr {
+                                    kind: TK::Call(f, vec![], vec![t]),
+                                    ty: Type::Str,
+                                    span,
+                                };
+                            } else if matches!(ty, ArgTy::Int | ArgTy::Float)
                                 || ty == ArgTy::Bool && matches!(kind, AttrKind::Attr(_))
                             {
                                 t = self.to_string_expr(t)?;
@@ -1218,6 +1319,9 @@ impl Checker<'_> {
         if name == "button" {
             te.static_attrs
                 .push(("type", if submit { "submit" } else { "button" }.into()));
+        }
+        if name == "scene" {
+            te.static_attrs.push(("role", "img".into()));
         }
         if name == "link" && te.attrs.iter().any(|(k, _)| *k == AttrKind::Attr("href")) {
             te.static_attrs.push(("rel", "noopener noreferrer".into()));
@@ -1332,7 +1436,11 @@ impl Checker<'_> {
                 }
             }
         }
-        let kids = self.scoped_views(&children_views, cx)?;
+        let outer = cx.in_scene;
+        cx.in_scene |= name == "scene";
+        let kids = self.scoped_views(&children_views, cx);
+        cx.in_scene = outer;
+        let kids = kids?;
         te.children.extend(kids);
         Ok(TView::Element(te))
     }
@@ -1683,6 +1791,8 @@ impl Checker<'_> {
 }
 
 struct ViewCx<'s> {
+    /// Checking the content of a `scene`.
+    in_scene: bool,
     sigs: &'s [CompSig],
     sheet: &'s mut Sheet,
     handlers: Vec<THandler>,

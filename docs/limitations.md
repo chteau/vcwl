@@ -61,6 +61,13 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 - Prerendering does not call server functions (they render their loading state).
 - `vcwl serve` speaks HTTP/1.1 without TLS or keep-alive.
 
+## 3D
+
+- Primitive shapes and solid colors only: no model loading, textures, shadows or transparency.
+- Requires WebGL; without it the scene shows its placeholder. The scene's content is exposed to
+  assistive technology only through its `label`.
+- Orbit drags are not keyboard-accessible, and meshes' `click` is reachable only by pointer.
+
 ## Platform
 
 - Requires WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari 18.2+); there is no fallback.

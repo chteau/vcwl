@@ -133,6 +133,19 @@ call from a pre-linked `InstancePre`, an epoch deadline, a memory limit, and hos
 mirroring the browser host's JSON and text I/O plus `env`, `store_get/set/delete`. See
 [ADR 14](adr/0014-server-functions.md).
 
+### 3D scenes
+
+`scene`, `mesh`, `group` and `light` are ordinary elements of the renderer's tree, so state
+bindings, events and diffing work unchanged. Layout treats the 3D elements as `display: none`;
+painting emits one `SCENE` op (node id, box, corner radii) for the scene. The host asks the
+renderer for `scene(id)`, a flat binary description (scene attributes, then each item's kind,
+parent index, node id, clickability and attributes), and passes it to `runtime/scene3d.js`,
+which is imported on first use. That module draws with WebGL into an offscreen canvas that the
+host copies into the page canvas, clipped like other content; it keeps a requestAnimationFrame
+loop only while something spins. A click without dragging renders a pick pass (one color per
+clickable mesh) and calls the renderer's `activate_node`; dragging an `orbit` scene changes the
+camera in the host only. See [ADR 15](adr/0015-built-in-3d.md).
+
 ### Transitions
 
 `render/src/anim.rs`: when a restyle changes `opacity`, `transform`, `color` or a background color

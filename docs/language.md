@@ -380,3 +380,41 @@ component App {
   is compiled into `dist-server/server.wasm` only; `app.wasm` contains just the call's URL.
 - A panic, trap or call running longer than 5 s is HTTP 500 for the client; the details go to
   the server's log.
+
+### 3D scenes
+
+```vcwl
+component Viewer {
+    state hits: Int = 0
+
+    scene(label: "A clickable box", camera: vec3(0.0, 1.5, 5.0), orbit: true) {
+        light(kind: "ambient", intensity: 0.3)
+        light(position: vec3(3.0, 5.0, 4.0))
+        mesh(shape: "box", rotation: vec3(20.0, 30.0, 0.0), color: "#d16a47") {
+            on click {
+                hits += 1
+            }
+        }
+        group(position: vec3(1.6, 0.0, 0.0), spin: vec3(0.0, 90.0, 0.0)) {
+            mesh(shape: "torus", color: "#b6ff6c")
+        }
+    }
+}
+```
+
+- `scene` is a block element (300px high by default, styled like any element) that draws a 3D
+  view with WebGL. `label` is required: it is the scene's accessible name (`role="img"`).
+  Arguments: `camera` and `target` (`Vec3`, default `vec3(0, 1.5, 5)` looking at the origin),
+  `fov` in degrees (50), `background` (a CSS color), `orbit` (dragging turns the camera around
+  the target).
+- Inside a scene only `mesh`, `light` and `group` are allowed, and they are allowed nowhere
+  else. Positions are `Vec3` values (`vec3(x, y, z)`, y up); rotations and `spin` are in
+  degrees and degrees per second around x, y and z.
+- `mesh`: `shape` (`box`, `sphere`, `plane`, `cylinder`, `cone`, `torus`), `size` (scale,
+  default 1 unit), `position`, `rotation`, `spin`, `color`, `shininess` (32; 0 for matte),
+  `wireframe`, and `on click`, fired when a click without dragging hits the mesh.
+- `group` moves, rotates (`rotation`, `spin`) and scales (`scale`) its children together.
+- `light`: `kind` (`directional`, the default, `point` or `ambient`), `position`, `color`,
+  `intensity`. A scene without lights gets an ambient and a directional light.
+- Arguments can be bound to state; changing it redraws the scene. Spinning stops when the user
+  prefers reduced motion. Prerendered HTML shows an empty box where the scene will be.

@@ -8,6 +8,8 @@ use crate::diag::SourceMap;
 pub const VCWL_JS: &str = include_str!("../runtime/vcwl.js");
 pub const BOOT_JS: &str = include_str!("../runtime/boot.js");
 pub const DEV_JS: &str = include_str!("../runtime/dev.js");
+/// The WebGL renderer of 3D scenes, loaded by the host when a page paints one.
+pub const SCENE3D_JS: &str = include_str!("../runtime/scene3d.js");
 const PRERENDER_JS: &str = include_str!("../runtime/prerender.mjs");
 /// The renderer, built from `render/` by `build.rs`.
 pub const RENDER_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/render.wasm"));
@@ -627,6 +629,7 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
         ("render.wasm", RENDER_WASM.to_vec()),
         ("vcwl.js", VCWL_JS.as_bytes().to_vec()),
         ("boot.js", BOOT_JS.as_bytes().to_vec()),
+        ("scene3d.js", SCENE3D_JS.as_bytes().to_vec()),
         // GitHub Pages: serve files as-is (no Jekyll processing).
         (".nojekyll", Vec::new()),
     ];
@@ -737,7 +740,15 @@ fn copy_dir(dir: &Path, out: &Path, base: &Path, generated: &[&str]) -> Result<(
             copy_dir(&path, out, base, generated)?;
         } else {
             let rel_str = rel.to_str().unwrap_or("");
-            if ["app.wasm", "render.wasm", "vcwl.js", "boot.js", "dev.js"].contains(&rel_str)
+            if [
+                "app.wasm",
+                "render.wasm",
+                "vcwl.js",
+                "boot.js",
+                "dev.js",
+                "scene3d.js",
+            ]
+            .contains(&rel_str)
                 || generated.contains(&rel_str)
             {
                 return Err(format!(
