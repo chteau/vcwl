@@ -1,0 +1,200 @@
+import "./data.vcwl"
+import "./theme.vcwl"
+import "./common.vcwl"
+import "./home.vcwl"
+
+export component Benchmark(b: Bench) {
+    let a = b.aggregate
+    let model = model_name()
+    let m_all = measured(b, "")
+    let models = b.model.join(", ")
+
+    column {
+        PageHead(crumb: "Benchmark", title: "Clean Claude Code vs TokenForge", lead: "The same {a.tasks} tasks, run in sandboxed sessions with {model} on both sides. Tokens come from the API usage in every transcript. Quality comes from hidden tests. Everything is in the plugin repo’s bench/ folder, so you can rerun it.")
+        grid(gap: 18px, label: "Summary") {
+            style {
+                columns: 1fr 1fr 1fr 1fr
+                when viewport < 1000px {
+                    columns: 1fr 1fr
+                }
+                when viewport < 560px {
+                    columns: 1fr
+                }
+            }
+            Kpi(label: "Median total tokens saved", value: "−" + r(a.medianSavings) + "%", note: "mean −" + r(a.meanSavings) + "%, pooled −" + r(a.pooledSavings) + "%, fewer on {a.tasksFewerTokens}/{a.tasks}")
+            Kpi(label: "Cheaper at list prices on", value: "{a.tasksCheaper}/{a.tasks}", note: "range " + pct(a.maxPriceWeighted) + " to " + pct(a.minPriceWeighted))
+            Kpi(label: "Median cost at list prices", value: pct(a.medianPriceWeighted), note: "roughly what usage limits count")
+            Kpi(label: "Runs", value: a.runs.to_string(), note: "all answered by {models}")
+        }
+        paragraph(m_all) {
+            style Small
+        }
+        section(label: "Per-task results") {
+            style Card
+            style {
+                margin: 18px 0 0
+            }
+            column(gap: 8px) {
+                H2(text: "Per-task results")
+                paragraph("Each row is the median of the runs on each side. “Saved” is total tokens (input, cache reads and writes, output). “List price” is the cost at {model} list prices. Quality is the 0–100 score from hidden tests and checks.") {
+                    style Caption
+                }
+                scroll {
+                    grid {
+                        style {
+                            columns: 2fr 1fr 1fr 1fr 1fr 1fr 1fr
+                            min-width: 760px
+                        }
+                        Cell(text: "Task", strong: true)
+                        Cell(text: "Group", strong: true)
+                        Cell(text: "Clean", strong: true)
+                        Cell(text: "TokenForge", strong: true)
+                        Cell(text: "Saved", strong: true)
+                        Cell(text: "List price", strong: true)
+                        Cell(text: "Quality", strong: true)
+                        for t in b.tasks key t.id {
+                            TaskRow(t: t)
+                        }
+                    }
+                }
+            }
+        }
+        section(label: "Lean levels and the proxy") {
+            style Card
+            style {
+                margin: 18px 0 0
+            }
+            column(gap: 8px) {
+                H2(text: "Lean levels and the proxy (0.9.2)")
+                P(text: "Whole tasks, not only the fixed context: 6 tasks (architecture, cross-module and Rust debugging, PR review, two features), 3 runs per level against 8 clean runs per task, TokenForge 0.9.2 without the proxy, Claude Code 2.1.296.")
+                grid {
+                    style {
+                        columns: 2fr 1fr 1fr 1fr
+                    }
+                    Cell(text: "Level", strong: true)
+                    Cell(text: "Tokens vs clean", strong: true)
+                    Cell(text: "Quality", strong: true)
+                    Cell(text: "List cost per run", strong: true)
+                    LeanRow(level: "clean Claude Code", tokens: "—", quality: "95.9", cost: "$0.74")
+                    LeanRow(level: "on", tokens: "−36.9%", quality: "98.1", cost: "$0.60")
+                    LeanRow(level: "balanced (default)", tokens: "−46.9%", quality: "97.5", cost: "$0.57")
+                    LeanRow(level: "max", tokens: "−44.1%", quality: "96.8", cost: "$0.58")
+                    LeanRow(level: "ultra", tokens: "−54.7%", quality: "98.2", cost: "$0.56")
+                }
+                P(text: "max saves no more than balanced here; with 3 runs per level the gap may be noise. With the API proxy, ultra saved 53.9% on the same tasks: in these one-prompt sessions the proxy adds nothing measurable on top of the hooks. Long interactive sessions are not measured yet.")
+            }
+        }
+        grid(gap: 18px) {
+            style {
+                columns: 1fr 1fr
+                margin: 18px 0 0
+                align: start
+                when viewport < 900px {
+                    columns: 1fr
+                }
+            }
+            section(label: "Method") {
+                style Card
+                column(gap: 8px) {
+                    H2(text: "Method")
+                    H3(text: "Two agents, one difference")
+                    P(text: "Claude Code {b.claudeCodeVersion} in -p mode with the same flags on both sides; the model pinned with --model and checked against every API response. The native side runs with no plugins, skills, hooks, MCP servers or CLAUDE.md; the TokenForge side with TokenForge only, at its defaults (lean {b.defaultLean}). Task, prompt, repo commit, toolchains and timeout are identical.")
+                    H3(text: "Sandboxing")
+                    list {
+                        style {
+                            padding: 0 0 0 22px
+                        }
+                        Bullet(text: "Each run gets a fresh, disposable sandbox. HOME and CLAUDE_CONFIG_DIR are empty directories, so no settings, plugins, skills, memory or history from the machine can leak in.")
+                        Bullet(text: "The environment is built from an allow-list. --strict-mcp-config means zero MCP servers.")
+                        Bullet(text: "The repo is a copy at a fixed, verified commit, under a random path that never mentions TokenForge or benchmarks.")
+                        Bullet(text: "A preflight audit checks every ancestor folder for CLAUDE.md, .claude/ and .mcp.json. A native run with any finding is not launched.")
+                        Bullet(text: "The TokenForge copy has no bench/ folder, so hidden tests are out of reach.")
+                    }
+                    H3(text: "Token measurement")
+                    P(text: "The source of truth is every transcript in the run’s config dir: main session, subagents and nested sessions, deduplicated by request ID. All numbers are exact API usage values. TokenForge’s own overhead is included.")
+                    P(text: "TokenForge’s first request was " + fmt_int(a.firstRequestOverhead) + " tokens smaller than clean Claude Code’s (median across tasks): the lean level outweighs the hook text it adds.")
+                    H3(text: "Quality score")
+                    P(text: "Correctness 40 points (hidden behaviour tests), regression protection 20, architecture 15, completeness 15, cleanliness 10. PR review and architecture tracing use their own graders.")
+                }
+            }
+            column(gap: 18px) {
+                section(label: "Caveats") {
+                    style Card
+                    column(gap: 8px) {
+                        H2(text: "Caveats, stated plainly")
+                        list {
+                            style {
+                                padding: 0 0 0 22px
+                            }
+                            Bullet(text: "Few runs. Two runs per side on each task, more on six. Single runs vary by about ±20%. Read per-task numbers as rough and the overall result as solid.")
+                            Bullet(text: "One task left out. A Ruby log analyzer was run once per side and is not in these results: TokenForge used 14% more tokens on it.")
+                            Bullet(text: "Session length. The benchmark covers sessions of roughly 5–30 calls. Long interactive sessions are not measured yet.")
+                            Bullet(text: "Some quality drops. TokenForge scored lower on {a.qualityWorse.len()} tasks, mostly by 1 to 3 points.")
+                            Bullet(text: "Hooks rewrite some commands: raw build and test commands, broad cat dumps and ssh are rewritten to compact tools.")
+                            Bullet(text: "One configuration. One model, one Claude Code version, one TokenForge version, all recorded in every run manifest.")
+                        }
+                    }
+                }
+                section(label: "Rerun it") {
+                    style Card
+                    column(gap: 8px) {
+                        H2(text: "Rerun it")
+                        P(text: "Needs Python 3.10+, git, and the task toolchains.")
+                        CopyBlock(code: "git clone https://github.com/chteau/tokenforge\ncd tokenforge/bench\npython3 runner/bench.py env build\npython3 runner/bench.py doctor\npython3 runner/bench.py run --all\npython3 runner/bench.py report")
+                        link("bench/ on GitHub →", href: "https://github.com/chteau/tokenforge/tree/master/bench") {
+                            style Accent
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component Kpi(label: String, value: String, note: String) {
+    column(gap: 2px) {
+        style Card
+        style {
+            padding: 18px 20px
+            border-left: 2px solid #d16a47
+        }
+        span(label) {
+            style Muted
+            style {
+                size: 12px
+            }
+        }
+        span(value) {
+            style {
+                size: 34px
+                weight: 700
+                line-height: 1.1
+                margin: 4px 0 0
+            }
+        }
+        span(note) {
+            style Secondary
+            style {
+                size: 12px
+                margin: 4px 0 0
+            }
+        }
+    }
+}
+
+component TaskRow(t: Task) {
+    Cell(text: t.label, strong: false)
+    Cell(text: t.group, strong: false)
+    Cell(text: fmt_k(t.native.total, false), strong: false)
+    Cell(text: fmt_k(t.tokenforge.total, false), strong: false)
+    Cell(text: pct(t.savings), strong: true)
+    Cell(text: pct(t.savingsPriceWeighted), strong: false)
+    Cell(text: r(t.native.quality) + " → " + r(t.tokenforge.quality), strong: false)
+}
+
+component LeanRow(level: String, tokens: String, quality: String, cost: String) {
+    Cell(text: level, strong: false)
+    Cell(text: tokens, strong: false)
+    Cell(text: quality, strong: false)
+    Cell(text: cost, strong: false)
+}

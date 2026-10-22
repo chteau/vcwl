@@ -21,6 +21,10 @@ pub const ACTIVE: u8 = 2;
 pub const FOCUS: u8 = 4;
 pub const FOCUS_VISIBLE: u8 = 8;
 pub const FOCUS_WITHIN: u8 = 16;
+/// Has been inside the viewport (ends `when appear` styles).
+pub const SEEN: u8 = 32;
+/// Has a computed style (style changes before that start no transitions).
+pub const STYLED: u8 = 64;
 
 pub struct Listener {
     pub event: String,

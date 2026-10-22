@@ -252,6 +252,7 @@ pub struct Style {
     pub shadow: Vec<Shadow>,
     pub fit: Fit,
     pub container: bool,
+    pub transitions: Vec<crate::anim::Transition>,
     // Inherited.
     pub color: Color,
     pub font_family: Rc<str>,
@@ -316,6 +317,7 @@ impl Default for Style {
             shadow: Vec::new(),
             fit: Fit::Fill,
             container: false,
+            transitions: Vec::new(),
             color: BLACK,
             font_family: FONT.into(),
             font_size: 16.0,
@@ -382,6 +384,13 @@ pub struct Media {
     pub reduced_motion: bool,
 }
 
+/// Settings and output of one restyle.
+struct Pass<'a> {
+    media: &'a Media,
+    all: bool,
+    prev: &'a mut Vec<(Id, Style)>,
+}
+
 pub struct Sheet {
     rules: Vec<Rule>,
     /// Rule indices by class name.
@@ -402,18 +411,38 @@ impl Sheet {
     /// descendants whose inherited values changed. Nodes whose style changed get their
     /// layout invalidated.
     pub fn restyle(&self, t: &mut Tree, media: &Media, all: bool) {
-        self.update(t, 0, all, all, media, None);
+        self.restyle_tracked(t, media, all, &mut Vec::new());
     }
 
-    fn update(
+    /// Like `restyle`, collecting the previous style of nodes with transitions whose style
+    /// changed.
+    pub fn restyle_tracked(
         &self,
         t: &mut Tree,
-        id: Id,
-        all: bool,
-        force: bool,
         media: &Media,
-        container: Option<f32>,
+        all: bool,
+        prev: &mut Vec<(Id, Style)>,
     ) {
+        let mut pass = Pass { media, all, prev };
+        self.update(t, 0, all, None, &mut pass);
+    }
+
+    /// Whether `class` has `when appear` rules.
+    pub fn appears(&self, class: &str) -> bool {
+        self.by_class.get(class).is_some_and(|rs| {
+            rs.iter()
+                .any(|&i| self.rules[i].pseudo.contains(&Pseudo::Appear))
+        })
+    }
+
+    pub fn uses_appear(&self) -> bool {
+        self.rules
+            .iter()
+            .any(|r| r.pseudo.contains(&Pseudo::Appear))
+    }
+
+    fn update(&self, t: &mut Tree, id: Id, force: bool, container: Option<f32>, p: &mut Pass) {
+        let (all, media) = (p.all, p.media);
         let mut changed = false;
         if all || force || t.n(id).style_dirty {
             let base = match t.n(id).parent {
@@ -423,7 +452,12 @@ impl Sheet {
             let s = self.compute(t, id, base, media, container);
             let n = t.m(id);
             n.style_dirty = false;
+            let styled = n.flags & dom::STYLED != 0;
+            n.flags |= dom::STYLED;
             if n.style != s {
+                if styled && !(s.transitions.is_empty() && n.style.transitions.is_empty()) {
+                    p.prev.push((id, n.style.clone()));
+                }
                 n.style = s;
                 changed = true;
                 t.mark_layout(id);
@@ -436,7 +470,7 @@ impl Sheet {
         };
         for i in 0..t.n(id).children.len() {
             let c = t.n(id).children[i];
-            self.update(t, c, all, changed, media, container);
+            self.update(t, c, changed, container, p);
         }
     }
 
@@ -479,6 +513,15 @@ impl Sheet {
                         }
                     }
                 }
+                // `style bind` values, after the classes.
+                for (k, v) in &n.attrs {
+                    if let Some((prop, unit)) =
+                        k.strip_prefix("style:").and_then(|r| r.split_once(':'))
+                    {
+                        let toks = crate::css::tokens(&format!("{v}{unit}"));
+                        apply(&mut s, prop, &toks, font, media);
+                    }
+                }
                 s.font = s.font_shorthand().into();
             }
             Kind::Text => s.display = Display::Inline,
@@ -517,6 +560,7 @@ fn pseudo(p: Pseudo, n: &Node, checked: bool) -> bool {
         Pseudo::FocusWithin => n.flags & (dom::FOCUS_WITHIN | dom::FOCUS) != 0,
         Pseudo::Disabled => n.attr("disabled").is_some(),
         Pseudo::Checked => checked,
+        Pseudo::Appear => n.flags & dom::SEEN == 0,
     }
 }
 
@@ -1218,7 +1262,7 @@ fn apply(s: &mut Style, prop: &str, v: &[Tok], parent_font: f32, m: &Media) {
             }
         }
         "user-select" => s.selectable = kw() != "none",
-        // Animations are not implemented; transitions apply their end state immediately.
+        "transition" => s.transitions = crate::anim::parse(v),
         _ => {}
     }
 }

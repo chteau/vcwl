@@ -1192,6 +1192,44 @@ impl<'a> Parser<'a> {
             if self.is("{") {
                 return Ok(View::Style(self.style_block()?));
             }
+            if self.eat_kw("bind") {
+                let prop = self.prop_name()?;
+                self.expect(":")?;
+                let (mut toks, vspan) = self.raw_value()?;
+                // A trailing unit (`%`, `px`, ...) is not part of the expression.
+                let unit = match &toks.last().unwrap().tok {
+                    Tok::Punct("%") => Some("%".to_string()),
+                    Tok::Ident(u) if ["px", "rem", "em", "vw", "vh"].contains(&u.as_str()) => {
+                        Some(u.clone())
+                    }
+                    _ => None,
+                };
+                if unit.is_some() {
+                    toks.pop();
+                }
+                let end = toks.last().map_or(vspan, |t| t.span);
+                toks.push(Token {
+                    tok: Tok::Eof,
+                    span: end,
+                    nl: true,
+                });
+                let mut sub = Parser {
+                    toks: &toks,
+                    pos: 0,
+                    next_id: self.next_id,
+                    no_struct: false,
+                };
+                let value = sub.expr()?;
+                if !sub.at_eof() {
+                    return Err(Diag::syntax(sub.span(), "expected the end of the value"));
+                }
+                return Ok(View::StyleBind {
+                    prop,
+                    value,
+                    unit,
+                    span: start.to(vspan),
+                });
+            }
             return Ok(View::StyleRef(self.ident()?));
         }
         if self.is_kw("routes") && matches!(self.peek_at(1), Tok::Punct("{")) {
@@ -1364,6 +1402,18 @@ impl<'a> Parser<'a> {
         Ok((toks, start.to(self.prev_span())))
     }
 
+    /// A style property name; names may contain hyphens: `font-weight`.
+    fn prop_name(&mut self) -> Result<Ident> {
+        let mut prop = self.ident()?;
+        while self.is("-") && self.span().lo == prop.span.hi {
+            self.bump();
+            let next = self.ident()?;
+            prop.name = format!("{}-{}", prop.name, next.name);
+            prop.span = prop.span.to(next.span);
+        }
+        Ok(prop)
+    }
+
     fn style_block(&mut self) -> Result<StyleBlock> {
         let start = self.expect("{")?;
         let mut decls = Vec::new();
@@ -1385,15 +1435,7 @@ impl<'a> Parser<'a> {
                 conds.push((toks, span, self.style_block()?));
                 continue;
             }
-            // Property names may contain hyphens: `font-weight`.
-            let first = self.ident()?;
-            let mut prop = first.clone();
-            while self.is("-") && self.span().lo == prop.span.hi {
-                self.bump();
-                let next = self.ident()?;
-                prop.name = format!("{}-{}", prop.name, next.name);
-                prop.span = prop.span.to(next.span);
-            }
+            let prop = self.prop_name()?;
             self.expect(":")?;
             let (value, vspan) = self.raw_value()?;
             decls.push(StyleDecl {

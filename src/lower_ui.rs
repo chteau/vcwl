@@ -432,6 +432,8 @@ impl Lower<'_> {
             Type::Str => {
                 let id = self.fns.iter().position(|f| f.name == "str_eq").unwrap();
                 let f = self.fn_inst(id, &[]);
+                // Values read from struct fields (such as list keys) are nullable references.
+                let (a, b2) = (un(UnOp::RefAsNonNull, a), un(UnOp::RefAsNonNull, b2));
                 un(UnOp::I32Eqz, IExpr::Call(FuncRef::Local(f), vec![a, b2]))
             }
             _ => un(UnOp::I32Eqz, IExpr::RefEq(b(a), b(b2))),

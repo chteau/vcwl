@@ -1,0 +1,190 @@
+import "./theme.vcwl"
+import "./common.vcwl"
+
+export component Roadmap {
+    column {
+        PageHead(crumb: "Roadmap · updated 2026-10-12", title: "What comes next", lead: "0.9.2 makes the savings safe and checkable: a cache reuses an answer only while it still holds, a rewritten command behaves like the original, and every published number names the version that produced it. This plan follows an external review of the public repo, which read the docs and the benchmark method, not the code or the test suite.")
+        grid(gap: 18px) {
+            style {
+                columns: 1fr 1fr
+                align: start
+                when viewport < 900px {
+                    columns: 1fr
+                }
+            }
+            section(label: "Rules") {
+                style Card
+                column(gap: 8px) {
+                    H2(text: "Rules")
+                    Rule(title: "Prefer a missed reuse to a wrong one.", body: "A cache that skips a reusable answer costs tokens. One that replays a stale answer, or skips a check that was needed, costs correctness.")
+                    Rule(title: "Optimize how output is shown, never what a command does.", body: "")
+                    Rule(title: "One validity policy for every cache,", body: "with rules for each kind of artifact, not one algorithm for all.")
+                    Rule(title: "Measure each optimization on its own.", body: "")
+                }
+            }
+            section(label: "0.9.2, in order") {
+                style Card
+                column(gap: 10px) {
+                    H2(text: "0.9.2, in order")
+                    Step(n: 1, title: "Validate 0.9.1 on real data.", body: "Regenerate the reports from 0.9.1 runs, check the version each run recorded, fix any page that mixes versions.", done: "")
+                    Step(n: 2, title: "Audit the answer cache and cache invalidation.", body: "Adversarial tests, a visible bypass, freshness checks.", done: "")
+                    Step(n: 3, title: "Differential tests for the Bash router and tkit.", body: "Exit codes, cut logs and rewritten commands first.", done: "")
+                    Step(n: 4, title: "Benchmark lean levels and orchestration strategies.", body: "On 6 tasks: on −37%, balanced −47%, max −44%, ultra −55% of tokens against clean Claude Code. Orchestration strategies are not benchmarked yet.", done: "Lean levels done")
+                    Step(n: 5, title: "Profile the system.", body: "Each hook takes 31–60 ms (22 ms of it Node starting), the tmap index 168 ms cold and 14 ms warm, the proxy 50 ms per request at 1,000 tool calls: none is a bottleneck against model calls of several seconds.", done: "Done")
+                }
+            }
+        }
+        column(gap: 4px) {
+            style {
+                margin: 32px 0 14px
+            }
+            span("By priority") {
+                style Label
+            }
+            H2(text: "The work")
+            P(text: "P0: what TokenForge reuses and reports must be right. P1: the boundaries where an optimization could change behavior. P2: the cheapest strategy for each task, measured.")
+        }
+        grid(gap: 18px) {
+            style {
+                columns: 1fr 1fr
+                align: start
+                when viewport < 900px {
+                    columns: 1fr
+                }
+            }
+            Item(prio: "P0", title: "Every result names the version that produced it", today: "Every benchmark run records the TokenForge and Claude Code versions, and the environment a hash of the plugin files. The README, the reports and the site name them under every figure.", plan: "Done: version, build hash and Claude Code version next to every published figure. Done: refuse to build a report from runs of different versions, unless it labels each one.")
+            Item(prio: "P0", title: "A safer answer cache", today: "An earlier answer is replayed only for the same question, from a turn that edited nothing, when no project file has changed since. Prompts that ask to review, verify, check or audit skip it.", plan: "Done: never replay an answer to a request to run, test, build or verify something. Done: an explicit, visible bypass. Done: adversarial tests for false positives.")
+            Item(prio: "P0", title: "Formal cache invalidation", today: "Every cache declares what it depends on (tforge caches) and is checked by content where correctness needs it. Cache writes are atomic, with tests for same-second edits, renames, deletions, branch switches and torn files.", plan: "Done: content hashes where correctness needs them. Done: concurrency tests, and invalidation after an interrupted write.")
+            Item(prio: "P2", title: "Lean levels: measure the whole cost", today: "Each level’s whole cost on 6 tasks (3 runs per level): on −36.9%, balanced −46.9%, max −44.1%, ultra −54.7% of tokens against clean Claude Code, quality 96.8 to 98.2 against 95.9.", plan: "Done: a report per level. Next: time, attempts and regressions per level, and more runs on max.")
+        }
+        section(label: "Caching") {
+            style Card
+            style {
+                margin: 18px 0 0
+            }
+            column(gap: 8px) {
+                H2(text: "Caching")
+                P(text: "Six layers with six sets of dependencies. They share one validity policy, with rules for each layer.")
+                scroll {
+                    grid {
+                        style {
+                            columns: 1.2fr 1.5fr 1.5fr 1fr
+                            min-width: 720px
+                        }
+                        Cell(text: "Layer", strong: true)
+                        Cell(text: "Today", strong: true)
+                        Cell(text: "Optimize for", strong: true)
+                        Cell(text: "Risk to test", strong: true)
+                        Layer(name: "Provider prompt cache", today: "Policy and instruction text stay identical between calls", goal: "Stable prefixes and configuration", risk: "Missed or expired cache")
+                        Layer(name: "tmap index", today: "Re-parses files whose content changed", goal: "Incremental index with explicit dependencies", risk: "Stale index")
+                        Layer(name: "Instruction cache", today: "Compacted text keyed by content and parser version", goal: "Reuse with reliable invalidation", risk: "File changed, cache didn’t")
+                        Layer(name: "Cross-session memory", today: "tforge recall, on demand", goal: "On-demand retrieval with provenance", risk: "An old assumption taken as fact")
+                        Layer(name: "Snapshots and handoffs", today: "Chunks kept by use; handoffs deleted once used", goal: "Compact storage, selective retrieval", risk: "Incomplete or contradictory state")
+                        Layer(name: "Answer cache", today: "Same question, repo, commit, files, model", goal: "Reuse only while the answer still holds", risk: "Stale answer, or a check skipped")
+                    }
+                }
+                paragraph("A cache with 99% hits that sometimes serves a wrong answer can be worse than a more cautious one with 85%.") {
+                    style Callout
+                    style Secondary
+                }
+                link("ROADMAP.md on GitHub →", href: "https://github.com/chteau/tokenforge/blob/master/ROADMAP.md") {
+                    style Accent
+                }
+            }
+        }
+    }
+}
+
+component Rule(title: String, body: String) {
+    paragraph {
+        style Secondary
+        style {
+            margin: 0
+        }
+        strong(title) {
+            style {
+                color: #faf9f5
+                when light {
+                    color: #141413
+                }
+            }
+        }
+        text(" " + body)
+    }
+}
+
+component Step(n: Int, title: String, body: String, done: String) {
+    row(gap: 10px, align: start) {
+        span(n.to_string()) {
+            style {
+                width: 22px
+                height: 22px
+                shrink: 0
+                text-align: center
+                line-height: 22px
+                background: #d16a47
+                color: #1a1918
+                size: 12px
+                weight: 700
+            }
+        }
+        paragraph {
+            style Secondary
+            style {
+                margin: 0
+            }
+            strong(title + " ")
+            if done != "" {
+                span(done) {
+                    style {
+                        padding: 1px 6px
+                        size: 11px
+                        weight: 600
+                        background: #0ca30c33
+                        color: #6fd36f
+                    }
+                }
+                text(" ")
+            }
+            text(body)
+        }
+    }
+}
+
+component Item(prio: String, title: String, today: String, plan: String) {
+    article {
+        style Card
+        column(gap: 8px) {
+            row(gap: 8px, align: center) {
+                span(prio) {
+                    style {
+                        padding: 1px 6px
+                        size: 11px
+                        weight: 700
+                        background: #d16a4729
+                        color: #e48a68
+                    }
+                }
+                heading(title, level: 3) {
+                    style {
+                        size: 15px
+                        weight: 600
+                    }
+                }
+            }
+            paragraph {
+                style Secondary
+                strong("Today. ")
+                text(today)
+            }
+            P(text: plan)
+        }
+    }
+}
+
+component Layer(name: String, today: String, goal: String, risk: String) {
+    Cell(text: name, strong: true)
+    Cell(text: today, strong: false)
+    Cell(text: goal, strong: false)
+    Cell(text: risk, strong: false)
+}

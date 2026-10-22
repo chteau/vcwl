@@ -132,6 +132,9 @@ function reader(memory, ptr, len) {
       p += 4;
       return v;
     },
+    skip(n) {
+      p += n;
+    },
     str() {
       const n = view.getInt32(p, true);
       const s = decoder.decode(bytes.subarray(p + 4, p + 4 + n));
@@ -170,7 +173,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   let r = null, x = null, busy = false, scheduled = false, wakeTimer = 0;
   const queue = [];
   host.dead = false;
-  host.stats = { flushes: 0, frames: 0, bytes: 0 };
+  host.stats = { flushes: 0, frames: 0, bytes: 0, mirrorMs: 0 };
 
   const measureCtx = (typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1) : doc.createElement("canvas")).getContext("2d");
   let lastFont = "", lastSpacing = 0;
@@ -226,6 +229,13 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
       busy = false;
     }
     while (queue.length && !host.dead) host.call(queue.shift());
+    if (!busy && !host.dead && x) {
+      try {
+        syncFocus();
+      } catch (e) {
+        fail(e);
+      }
+    }
     schedule();
   };
 
@@ -247,6 +257,13 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     const err = r.apply(n);
     if (err) throw new Error(new TextDecoder().decode(new Uint8Array(r.memory.buffer, r.out_ptr(), err)));
   };
+
+  host.imports.navigate = (len) => {
+    const path = host.readIO(len);
+    if (opts.navigate) opts.navigate(path);
+    else win.location.hash = "#" + path;
+  };
+  host.imports.copy = (len) => win.navigator.clipboard?.writeText(host.readIO(len)).catch(() => {});
 
   function drain() {
     for (let n = r.poll(); n; n = r.poll()) {
@@ -328,8 +345,19 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     scheduled = false;
     if (host.dead) return;
     host.paintNow();
+    // The mirror follows the canvas within the same frame, after it is drawn.
+    try {
+      const t0 = win.performance.now();
+      syncMirror();
+      host.stats.mirrorMs += win.performance.now() - t0;
+      syncFocus();
+    } catch (e) {
+      return fail(e);
+    }
+    schedule(); // running transitions
     clearTimeout(wakeTimer);
     // The caret blinks without input; come back when it toggles.
+    if (scheduled) return;
     const wake = r.next_wake(win.performance.now());
     if (wake >= 0) {
       wakeTimer = setTimeout(() => {
@@ -525,14 +553,227 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     finish(FETCH_OK, resp.status, value);
   }
 
+  // ----- accessibility mirror -----
+  // Invisible DOM elements for the renderer's semantic elements and text, placed over what
+  // the canvas shows (`render/src/engine/semantics.rs`). Screen readers, search engines and
+  // the browser's text input (IME, autocorrect, virtual keyboards, undo) use them; pointer
+  // input goes to the canvas, which is hidden from assistive technology.
+
+  const MIRROR_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "a", "button", "input", "textarea", "select", "option", "nav", "main", "header", "footer", "section", "article", "aside", "ul", "ol", "li", "form", "strong", "em", "code", "pre", "blockquote", "hr", "table", "thead", "tbody", "tr", "th", "td"]);
+  const INPUT_TYPES = new Set(["text", "checkbox", "email", "password", "search", "tel", "url", "number"]);
+  const BOX = "position:fixed;margin:0;padding:0;border:0;box-sizing:border-box;background:none;color:transparent;overflow:hidden;outline:none;appearance:none;resize:none;caret-color:transparent;white-space:pre-wrap;font-size:16px;";
+  const a11y = doc.createElement("div");
+  a11y.tabIndex = -1;
+  a11y.style.cssText = "position:fixed;inset:0;pointer-events:none;outline:none";
+  canvas.setAttribute("aria-hidden", "true");
+  canvas.before(a11y);
+  const mirror = new Map(); // renderer id -> { el, tag, attrs, box, flags }
+  const ids = new WeakMap(); // element -> renderer id
+  let lastSemantics = new Uint8Array(0), syncing = false, lastFocus = -1, lastSelection = "";
+  const isField = (el) => el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && el.type !== "checkbox");
+  const idOf = (el) => {
+    for (; el && el !== a11y; el = el.parentElement) if (ids.has(el)) return ids.get(el);
+    return null;
+  };
+
+  function mirrorElement(tag) {
+    let el;
+    if (tag === "#text") el = doc.createElement("span");
+    else if (tag === "img") {
+      el = doc.createElement("span");
+      el.setAttribute("role", "img");
+    } else el = doc.createElement(MIRROR_TAGS.has(tag) ? tag : "div");
+    el.style.cssText = BOX;
+    return el;
+  }
+
+  function setAttrs(m, attrs) {
+    const el = m.el;
+    for (const k of Object.keys(m.attrs)) if (!(k in attrs)) el.removeAttribute(k === "alt" ? "aria-label" : k);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (m.attrs[k] === v) continue;
+      switch (k) {
+        case "text":
+          el.textContent = v;
+          break;
+        case "font":
+          el.style.font = v;
+          break;
+        case "label":
+          el.textContent = v;
+          break;
+        case "value":
+          if (m.tag === "option") el.value = v;
+          else if (el.value !== v) el.value = v;
+          break;
+        case "href":
+          el.setAttribute("href", sanitizeUrl(v));
+          break;
+        case "alt":
+          el.setAttribute("aria-label", v);
+          break;
+        case "type":
+          if (m.tag === "input") el.type = INPUT_TYPES.has(v) ? v : "text";
+          else if (m.tag === "button") el.type = v === "submit" ? "submit" : "button";
+          break;
+        default:
+          if (/^(aria-[a-z]+|role|title|lang|placeholder)$/.test(k)) el.setAttribute(k, v);
+      }
+    }
+    m.attrs = attrs;
+  }
+
+  /** Brings the mirror up to date with the renderer. */
+  function syncMirror() {
+    const n = r.semantics();
+    if (!n) return;
+    const bytes = new Uint8Array(r.memory.buffer, r.out_ptr(), n);
+    if (bytes.length === lastSemantics.length && bytes.every((v, i) => v === lastSemantics[i])) return;
+    lastSemantics = bytes.slice();
+    const b = out(n), seen = new Set(), kids = new Map();
+    while (b.more()) {
+      const id = b.int(), parent = b.int(), hash = b.int(), len = b.int();
+      let m = mirror.get(id);
+      seen.add(id);
+      const p = parent < 0 ? a11y : mirror.get(parent).el;
+      if (!kids.has(p)) kids.set(p, []);
+      if (m && m.hash === hash) {
+        b.skip(len);
+        kids.get(p).push(m.el);
+        continue;
+      }
+      const tag = b.str();
+      const box = `${b.f32()},${b.f32()},${b.f32()},${b.f32()}`;
+      const flags = b.int(), attrs = {};
+      for (let k = b.int(); k > 0; k--) attrs[b.str()] = b.str();
+      if (!m || m.tag !== tag) {
+        if (m) m.el.remove();
+        m = { el: mirrorElement(tag), tag, attrs: {}, box: "", flags: 0 };
+        ids.set(m.el, id);
+        mirror.set(id, m);
+      }
+      m.hash = hash;
+      setAttrs(m, attrs);
+      if (m.box !== box) {
+        const [x0, y0, w, h] = box.split(",");
+        Object.assign(m.el.style, { left: x0 + "px", top: y0 + "px", width: w + "px", height: h + "px" });
+        m.box = box;
+      }
+      if (m.flags !== flags) {
+        if ("checked" in m.el) m.el.checked = (flags & 2) !== 0;
+        if ("disabled" in m.el) m.el.disabled = (flags & 4) !== 0;
+        m.flags = flags;
+      }
+      kids.get(p).push(m.el);
+    }
+    for (const [p, list] of kids) order(p, list);
+    for (const [id, m] of mirror) {
+      if (!seen.has(id)) {
+        m.el.remove();
+        mirror.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Puts `list` in order under `p` with few moves: elements on a longest increasing run of
+   * their current positions stay, the others are inserted before their successor.
+   */
+  function order(p, list) {
+    const at = new Map();
+    for (let i = 0, c = p.firstElementChild; c; c = c.nextElementSibling, i++) at.set(c, i);
+    const pos = list.map((el) => (el.parentNode === p ? at.get(el) : -1));
+    if (pos.every((v, i) => v === i) && p.childElementCount === list.length) return;
+    // Longest increasing subsequence of `pos` (ignoring new elements).
+    const tails = [], prev = new Array(list.length).fill(-1), idx = [];
+    pos.forEach((v, i) => {
+      if (v < 0) return;
+      let lo = 0, hi = tails.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pos[idx[mid]] < v) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo > 0) prev[i] = idx[lo - 1];
+      tails[lo] = v;
+      idx[lo] = i;
+    });
+    const keep = new Set();
+    for (let i = idx[tails.length - 1] ?? -1; i >= 0; i = prev[i]) keep.add(i);
+    let next = null;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (!keep.has(i)) p.insertBefore(list[i], next);
+      next = list[i];
+    }
+  }
+
+  /** Moves browser focus and text selection to match the renderer's. */
+  function syncFocus() {
+    const b = out(r.focus_state());
+    const id = b.int(), anchor = b.int(), caret = b.int(), value = b.str();
+    if (id >= 0 && !mirror.has(id)) syncMirror();
+    const el = id < 0 ? a11y : mirror.get(id)?.el;
+    if (!el) return;
+    syncing = true;
+    try {
+      if (id !== lastFocus || (doc.activeElement !== el && a11y.contains(doc.activeElement))) el.focus({ preventScroll: true });
+      lastFocus = id;
+      // Only selections the renderer changed (clicks, drags) go to the DOM: the browser's
+      // own selection changes reach the renderer asynchronously and must not be undone.
+      const sel = `${id},${anchor},${caret},${value}`;
+      if (sel !== lastSelection && isField(el) && doc.activeElement === el) {
+        // A value set by the application (such as clearing after submit) applies at once.
+        if (el.value !== value) el.value = value;
+        const [start, end] = [Math.min(anchor, caret), Math.max(anchor, caret)];
+        const dir = anchor > caret ? "backward" : "forward";
+        if (el.selectionStart !== start || el.selectionEnd !== end) el.setSelectionRange(start, end, dir);
+      }
+      lastSelection = sel;
+    } finally {
+      syncing = false;
+    }
+  }
+
+  function fieldInput(el) {
+    const id = idOf(el);
+    if (id === null || syncing) return;
+    const len = put(el.value);
+    input(() => r.field_input(id, len, el.selectionStart ?? 0, el.selectionEnd ?? 0, el.selectionDirection === "backward" ? 1 : 0));
+  }
+
+  a11y.addEventListener("focusin", (e) => {
+    const id = idOf(e.target);
+    if (!syncing && id !== null) input(() => r.focus_node(id));
+  });
+  a11y.addEventListener("focusout", (e) => {
+    if (syncing || a11y.contains(e.relatedTarget)) return;
+    lastFocus = -1;
+    input(() => r.leave());
+  });
+  // Activation by assistive technology (pointer clicks land on the canvas).
+  a11y.addEventListener("click", (e) => {
+    // A cancelled checkbox click would undo the state the renderer sets during the event.
+    if (e.target.type !== "checkbox") e.preventDefault();
+    const id = idOf(e.target);
+    if (id !== null) input(() => r.activate_node(id));
+  });
+  a11y.addEventListener("submit", (e) => e.preventDefault());
+  a11y.addEventListener("input", (e) => {
+    if (isField(e.target)) fieldInput(e.target);
+  });
+  a11y.addEventListener("change", (e) => {
+    const id = idOf(e.target);
+    if (e.target.tagName === "SELECT" && id !== null) input(() => r.choose_index(id, e.target.selectedIndex));
+  });
+  doc.addEventListener("selectionchange", () => {
+    const el = doc.activeElement;
+    if (el && isField(el) && a11y.contains(el)) fieldInput(el);
+  });
+
   // ----- input -----
 
   const pos = (e) => [e.clientX, e.clientY];
-  let pointerFocus = false;
   canvas.addEventListener("pointerdown", (e) => {
-    pointerFocus = true;
-    canvas.focus({ preventScroll: true });
-    pointerFocus = false;
     canvas.setPointerCapture?.(e.pointerId);
     e.preventDefault();
     input(() => r.pointer_down(...pos(e), e.pointerType === "touch" ? 1 : 0, win.performance.now()));
@@ -545,24 +786,17 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? win.innerHeight : 1;
     input(() => r.wheel(...pos(e), e.deltaX * k, e.deltaY * k));
   }, { passive: false });
-  canvas.addEventListener("keydown", (e) => {
+  a11y.addEventListener("keydown", (e) => {
     if (e.isComposing) return;
+    // Text fields edit natively; the renderer handles focus movement, submission and escape.
+    if (isField(e.target) && !(e.key === "Tab" || e.key === "Escape" || (e.key === "Enter" && e.target.tagName === "INPUT"))) {
+      input(() => r.field_keydown(put(e.key)));
+      return;
+    }
     let used = 0;
     input(() => (used = r.key(put(e.key), e.shiftKey, e.ctrlKey || e.metaKey, e.altKey, win.performance.now())));
     if (used) e.preventDefault();
   });
-  doc.addEventListener("paste", (e) => {
-    if (doc.activeElement !== canvas) return;
-    const text = e.clipboardData?.getData("text/plain");
-    if (text) {
-      e.preventDefault();
-      input(() => r.insert_text(put(text)));
-    }
-  });
-  canvas.addEventListener("focus", () => {
-    if (!pointerFocus) input(() => r.enter(0));
-  });
-  canvas.addEventListener("blur", () => input(() => r.leave()));
   win.addEventListener("resize", resize);
   const dark = win.matchMedia("(prefers-color-scheme: dark)"), motion = win.matchMedia("(prefers-reduced-motion: reduce)");
   const prefs = () => input(() => r.preferences(dark.matches ? 1 : 0, motion.matches ? 1 : 0));
@@ -581,6 +815,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
 
   host.tree = () => {
     host.paintNow();
+    syncMirror();
     const n = r.dump();
     return JSON.parse(decoder.decode(new Uint8Array(r.memory.buffer, r.out_ptr(), n)));
   };
@@ -588,13 +823,17 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
   host.liveListeners = () => r.live_listeners();
   host.commands = () => r.counter(0);
   host.moves = () => r.counter(1);
-  /** Focuses the canvas without moving focus to the first control. */
+  /** Gives the page keyboard focus without focusing a control. */
   host.focus = () => {
-    pointerFocus = true;
-    canvas.focus({ preventScroll: true });
-    pointerFocus = false;
+    syncing = true;
+    a11y.focus({ preventScroll: true });
+    syncing = false;
   };
-  host.setRoute = (path) => host.call((x) => x.set_route(host.writeIO(path)));
+  host.mirror = a11y;
+  host.setRoute = (path) => {
+    host.call((x) => x.set_route(host.writeIO(path)));
+    input(() => r.scroll_to_top());
+  };
   host.showError = (msg) => {
     host.error = msg;
     replay();
@@ -668,7 +907,6 @@ export async function boot(doc = document) {
     if (cfg.dev) showError(doc, msg);
   };
   const canvas = doc.createElement("canvas");
-  canvas.tabIndex = 0;
   canvas.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;display:block;outline:none;touch-action:none";
   doc.body.append(canvas);
   let host;

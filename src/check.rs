@@ -1583,10 +1583,10 @@ impl<'a> Checker<'a> {
             }
         }
         match name {
-            "navigate" if self.ctx != Ctx::Handler => {
+            "navigate" | "copy" if self.ctx != Ctx::Handler => {
                 return Err(Diag::ty(
                     callee.span,
-                    "`navigate` can only be called from an event handler",
+                    format!("`{name}` can only be called from an event handler"),
                 ));
             }
             "assert" => {
@@ -1621,16 +1621,16 @@ impl<'a> Checker<'a> {
                     span,
                 });
             }
-            "navigate" | "print" => {
+            "navigate" | "print" | "copy" => {
                 if args.len() != 1 {
                     return Err(Diag::ty(span, format!("`{name}` takes exactly one String")));
                 }
                 let a = self.check_expr(&args[0].value, Some(&Type::Str))?;
                 self.coerce(&a.ty, &Type::Str, args[0].value.span)?;
-                let iname = if name == "print" {
-                    "__print"
-                } else {
-                    "__navigate"
+                let iname = match name {
+                    "print" => "__print",
+                    "copy" => "__copy",
+                    _ => "__navigate",
                 };
                 return Ok(TExpr {
                     kind: TK::Intrinsic(iname, vec![], vec![a]),
@@ -1672,7 +1672,7 @@ impl<'a> Checker<'a> {
                     cands
                         .iter()
                         .map(|s| s.as_str())
-                        .chain(["print", "navigate", "assert"]),
+                        .chain(["print", "navigate", "copy", "assert"]),
                 ) {
                     d = d.help(format!("did you mean `{s}`?"));
                 }

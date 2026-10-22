@@ -118,7 +118,8 @@ Methods are prelude functions found by the receiver's type (`s.len()` calls `str
 - `T?`: `is_some`, `is_none`, `unwrap_or`. `Result`: `is_ok`, `is_err`, `unwrap_or`, `ok`.
 - `HttpError`: `message`.
 
-Built-in functions: `print(String)`, `assert(Bool, String)`, `navigate(String)` (handlers only).
+Built-in functions: `print(String)`, `assert(Bool, String)`, `navigate(String)` and
+`copy(String)` (writes to the clipboard); the last two only in event handlers.
 
 ## Programs and tests
 
@@ -182,8 +183,11 @@ error. After a handler finishes, the views that depend on changed values update 
 - Semantic elements: `section`, `header`, `footer`, `nav`, `main`, `article`, `aside`, `list`,
   `ordered_list`, `item`, `paragraph`, `span`, `strong`, `code`, `heading(text, level: 1..6)`,
   `divider`.
-- Controls: `button(text, disabled:, pressed:, submit:)`, `link(text, to: "/route")` or
-  `link(text, href: url)`, `image(src:, alt:)` (`alt` required), `input(value:, label:,
+- Every element takes `label:` (accessible name), `title:` and `id:`. `link(text, href: "#id")`
+  scrolls to the element with that `id` (smoothly, unless reduced motion is preferred); `#/path`
+  links are routes.
+- Controls: `button(text, disabled:, pressed:, submit:)`, `link(text, to: "/route", current:)` or
+  `link(text, href: url)` (`current: true` marks the link for the current page), `image(src:, alt:)` (`alt` required), `input(value:, label:,
   placeholder:, kind:)`, `textarea(value:, label:)`, `checkbox(label:, checked:)`,
   `select(options:, value:, label:)` (`label` is required on every form control), `form`
   (submits without reloading).
@@ -214,8 +218,14 @@ button("Save") {
     style if busy {                // applied while `busy` is true
         opacity: 0.5
     }
+    style bind width: progress %   // one property from a number computed at run time
 }
 ```
+
+`style bind <property>: <expr> <unit>` sets a property with a single length (`width`, `height`,
+`left`, `size`, `gap`, ...; the unit is `%`, `px`, `rem`, `em`, `vw` or `vh`) or a single number
+(`opacity`, `grow`, `shrink`) from an `Int` or `Float` expression. It updates when the expression's
+inputs change, and applies after the element's style blocks.
 
 Property values are checked at compile time (units, colors, keywords). Properties: `color`,
 `background`, `width`, `height`, `min-width`, `max-width`, `min-height`, `max-height`, `padding`,
@@ -227,12 +237,25 @@ Property values are checked at compile time (units, colors, keywords). Propertie
 `transform`, `transition`, `cursor`, `shadow`, `fit`, `container`, `user-select`, `list-style`.
 
 `when` conditions: `viewport < | <= | > | >= length`, `container ...`, `hover`, `focus`,
-`focus-within`, `active`, `disabled`, `checked`, `dark`, `light`, `reduced-motion`, `print`.
+`focus-within`, `active`, `disabled`, `checked`, `appear`, `dark`, `light`, `reduced-motion`,
+`print`. `when appear` styles apply until the element first scrolls into view; with a
+`transition`, the element then animates to its normal style (a scroll reveal):
+
+```vcwl
+style {
+    transition: opacity 600ms ease-out, transform 600ms ease-out
+    when appear {
+        opacity: 0
+        transform: translateY(16px)
+    }
+}
+```
 
 Each style block becomes a class named after a hash of its contents. The renderer supports the
-properties above with these exceptions: `transition` has no effect (changes apply immediately),
-`position: sticky` behaves as `relative`, and `display: inline` elements take no padding, border or
-background.
+properties above with these exceptions: `transition` animates `opacity`, `transform`, `color` and
+`background` colors (other properties change at once, and nothing animates when reduced motion is
+preferred), `position: sticky` behaves as `relative`, and `display: inline` elements take no
+padding, border or background.
 
 ### Fetch
 

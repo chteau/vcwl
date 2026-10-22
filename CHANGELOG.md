@@ -4,6 +4,31 @@ All notable changes. The project has no release yet; entries are grouped by mile
 
 ## Unreleased
 
+### Milestone 8 — accessibility, motion and a real website
+
+- Accessibility mirror ([ADR 11](docs/adr/0011-accessibility-mirror.md)): invisible DOM elements
+  for headings, landmarks, links, buttons, form controls, lists and text, placed over the canvas.
+  Screen readers, focus from outside the page, activation by assistive technology, and crawlers
+  work with it. Text fields are edited natively through it: IME composition, mobile keyboards,
+  autocorrect, paste and undo.
+- Transitions of `opacity`, `transform`, `color` and `background` colors, retargeted from the
+  current value when interrupted, disabled under reduced motion.
+- `when appear` styles: applied until an element first scrolls into view, then transitioned away
+  (scroll reveal).
+- `style bind <property>: <expr> <unit>`: typed, reactive style values computed at run time (bar
+  charts, progress, positions).
+- `id:` on every element and `#id` links that scroll smoothly to it; `current:` on links
+  (`aria-current`); `copy(String)` writes to the clipboard from handlers; route changes scroll
+  to the top.
+- `public/` is copied into the build; `vcwl.toml` takes `description`, `theme_color`, `icon`,
+  `image` and `url` for meta, Open Graph and Twitter tags.
+- Fixed: keyed `for` lists with `String` keys produced an invalid module.
+- `examples/tokenforge`: a remake of https://chteau.github.io/tokenforge in VCWL (home, benchmark,
+  three docs pages, roadmap; charts built from bound boxes; data fetched from `bench.json`).
+- Measured: the event-to-canvas path is unchanged (rows benchmark sync column 7.0 / 1.1 / 1.1 /
+  0.8 ms); the mirror adds about 20 ms when 1000 rows are created and 1.5–4 ms per update, after
+  the frame is drawn. See [benchmarks](docs/benchmarks.md).
+
 ### Milestone 7 — our own renderer instead of the DOM
 
 - Apps no longer use the browser DOM. `render.wasm`, a dependency-free Rust crate (`render/`),

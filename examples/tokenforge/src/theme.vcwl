@@ -1,0 +1,156 @@
+// The plugin dashboard's design language: warm dark by default (light when preferred), square corners.
+
+export style Page {
+    background: #141413
+    color: #faf9f5
+    min-height: 100vh
+    size: 15px
+    line-height: 1.55
+    when light {
+        background: #f4f2ec
+        color: #141413
+    }
+}
+
+export style Card {
+    padding: 20px 22px
+    background: linear-gradient(127deg, #262624f5 20%, #1a1918d1)
+    border: 1px solid #faf9f512
+    shadow: 0 20px 40px -24px #000000b3
+    when light {
+        background: linear-gradient(127deg, #ffffff 30%, #fbfaf7)
+        border: 1px solid #14141317
+        shadow: 0 16px 32px -24px #281e1459
+    }
+}
+
+export style Secondary {
+    color: #c2c0b6
+    when light {
+        color: #46453f
+    }
+}
+
+export style Muted {
+    color: #8f8d86
+    when light {
+        color: #6b6963
+    }
+}
+
+export style Label {
+    size: 12px
+    weight: 600
+    letter-spacing: 0.08em
+    case: upper
+    color: #e48a68
+    when light {
+        color: #a8461f
+    }
+}
+
+export style Caption {
+    size: 13px
+    color: #8f8d86
+    margin: 12px 0 0
+    when light {
+        color: #6b6963
+    }
+}
+
+export style Small {
+    size: 12px
+    color: #8f8d86
+    margin: 6px 0 0
+}
+
+export style SectionTitle {
+    size: 26px
+    weight: 700
+    letter-spacing: -0.01em
+    margin: 4px 0 18px
+    line-height: 1.25
+}
+
+export style Btn {
+    padding: 10px 16px
+    border: 1px solid #faf9f524
+    background: #30302e
+    color: #faf9f5
+    size: 14px
+    decoration: none
+    cursor: pointer
+    transition: background 150ms ease-out, color 150ms ease-out
+    when hover {
+        background: #3a3a37
+    }
+    when light {
+        background: #ebe9e1
+        color: #141413
+        border: 1px solid #1414132e
+    }
+}
+
+export style Primary {
+    background: #d16a47
+    border: 1px solid #d16a47
+    color: #1a1918
+    weight: 600
+    when hover {
+        background: #df7b58
+    }
+    when light {
+        background: #c4572f
+        color: #ffffff
+        border: 1px solid #c4572f
+    }
+}
+
+export style Accent {
+    color: #e48a68
+    when light {
+        color: #a8461f
+    }
+}
+
+export style Code {
+    font: ui-monospace, monospace
+    size: 0.9em
+    color: #e8e4d8
+    when light {
+        color: #3a3833
+    }
+}
+
+export style Term {
+    font: ui-monospace, monospace
+    size: 13.5px
+    white-space: pre
+    padding: 16px 18px
+    background: #141413b3
+    border: 1px solid #faf9f512
+    color: #e8e4d8
+    overflow-x: auto
+    when light {
+        background: #f1efe8
+        color: #3a3833
+    }
+}
+
+export style Reveal {
+    transition: opacity 700ms ease-out, transform 700ms ease-out
+    when appear {
+        opacity: 0
+        transform: translateY(18px)
+    }
+}
+
+export style Prose {
+    gap: 12px
+}
+
+export style Callout {
+    padding: 12px 16px
+    background: #faf9f50d
+    border-left: 3px solid #d16a47
+}

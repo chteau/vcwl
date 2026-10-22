@@ -816,10 +816,11 @@ impl<'a> Lower<'a> {
                 let f = self.m.import("now", vec![], Some(VT::F64));
                 IExpr::Call(f, vec![])
             }
-            "__print" | "__panic" | "__navigate" => {
+            "__print" | "__panic" | "__navigate" | "__copy" => {
                 let host = match name {
                     "__print" => "print",
                     "__panic" => "panic",
+                    "__copy" => "copy",
                     _ => "navigate",
                 };
                 let f = self.m.import(host, vec![VT::I32], None);

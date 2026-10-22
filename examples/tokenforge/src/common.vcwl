@@ -1,0 +1,88 @@
+// Pieces shared by the inner pages.
+
+import "./theme.vcwl"
+
+export component PageHead(crumb: String, title: String, lead: String) {
+    header {
+        style {
+            margin: 0 0 22px
+        }
+        column(gap: 4px) {
+            span(crumb) {
+                style Muted
+                style {
+                    size: 12px
+                }
+            }
+            heading(title, level: 1) {
+                style {
+                    size: 26px
+                    weight: 700
+                    letter-spacing: -0.01em
+                    margin: 2px 0 6px
+                }
+            }
+            paragraph(lead) {
+                style Secondary
+                style {
+                    max-width: 720px
+                    margin: 0
+                }
+            }
+        }
+    }
+}
+
+export component H2(text: String) {
+    heading(text, level: 2) {
+        style {
+            size: 20px
+            weight: 700
+            margin: 10px 0 2px
+            letter-spacing: -0.01em
+        }
+    }
+}
+
+export component H3(text: String) {
+    heading(text, level: 3) {
+        style {
+            size: 16px
+            weight: 600
+            margin: 12px 0 0
+        }
+    }
+}
+
+export component P(text: String) {
+    paragraph(text) {
+        style Secondary
+    }
+}
+
+export component Bullet(text: String) {
+    item(text) {
+        style Secondary
+        style {
+            margin: 2px 0
+        }
+    }
+}
+
+export component Cell(text: String, strong: Bool) {
+    span(text) {
+        style {
+            padding: 8px 10px 8px 0
+            border-bottom: 1px solid #faf9f50d
+            size: 14px
+        }
+        style Secondary
+        style if strong {
+            color: #faf9f5
+            weight: 600
+            when light {
+                color: #141413
+            }
+        }
+    }
+}

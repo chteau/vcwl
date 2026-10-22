@@ -1,0 +1,9 @@
+# VCWL example: a remake of https://chteau.github.io/tokenforge
+name = "tokenforge"
+entry = "src/main.vcwl"
+out = "dist"
+description = "A Claude Code plugin that trims what every request re-sends. Same work, same quality, about half the tokens."
+theme_color = "#d16a47"
+icon = "logo.svg"
+image = "og.png"
+url = "https://chteau.github.io/tokenforge/"

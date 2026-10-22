@@ -1,0 +1,8 @@
+// error: `color` cannot be bound to a value
+app "T"
+
+component App {
+    box {
+        style bind color: 3
+    }
+}

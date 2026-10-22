@@ -23,8 +23,10 @@ const labels = async (page) => {
 test("starts and renders into a single canvas", async () => {
   const { page } = app;
   assert.equal(await page.title(), "VCWL Todos");
-  // The page's DOM is the canvas; the element tree lives in the renderer.
-  assert.deepEqual(await page.$$eval("body *", (els) => els.map((e) => e.tagName)), ["CANVAS"]);
+  // The canvas shows the page; the only other DOM is the invisible accessibility mirror.
+  assert.equal(await page.$$eval("canvas", (cs) => cs.length), 1);
+  assert.equal(await page.$eval("canvas", (c) => c.getAttribute("aria-hidden")), "true");
+  assert.equal(await page.$eval("body", (b) => b.children.length), 2);
   const t = await tree(page);
   assert.equal(t.text("h1"), "Todos");
   assert.equal(t.count("nav a[href='#/about']"), 1);

@@ -1,0 +1,8 @@
+// error: a bound style value must be an Int or Float, found `String`
+app "T"
+
+component App {
+    box {
+        style bind opacity: "half"
+    }
+}

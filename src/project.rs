@@ -15,6 +15,8 @@ pub struct Project {
     pub root: PathBuf,
     pub entry: PathBuf,
     pub out: PathBuf,
+    /// Contents of `vcwl.toml`.
+    pub manifest: String,
 }
 
 impl Project {
@@ -36,6 +38,7 @@ impl Project {
                     root: d.to_path_buf(),
                     entry: d.join(entry),
                     out: d.join(out),
+                    manifest: text,
                 });
             }
             dir = d.parent();
@@ -91,7 +94,58 @@ pub fn csp(caps: &crate::app::Capabilities, dev: bool) -> String {
 
 /// The page: metadata and one script. The app's configuration and styles travel inside
 /// `app.wasm`; the renderer creates the only element, a canvas.
-pub fn index_html(title: &str, caps: &crate::app::Capabilities, dev: bool) -> String {
+/// Page metadata from `vcwl.toml` (`description`, `theme_color`, `icon`, `image`, `url`).
+#[derive(Default)]
+pub struct Meta {
+    pub description: Option<String>,
+    pub theme_color: Option<String>,
+    pub icon: Option<String>,
+    pub image: Option<String>,
+    pub url: Option<String>,
+}
+
+impl Meta {
+    fn from_manifest(text: &str) -> Meta {
+        let v = |k| manifest_value(text, k);
+        Meta {
+            description: v("description"),
+            theme_color: v("theme_color"),
+            icon: v("icon"),
+            image: v("image"),
+            url: v("url"),
+        }
+    }
+
+    fn html(&self, title: &str) -> String {
+        let mut s = String::new();
+        let mut tag = |attr: &str, name: &str, content: &str| {
+            s.push_str(&format!(
+                "<meta {attr}=\"{name}\" content=\"{}\">\n",
+                html_escape(content)
+            ));
+        };
+        if let Some(d) = &self.description {
+            tag("name", "description", d);
+            tag("property", "og:description", d);
+        }
+        tag("property", "og:title", title);
+        tag("property", "og:type", "website");
+        if let Some(u) = &self.url {
+            tag("property", "og:url", u);
+        }
+        if let Some(i) = &self.image {
+            let abs = format!("{}{i}", self.url.as_deref().unwrap_or(""));
+            tag("property", "og:image", &abs);
+            tag("name", "twitter:card", "summary_large_image");
+        }
+        if let Some(c) = &self.theme_color {
+            tag("name", "theme-color", c);
+        }
+        s
+    }
+}
+
+pub fn index_html(title: &str, caps: &crate::app::Capabilities, dev: bool, meta: &Meta) -> String {
     let dev_script = if dev {
         "\n<script type=\"module\" src=\"dev.js\"></script>"
     } else {
@@ -101,11 +155,13 @@ pub fn index_html(title: &str, caps: &crate::app::Capabilities, dev: bool) -> St
         "<!doctype html>\n<html lang=\"en\">\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n\
 <meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n\
-<title>{title}</title>\n<link rel=\"icon\" href=\"data:,\">\n\
+<title>{title}</title>\n{meta}<link rel=\"icon\" href=\"{icon}\">\n\
 <script type=\"module\" src=\"boot.js\"></script>{dev_script}\n\
 <noscript>This application needs JavaScript and WebAssembly enabled.</noscript>\n",
         csp = html_escape(&csp(caps, dev)),
         title = html_escape(title),
+        meta = meta.html(title),
+        icon = html_escape(meta.icon.as_deref().unwrap_or("data:,")),
     )
 }
 
@@ -149,10 +205,15 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
         ));
     };
     std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let project = entry.parent().and_then(|d| Project::find(d).ok());
+    let meta = project
+        .as_ref()
+        .map(|p| Meta::from_manifest(&p.manifest))
+        .unwrap_or_default();
     let mut files: Vec<(&str, Vec<u8>)> = vec![
         (
             "index.html",
-            index_html(&app.title, &app.caps, dev).into_bytes(),
+            index_html(&app.title, &app.caps, dev, &meta).into_bytes(),
         ),
         ("app.wasm", app_wasm(&o.wasm, app, dev)),
         ("render.wasm", RENDER_WASM.to_vec()),
@@ -176,7 +237,46 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
             sizes.push((name.to_string(), data.len()));
         }
     }
+    // Static assets (images, fonts, data) are copied as they are.
+    if let Some(p) = &project {
+        let public = p.root.join("public");
+        if public.is_dir() {
+            copy_dir(&public, out, &public)?;
+        }
+    }
     Ok(sizes)
+}
+
+fn copy_dir(dir: &Path, out: &Path, base: &Path) -> Result<(), String> {
+    let err = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+    for e in std::fs::read_dir(dir).map_err(|e| err(dir, e))? {
+        let path = e.map_err(|e| err(dir, e))?.path();
+        let rel = path.strip_prefix(base).unwrap();
+        let dest = out.join(rel);
+        if path.is_dir() {
+            std::fs::create_dir_all(&dest).map_err(|e| err(&dest, e))?;
+            copy_dir(&path, out, base)?;
+        } else {
+            if rel.parent() == Some(Path::new(""))
+                && [
+                    "index.html",
+                    "app.wasm",
+                    "render.wasm",
+                    "vcwl.js",
+                    "boot.js",
+                    "dev.js",
+                ]
+                .contains(&rel.to_str().unwrap_or(""))
+            {
+                return Err(format!(
+                    "{}: conflicts with a generated file",
+                    path.display()
+                ));
+            }
+            std::fs::copy(&path, &dest).map_err(|e| err(&path, e))?;
+        }
+    }
+    Ok(())
 }
 
 pub fn clean(p: &Project) -> Result<bool, String> {

@@ -1,0 +1,242 @@
+import "./data.vcwl"
+import "./theme.vcwl"
+import "./common.vcwl"
+import "./charts.vcwl"
+import "./home.vcwl"
+
+export component Docs(b: Bench, page: String) {
+    let title = match page {
+        "lean" => "Lean levels",
+        "faq" => "FAQ",
+        _ => "Install & first start",
+    }
+    let lead = match page {
+        "lean" => "Every request carries the definition of every enabled tool and skill. Lean levels hide the ones a coding session rarely needs.",
+        "faq" => "Short answers to common questions.",
+        _ => "Two commands inside Claude Code. On first start, TokenForge sets one setting and tells you about it.",
+    }
+
+    grid(gap: 32px) {
+        style {
+            columns: 200px 1fr
+            align: start
+            when viewport < 800px {
+                columns: 1fr
+                gap: 16px
+            }
+        }
+        nav(label: "Docs pages") {
+            style {
+                display: flex
+                direction: column
+                border-left: 1px solid #faf9f512
+                when viewport < 800px {
+                    direction: row
+                    wrap: wrap
+                    border-left: none
+                }
+            }
+            TocLink(text: "Install & first start", to: "/docs/install", on: page == "install")
+            TocLink(text: "Lean levels", to: "/docs/lean", on: page == "lean")
+            TocLink(text: "FAQ", to: "/docs/faq", on: page == "faq")
+            link("All docs on GitHub →", href: "https://github.com/chteau/tokenforge#readme") {
+                style {
+                    padding: 6px 12px
+                    size: 13.5px
+                    decoration: none
+                }
+                style Muted
+            }
+        }
+        column {
+            PageHead(crumb: "Docs", title: title, lead: lead)
+            article {
+                style Card
+                column(gap: 10px) {
+                    match page {
+                        "lean" => LeanDoc(b: b)
+                        "faq" => Faq(b: b)
+                        _ => InstallDoc()
+                    }
+                }
+            }
+            row(gap: 12px, justify: between) {
+                style {
+                    margin: 36px 0 0
+                }
+                match page {
+                    "lean" => {
+                        Pager(text: "Install & first start", to: "/docs/install", next: false)
+                        Pager(text: "FAQ", to: "/docs/faq", next: true)
+                    }
+                    "faq" => {
+                        Pager(text: "Lean levels", to: "/docs/lean", next: false)
+                    }
+                    _ => {
+                        Pager(text: "Lean levels", to: "/docs/lean", next: true)
+                    }
+                }
+            }
+        }
+    }
+}
+
+component TocLink(text: String, to: String, on: Bool) {
+    link(text, to: to, current: on) {
+        style {
+            padding: 6px 12px
+            size: 13.5px
+            decoration: none
+            color: #c2c0b6
+            transition: background 150ms
+            when hover {
+                background: #faf9f50d
+            }
+            when light {
+                color: #46453f
+            }
+        }
+        style if on {
+            color: #faf9f5
+            shadow: inset 2px 0 0 #d16a47
+            when light {
+                color: #141413
+            }
+        }
+    }
+}
+
+component Pager(text: String, to: String, next: Bool) {
+    link(to: to, label: if next { "Next: {text}" } else { "Previous: {text}" }) {
+        style {
+            display: flex
+            direction: column
+            grow: 1
+            padding: 12px 14px
+            border: 1px solid #faf9f512
+            background: #1a1918
+            decoration: none
+            color: #faf9f5
+            transition: background 150ms
+            when hover {
+                background: #262624
+            }
+            when light {
+                background: #faf9f5
+                color: #141413
+            }
+        }
+        style if next {
+            text-align: right
+        }
+        span(if next { "Next" } else { "Previous" }) {
+            style Muted
+            style {
+                size: 11px
+                case: upper
+                letter-spacing: 0.06em
+            }
+        }
+        span(text)
+    }
+}
+
+component InstallDoc {
+    H2(text: "Install")
+    P(text: "Run these inside Claude Code:")
+    CopyBlock(code: "/plugin marketplace add chteau/tokenforge\n/plugin install tokenforge@tokenforge")
+    P(text: "Requirements: Claude Code and Node.js 18 or newer. Subscription (OAuth) logins and API keys both work. The tmap indexer needs a release binary for your platform, or Rust to build one.")
+    P(text: "Plugins load only when Claude Code starts. Start a new session after installing. /clear does not reload plugins.")
+    H2(text: "What you’ll see")
+    P(text: "Nothing to learn: it works on its own, in the terminal and in Claude Desktop.")
+    list {
+        style {
+            padding: 0 0 0 22px
+        }
+        Bullet(text: "Every new session starts with “TokenForge: active · lean balanced · replies full · dashboard …”. The first three sessions add a short walkthrough. This line is shown to you only and costs no tokens (TFORGE_BANNER=0 hides it).")
+        Bullet(text: "After /clear: “TokenForge: checkpoint saved (… ago)”. A compact checkpoint is reloaded so Claude continues where you stopped (TFORGE_CLEAR_RELOAD=0 turns it off).")
+        Bullet(text: "Once a day, in the background, it checks for a newer version and tells you how to update (TFORGE_UPDATE_CHECK=0 turns it off).")
+        Bullet(text: "No permission prompts for TokenForge’s own read-only tools (tread, tview, tkit ctx/check/test, tforge recall). TFORGE_AUTO_ALLOW=0 turns this off.")
+    }
+    H2(text: "What happens on first start")
+    list {
+        style {
+            padding: 0 0 0 22px
+        }
+        Bullet(text: "Lean level balanced is set once. TokenForge writes only its own entries to ~/.claude/settings.json: permissions.deny, skillOverrides and autoCompactWindow. It never re-applies after you pick a level.")
+        Bullet(text: "The local dashboard starts in the background, on 127.0.0.1:7878 (or the next free port).")
+        Bullet(text: "A small session context is added: a terse-reply rule of about 60 tokens and an efficiency policy of about 370.")
+        Bullet(text: "Hooks start working. Some commands get rewritten to compact tools.")
+    }
+    paragraph {
+        style Callout
+        style Secondary
+        strong("Opt out of the settings change. ")
+        text("Set TFORGE_LEAN_DEFAULT=off before the first start. You can also pick another level the same way: on, max or ultra.")
+    }
+    CopyBlock(code: "TFORGE_LEAN_DEFAULT=off claude")
+    P(text: "To undo it later, run tforge lean off. It removes exactly the entries TokenForge added, never your own.")
+    H2(text: "Updates")
+    P(text: "TokenForge is a normal plugin. It never patches Claude Code or wraps the claude binary, so Claude Code’s auto-update keeps working. To update TokenForge, enable auto-update for the tokenforge marketplace in /plugin, or run:")
+    CopyBlock(code: "/plugin marketplace update tokenforge")
+    H2(text: "Uninstall")
+    P(text: "First turn the proxy off, then uninstall:")
+    CopyBlock(code: "tforge proxy off\n/plugin uninstall tokenforge@tokenforge")
+    P(text: "Without the first step your settings keep sending Claude Code’s requests to a proxy that no longer runs, and every request fails. To fix it by hand, remove ANTHROPIC_BASE_URL from the env of ~/.claude/settings.json.")
+}
+
+component LeanDoc(b: Bench) {
+    H2(text: "The levels")
+    P(text: "Measured fixed context per request (Opus 5.5). {b.leanSource}")
+    LeanChart(b: b)
+    list {
+        style {
+            padding: 0 0 0 22px
+        }
+        Bullet(text: "on hides agent-orchestration tools: Workflow, Monitor, Cron*, ScheduleWakeup, RemoteTrigger, PushNotification, SendMessage, ListAgents, TaskStop, worktrees, NotebookEdit.")
+        Bullet(text: "balanced (default) also marks Claude Code’s 19 built-in skills user-invocable-only. Claude no longer sees them, but you can still type them as slash commands.")
+        Bullet(text: "max also hides the Skill tool, subagents (Task), WebFetch/WebSearch and Claude Code’s git instructions.")
+        Bullet(text: "ultra also hides Read/Edit/Write. Edits go through one tkit edit per step; Claude reads code with tread or cat, which tview folds. No image or PDF viewing.")
+    }
+    H2(text: "Change the level")
+    P(text: "Any of these works. Changes apply to sessions started afterwards.")
+    CopyBlock(code: "/tokenforge:lean balanced     # inside Claude Code\ntforge lean max               # in a terminal\ntforge lean off               # remove everything TokenForge added")
+    H2(text: "What gets written")
+    P(text: "Only TokenForge’s own entries in ~/.claude/settings.json: permissions.deny, skillOverrides, autoCompactWindow, and includeGitInstructions at max/ultra. off removes exactly those.")
+    H2(text: "Which one to use")
+    P(text: "Keep balanced unless you have a reason. On short tasks this fixed floor is most of the cost, so going lower helps. ultra is the smallest: Claude edits through tkit edit instead of the native tools, and loses image and PDF viewing.")
+}
+
+component Faq(b: Bench) {
+    let a = b.aggregate
+    let equal = a.tasks - a.qualityWorse.len()
+    let lists = pct(a.medianPriceWeighted)
+    let tokens = pct(a.medianSavings)
+    let floor = fmt_k(lean_tokens(b, "balanced"), true)
+
+    QA(q: "Does it change Claude Code itself?", a: "No. It never patches Claude Code or wraps the claude binary. It edits ~/.claude/settings.json only for lean levels, with its own entries, and tforge lean off removes them.")
+    QA(q: "Will quality drop?", a: "In the benchmark, quality was equal or better on {equal} of {a.tasks} tasks. Most drops are 1 to 3 points; PHP ticketing scored 93, missing a hidden test on seat holds in both its runs.")
+    QA(q: "Why is the saving at list prices ({lists}) smaller than the token saving ({tokens})?", a: "Most of the saved tokens are cache reads, which cost 0.05× of normal input, and the 1-hour cache writes Claude Code makes cost 2×. List prices are roughly what usage limits count. TokenForge cost less on {a.tasksCheaper} of {a.tasks} tasks.")
+    QA(q: "Claude ran a different command than it wrote. Why?", a: "The Bash router rewrote it to a compact tool (for example cargo test → tkit test). Prefix the command with TFORGE_RAW=1, or repeat the identical call, to run it unchanged.")
+    QA(q: "I installed it but nothing changed.", a: "Plugins load only when Claude Code starts; /clear does not reload them. Start a new session.")
+    QA(q: "Does it work with a subscription login?", a: "Yes. Subscription (OAuth) logins and API keys both work.")
+    QA(q: "Which platforms?", a: "Linux, macOS and Windows. You need Node.js 18 or newer.")
+    QA(q: "How long were the benchmark sessions?", a: "Roughly 5–30 calls each. Long interactive sessions are not measured yet.")
+    QA(q: "Can I check the numbers?", a: "Yes. The raw report is in bench/reports/ and bench/ reruns everything. The default fixed context is {floor} per request.")
+}
+
+component QA(q: String, a: String) {
+    column(gap: 4px) {
+        style {
+            padding: 10px 0
+            border-bottom: 1px solid #faf9f50d
+        }
+        heading(q, level: 3) {
+            style {
+                size: 15px
+                weight: 600
+            }
+        }
+        P(text: a)
+    }
+}

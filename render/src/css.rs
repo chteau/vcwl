@@ -21,6 +21,8 @@ pub enum Pseudo {
     Active,
     Disabled,
     Checked,
+    /// Until the element first scrolls into view.
+    Appear,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -219,6 +221,7 @@ fn block(src: &str, conds: &[Cond], out: &mut Vec<Rule>) {
                     "active" => pseudo.push(Pseudo::Active),
                     "disabled" => pseudo.push(Pseudo::Disabled),
                     "checked" => pseudo.push(Pseudo::Checked),
+                    "appear" => pseudo.push(Pseudo::Appear),
                     _ => known = false,
                 }
             }

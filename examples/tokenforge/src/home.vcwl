@@ -1,0 +1,588 @@
+import "./data.vcwl"
+import "./theme.vcwl"
+import "./charts.vcwl"
+
+export component Home(b: Bench) {
+    let a = b.aggregate
+    let off = lean_tokens(b, "off")
+    let bal = lean_tokens(b, "balanced")
+    let floor = fmt_k(off, true) + " → " + fmt_k(bal, true)
+    let calls = r(a.medianToolCallReduction)
+    let m_existing = measured(b, "existing")
+    let m_scratch = measured(b, "scratch")
+    let m_all = measured(b, "")
+    let model = model_name()
+
+    column {
+        Hero(version: b.pluginVersion)
+
+        section(id: "how", label: "Claude Code pays for the same tokens over and over.") {
+            style Reveal
+            style Sec
+            SectionHead(label: "How it works", title: "Claude Code pays for the same tokens over and over.")
+            grid(gap: 18px) {
+                style TwoCols
+                article {
+                    style Card
+                    column {
+                        paragraph {
+                            style Secondary
+                            text("Claude Code doesn’t remember anything between API calls. Each time Claude runs a tool (read a file, run the tests, edit something), the next call sends ")
+                            strong("everything again")
+                            text(": the tool definitions and instructions, your messages, and every file and command output so far.")
+                        }
+                        paragraph("So a file read early in a session is paid for on every call after it. In an 18-call session, a file read in the first call is sent again in each of the other 17. Most of a bill is re-reading, not new work.") {
+                            style Secondary
+                        }
+                        paragraph {
+                            style Secondary
+                            text("That gives three things to cut: ")
+                            strong("what every call carries")
+                            text(", ")
+                            strong("how big each tool output is")
+                            text(", and ")
+                            strong("how many calls there are")
+                            text(". TokenForge works on all three, without changing how you use Claude Code.")
+                        }
+                    }
+                }
+                article {
+                    style Card
+                    Anatomy(floor: 30.0)
+                    paragraph("A sketch, not one real session: the tools-and-instructions part is measured ({floor} per call), the output sizes are made up to show the shape. Real sessions are below.") {
+                        style Caption
+                    }
+                }
+            }
+            grid(gap: 18px) {
+                style ThreeCols
+                style {
+                    margin: 18px 0 0
+                }
+                Cut(title: "Carry less on every call", body: "Lean levels hide tools and built-in skills a coding session rarely needs. They’re sent with every call, so trimming them saves on all of them.", how: "{floor} per call by default", tone: 1)
+                Cut(title: "Keep tool output small", body: "Big file dumps fold to their outline, long lines are cut, and build and test runs report only the summary and failures. Whatever lands in context is re-sent on every later call.", how: "tview · tkit check / test", tone: 2)
+                Cut(title: "Make fewer calls", body: "Several reads in one call, edits batched together, past sessions searched instead of re-explored, and a question you already asked answered without a model call.", how: "median {calls}% fewer tool calls", tone: 3)
+            }
+        }
+
+        section(id: "idea", label: "The same task, measured: two real sessions.") {
+            style Reveal
+            style Sec
+            SectionHead(label: "One real session", title: "The same task, measured: two real sessions.")
+            article {
+                style Card
+                column(gap: 10px) {
+                    paragraph("{b.curve.label} task (“{b.curve.title}”), one real session each. Each bar is the context size of one API request. {m_existing}") {
+                        style Caption
+                    }
+                    Legend(native: "clean Claude Code", forge: "tokenforge")
+                    ContextChart(c: b.curve)
+                }
+            }
+            paragraph("Same task, fewer requests, and each one smaller.") {
+                style Caption
+            }
+        }
+
+        section(id: "levers", label: "Five changes, active from the first session.") {
+            style Reveal
+            style Sec
+            SectionHead(label: "What it changes", title: "Five changes, active from the first session.")
+            grid(gap: 10px) {
+                style FiveCols
+                Rung(n: 1, title: "Smaller floor.", body: "Lean levels hide tools and built-in skills a coding session rarely needs: {floor} per request by default.")
+                Rung(n: 2, title: "Fewer round trips.", body: "One-call reads with tread, batched edits. Median {calls}% fewer tool calls.")
+                Rung(n: 3, title: "Smaller tool results.", body: "Broad dumps fold, long lines are cut, build and test output is compacted to failures.")
+                Rung(n: 4, title: "Nothing asked twice.", body: "Past sessions are searched with tforge recall; a repeated question is answered at zero tokens.")
+                Rung(n: 5, title: "Only what was asked.", body: "Every stated requirement is met; unrequested extras are left out.")
+            }
+        }
+
+        section(id: "numbers", label: "Measured on {a.tasks} real tasks, not estimated.") {
+            style Reveal
+            style Sec
+            SectionHead(label: "Benchmark", title: "Measured on {a.tasks} real tasks, not estimated.")
+            grid(gap: 1px) {
+                style FiveCols
+                style {
+                    background: #faf9f512
+                    border: 1px solid #faf9f512
+                }
+                Stat(n: r(a.medianSavings) + "%", label: "fewer tokens (median)", hi: true)
+                Stat(n: "{a.tasksCheaper}/{a.tasks}", label: "cheaper at list prices", hi: false)
+                Stat(n: r(a.scratchMedian) + "%", label: "built from scratch", hi: false)
+                Stat(n: r(a.existingMedian) + "%", label: "existing codebases", hi: false)
+                Stat(n: calls + "%", label: "fewer tool calls", hi: false)
+            }
+            article {
+                style Card
+                style {
+                    margin: 18px 0 0
+                }
+                column(gap: 10px) {
+                    paragraph("Total tokens per task (input, cache and output), log scale. Each line runs from clean Claude Code to TokenForge. Quality is scored by hidden tests.") {
+                        style Caption
+                    }
+                    Legend(native: "clean Claude Code", forge: "tokenforge (default)")
+                    ChartTitle(text: "Built from scratch · median −" + r(a.scratchMedian) + "%")
+                    Dumbbell(tasks: tasks_in(b, "scratch"))
+                    paragraph(m_scratch) {
+                        style Small
+                    }
+                    ChartTitle(text: "In an existing codebase · median −" + r(a.existingMedian) + "%")
+                    Dumbbell(tasks: tasks_in(b, "existing"))
+                    ChartTitle(text: "Academic work · median −" + r(a.academicMedian) + "%")
+                    Dumbbell(tasks: tasks_in(b, "academic"))
+                }
+            }
+            paragraph {
+                style Caption
+                text("{a.tasks} tasks, {a.scratchTasks} from-scratch projects. {model} on both sides, checked in every API response. Medians of 2 runs per side (more on six tasks). {m_all} ")
+                link("Method and caveats →", to: "/benchmark") {
+                    style Accent
+                }
+            }
+        }
+
+        section(id: "install", label: "Add the marketplace, install, restart.") {
+            style Reveal
+            style Sec
+            SectionHead(label: "Install", title: "Add the marketplace, install, restart.")
+            CopyBlock(code: "/plugin marketplace add chteau/tokenforge\n/plugin install tokenforge@tokenforge")
+            grid(gap: 10px) {
+                style FourCols
+                style {
+                    margin: 14px 0 0
+                }
+                Other(title: "update", code: "/plugin marketplace update tokenforge")
+                Other(title: "dashboard", code: "/tokenforge:dashboard")
+                Other(title: "everything off", code: "tforge lean off")
+                Other(title: "uninstall", code: "/plugin uninstall tokenforge@tokenforge")
+            }
+            paragraph {
+                style Caption
+                text("Start a new session after installing; ")
+                code("/clear") {
+                    style Code
+                }
+                text(" doesn’t reload plugins. The first start sets the lean level to ")
+                code("balanced") {
+                    style Code
+                }
+                text(". More in the ")
+                link("install docs", to: "/docs/install") {
+                    style Accent
+                }
+                text(".")
+            }
+        }
+
+        section(id: "commands", label: "Everything it adds, in one table.") {
+            style Reveal
+            style Sec
+            SectionHead(label: "Commands", title: "Everything it adds, in one table.")
+            column {
+                style Card
+                style {
+                    padding: 6px 22px
+                }
+                Command(code: "/tokenforge:lean on|balanced|max|ultra|off", what: "set the lean level")
+                Command(code: "/tokenforge:terse full|lite|off", what: "reply style")
+                Command(code: "/tokenforge:dashboard", what: "local dashboard: usage, limits, sessions, memory graph")
+                Command(code: "/tokenforge:meter", what: "token use of recent sessions")
+                Command(code: "/tokenforge:handoff", what: "save state, /clear, continue small")
+                Command(code: "/tokenforge:forge", what: "plan-then-workers build for large new apps")
+                Command(code: "tforge recall <words>", what: "search past sessions")
+                Command(code: "tread <symbol|file:range|file:/re/>…", what: "several reads in one call")
+            }
+        }
+
+        section(id: "levels", label: "Choose what each request carries.") {
+            style Reveal
+            style Sec
+            SectionHead(label: "Lean levels", title: "Choose what each request carries.")
+            grid(gap: 18px) {
+                style FourCols
+                Level(name: "on", tokens: fmt_k(lean_tokens(b, "on"), true), body: "Hides agent-orchestration tools: Workflow, Monitor, Cron, worktrees, NotebookEdit.", default: false)
+                Level(name: "balanced", tokens: fmt_k(bal, true), body: "Also hides the 19 built-in skills from Claude. You can still type them. Your skills, subagents and web stay.", default: true)
+                Level(name: "max", tokens: fmt_k(lean_tokens(b, "max"), true), body: "Also drops the Skill tool, subagents, web tools and the git instructions.", default: false)
+                Level(name: "ultra", tokens: fmt_k(lean_tokens(b, "ultra"), true), body: "Also drops Read, Edit and Write. Claude edits with one tkit edit per step and reads with tread or cat. No image or PDF viewing.", default: false)
+            }
+            article {
+                style Card
+                style {
+                    margin: 18px 0 0
+                }
+                column(gap: 10px) {
+                    paragraph("Fixed context per request, before any work happens. {b.leanSource}") {
+                        style Caption
+                    }
+                    Legend(native: "clean Claude Code", forge: "tokenforge lean levels")
+                    LeanChart(b: b)
+                }
+            }
+        }
+
+        section(label: "Get started") {
+            style Reveal
+            style {
+                margin: 72px 0 0
+                padding: 48px 16px
+                text-align: center
+                border-top: 1px solid #faf9f512
+            }
+            column(gap: 14px, align: center) {
+                image(src: "logo.svg", alt: "") {
+                    style {
+                        width: 56px
+                        height: 56px
+                    }
+                }
+                paragraph("Spend tokens on the work, not on re-reading it.") {
+                    style {
+                        size: 22px
+                        weight: 600
+                    }
+                }
+                row(gap: 10px, wrap: wrap, justify: center) {
+                    link("Install", href: "#install") {
+                        style Btn
+                        style Primary
+                    }
+                    link("Read the docs", to: "/docs/install") {
+                        style Btn
+                    }
+                }
+            }
+        }
+    }
+}
+
+style TwoCols {
+    columns: 1fr 1fr
+    when viewport < 860px {
+        columns: 1fr
+    }
+}
+
+style ThreeCols {
+    columns: 1fr 1fr 1fr
+    when viewport < 860px {
+        columns: 1fr
+    }
+}
+
+style FourCols {
+    columns: 1fr 1fr 1fr 1fr
+    when viewport < 1000px {
+        columns: 1fr 1fr
+    }
+    when viewport < 560px {
+        columns: 1fr
+    }
+}
+
+style FiveCols {
+    columns: 1fr 1fr 1fr 1fr 1fr
+    when viewport < 1000px {
+        columns: 1fr 1fr 1fr
+    }
+    when viewport < 560px {
+        columns: 1fr 1fr
+    }
+}
+
+component Hero(version: String) {
+    header(label: "TokenForge") {
+        style Reveal
+        column(gap: 0px, align: center) {
+            style {
+                padding: 48px 0 24px
+                text-align: center
+            }
+            image(src: "logo.svg", alt: "") {
+                style {
+                    width: 88px
+                    height: 88px
+                    margin: 0 0 14px
+                }
+            }
+            row(align: end) {
+                heading("TokenForge", level: 1) {
+                    style {
+                        size: 60px
+                        weight: 700
+                        line-height: 1.02
+                        margin: 0 0 12px
+                        letter-spacing: -0.02em
+                        when viewport < 600px {
+                            size: 44px
+                        }
+                    }
+                }
+                box {
+                    style {
+                        width: 4px
+                        height: 50px
+                        margin: 0 0 16px 4px
+                        background: #d16a47
+                        when viewport < 600px {
+                            height: 36px
+                        }
+                    }
+                }
+            }
+            paragraph("Where the fuck did all my tokens go?") {
+                style {
+                    size: 21px
+                    margin: 0 0 10px
+                }
+            }
+            paragraph("A Claude Code plugin that trims what every request re-sends. Same work, same quality, about half the tokens.") {
+                style Secondary
+                style {
+                    max-width: 560px
+                    margin: 0 0 22px
+                }
+            }
+            row(gap: 10px, wrap: wrap, justify: center) {
+                link("View on GitHub", href: "https://github.com/chteau/tokenforge") {
+                    style Btn
+                    style Primary
+                }
+                link("Install", href: "#install") {
+                    style Btn
+                }
+            }
+            paragraph("Claude Code plugin · v{version} · MIT") {
+                style Small
+                style {
+                    margin: 16px 0 0
+                }
+            }
+        }
+    }
+}
+
+style Sec {
+    margin: 72px 0 0
+}
+
+component SectionHead(label: String, title: String) {
+    column {
+        paragraph(label) {
+            style Label
+        }
+        heading(title, level: 2) {
+            style SectionTitle
+        }
+    }
+}
+
+component ChartTitle(text: String) {
+    heading(text, level: 3) {
+        style {
+            size: 15px
+            weight: 600
+            margin: 14px 0 4px
+        }
+    }
+}
+
+component Cut(title: String, body: String, how: String, tone: Int) {
+    article {
+        style Card
+        column(gap: 8px) {
+            row(gap: 8px, align: center) {
+                box {
+                    style {
+                        width: 10px
+                        height: 10px
+                        background: #8f8d86
+                    }
+                    style if tone == 1 {
+                        background: #8c74e6
+                    }
+                    style if tone == 2 {
+                        background: #3f8fd8
+                    }
+                }
+                heading(title, level: 3) {
+                    style {
+                        size: 15px
+                        weight: 600
+                    }
+                }
+            }
+            paragraph(body) {
+                style Secondary
+            }
+            paragraph(how) {
+                style Accent
+                style {
+                    size: 13px
+                    weight: 600
+                }
+            }
+        }
+    }
+}
+
+component Rung(n: Int, title: String, body: String) {
+    column(gap: 8px) {
+        style Card
+        style {
+            padding: 16px
+        }
+        span(n.to_string()) {
+            style {
+                width: 26px
+                height: 26px
+                text-align: center
+                line-height: 26px
+                background: #d16a4729
+                weight: 700
+                size: 13px
+            }
+            style Accent
+        }
+        strong(title)
+        paragraph(body) {
+            style Secondary
+            style {
+                size: 14px
+            }
+        }
+    }
+}
+
+component Stat(n: String, label: String, hi: Bool) {
+    column(gap: 2px) {
+        style {
+            padding: 18px 16px
+            background: #1a1918
+            when light {
+                background: #faf9f5
+            }
+        }
+        span(n) {
+            style {
+                size: 30px
+                weight: 700
+            }
+            style if hi {
+                color: #e48a68
+            }
+        }
+        span(label) {
+            style Muted
+            style {
+                size: 12px
+            }
+        }
+    }
+}
+
+export component CopyBlock(code: String) {
+    state copied: Bool = false
+
+    row(gap: 12px, justify: between, align: start) {
+        style Term
+        code(code)
+        button(if copied { "Copied" } else { "Copy" }, label: "Copy the commands") {
+            style {
+                padding: 4px 10px
+                shrink: 0
+                size: 12px
+                background: #30302e
+                color: #c2c0b6
+                border: 1px solid #faf9f524
+                font: system-ui, sans-serif
+                cursor: pointer
+            }
+            on click {
+                copy(code)
+                copied = true
+            }
+        }
+    }
+}
+
+component Other(title: String, code: String) {
+    column(gap: 4px) {
+        style Card
+        style {
+            padding: 14px 16px
+        }
+        heading(title, level: 3) {
+            style {
+                size: 13px
+                weight: 600
+            }
+            style Muted
+        }
+        code(code) {
+            style Code
+            style {
+                size: 13px
+            }
+        }
+    }
+}
+
+component Command(code: String, what: String) {
+    row(gap: 16px, wrap: wrap) {
+        style {
+            padding: 10px 0
+            border-bottom: 1px solid #faf9f50d
+        }
+        code(code) {
+            style Code
+            style {
+                min-width: 320px
+                when viewport < 700px {
+                    min-width: 0
+                }
+            }
+        }
+        span(what) {
+            style Secondary
+        }
+    }
+}
+
+component Level(name: String, tokens: String, body: String, default: Bool) {
+    column(gap: 6px) {
+        style Card
+        style if default {
+            border: 1px solid #d16a47
+        }
+        if default {
+            span("default") {
+                style Label
+                style {
+                    size: 11px
+                }
+            }
+        }
+        heading(name, level: 3) {
+            style {
+                size: 18px
+                weight: 700
+            }
+        }
+        span("{tokens} / request") {
+            style Accent
+            style {
+                size: 13px
+                weight: 600
+            }
+        }
+        paragraph(body) {
+            style Secondary
+            style {
+                size: 14px
+            }
+        }
+    }
+}

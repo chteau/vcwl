@@ -1,0 +1,32 @@
+// Compiles: string list keys, bound styles, clipboard, anchors, `when appear`, current links.
+app "Features"
+
+struct Row {
+    id: String,
+    share: Float,
+}
+
+component App {
+    state rows: [Row] = [Row { id: "a", share: 25.0 }, Row { id: "b", share: 75.0 }]
+
+    section(id: "top") {
+        style {
+            transition: opacity 300ms ease-out
+            when appear {
+                opacity: 0
+            }
+        }
+        link("Top", href: "#top", current: true)
+        for r in rows key r.id {
+            box {
+                style bind width: r.share %
+                    style bind opacity: r.share / 100.0
+            }
+        }
+        button("Copy") {
+            on click {
+                copy("hello")
+            }
+        }
+    }
+}

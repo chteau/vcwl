@@ -1,0 +1,11 @@
+// error: `copy` can only be called from an event handler
+app "T"
+
+fn grab() -> Int {
+    copy("x")
+    1
+}
+
+component App {
+    text("{grab()}")
+}

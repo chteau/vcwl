@@ -23,16 +23,24 @@ Two timings per action:
 - **frame**: from the click until the next frame has been produced (`requestAnimationFrame` then a
   task). This includes the browser's rendering for both, but is quantized by frame scheduling.
 
-Measured 2026-10-22; Linux, Chrome 151 headless, Node 26, VCWL canvas renderer:
+Measured 2026-10-22; Linux, Chrome 151 headless, Node 26, VCWL canvas renderer with the
+accessibility mirror ([ADR 11](adr/0011-accessibility-mirror.md)):
 
 | action | VCWL sync | DOM sync | VCWL frame | DOM frame |
 | --- | ---: | ---: | ---: | ---: |
-| create 1000 rows | 6.9 | 6.4 | 11.2 | 15.4 |
-| update every 10th row | 1.0 | 0.5 | 11.7 | 9.2 |
-| swap two rows | 1.0 | 0.2 | 16.4 | 16.0 |
-| clear | 0.8 | 0.6 | 15.3 | 15.7 |
+| create 1000 rows | 7.0 | 7.1 | 38.1 | 13.7 |
+| update every 10th row | 1.1 | 0.5 | 18.8 | 9.6 |
+| swap two rows | 1.1 | 0.2 | 13.7 | 16.0 |
+| clear | 0.8 | 0.6 | 15.0 | 15.7 |
 
 Timer resolution in the page is 0.1 ms. Rows below the viewport are laid out but not painted.
+
+The frame column now includes the accessibility mirror, which is updated right after the canvas
+is drawn: about 20 ms to create the 1000 mirror rows (2000+ DOM elements), 1.5–4 ms to bring it up
+to date after an update or swap (measured with `vcwl.stats.mirrorMs`). Before the mirror, the
+VCWL frame column was 11.2 / 11.7 / 16.4 / 15.3. So with the mirror, creating a large list takes
+2.8× the DOM version's frame time and updating it 2×; the event-to-canvas work (sync column) is
+unchanged.
 
 History of the same benchmark (sync column):
 
@@ -41,7 +49,9 @@ History of the same benchmark (sync column):
 | DOM host, greedy keyed moves | 7.7 | 0.6 | 7.1 | 1.1 |
 | DOM host, LIS keyed moves (2026-10-21) | 7.7 | 0.6 | 0.3 | 1.1 |
 | canvas renderer, full restyle/relayout/repaint | 10.5 | 4.9 | 4.6 | 0.7 |
-| canvas renderer, incremental (current) | 6.9 | 1.0 | 1.0 | 0.8 |
+| canvas renderer, incremental | 6.9 | 1.0 | 1.0 | 0.8 |
+| + accessibility mirror updated during events (first version) | 21.9 | 6.4 | 17.3 | 6.1 |
+| + mirror after paint, keyed moves, entry hashes (current) | 7.0 | 1.1 | 1.1 | 0.8 |
 
 What this shows: with incremental style and layout and viewport culling, the canvas renderer's
 complete pipeline stays within a small factor of the browser's DOM update for these operations.
@@ -54,12 +64,13 @@ It does not compare against UI frameworks, larger or text-heavy pages, memory us
 
 | file | todo example | rows benchmark |
 | --- | ---: | ---: |
-| app.wasm (includes styles) | 17,276 / 6,589 | 5,729 / 2,645 |
-| render.wasm (same for every app) | 236,790 / 106,659 | 236,790 / 106,659 |
-| vcwl.js (host) | 23,854 / 7,797 | 23,854 / 7,797 |
+| app.wasm (includes styles) | 17,280 / 6,591 | 5,729 / 2,645 |
+| render.wasm (same for every app) | 255,554 / 114,040 | 255,554 / 114,040 |
+| vcwl.js (host) | 33,403 / 10,841 | 33,403 / 10,841 |
 | index.html + boot.js | 622 / 474 | 623 / 477 |
 
 `render.wasm` is mostly Rust's standard library (allocator, formatting, Unicode case mapping,
 hashing) and the renderer's own style, layout and paint code; it is built with `opt-level = "z"`,
 LTO and stripped names. For comparison, the DOM version of the todo example shipped 15,962 / 6,021
-(app.wasm) + 14,768 / 5,204 (vcwl.js) + 1,907 / 872 (app.css).
+(app.wasm) + 14,768 / 5,204 (vcwl.js) + 1,907 / 872 (app.css). The tokenforge site remake
+(`examples/tokenforge`, four pages) compiles to an `app.wasm` of 152,101 / 47,121.

@@ -7,8 +7,10 @@ enforce.
 
 ## Enforced
 
-- **No markup at all.** The element tree lives in the renderer; nothing the application produces
-  reaches the browser DOM, which contains only the canvas. Text is painted, never parsed.
+- **No markup at all.** The element tree lives in the renderer. The accessibility mirror creates
+  DOM elements only from a fixed list of tags, sets text with `textContent`, copies only `aria-*`,
+  `role`, `title`, `lang` and `placeholder` attributes (plus sanitized `href`), and never sets
+  `src`, `style` attributes or event handlers. Text is painted or assigned, never parsed.
 - **No script URLs.** Links are followed by the host after rewriting `javascript:` and other
   script-capable URLs to `about:invalid`; image sources are sanitized the same way.
 - **No event-handler attributes.** The renderer refuses attributes starting with `on` and properties
@@ -27,8 +29,6 @@ enforce.
 
 ## Not enforced or not yet implemented
 
-- The canvas renderer exposes nothing to assistive technology; see
-  [limitations](limitations.md).
 - A meta-tag CSP cannot set `frame-ancestors`, reporting or sandboxing; configure HTTP headers on
   the server when possible.
 - `storage` capabilities are parsed but there is no storage API yet.

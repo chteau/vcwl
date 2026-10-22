@@ -5,7 +5,8 @@ to WebAssembly (with the GC proposal, Wasm 3.0). Application logic, views, state
 written in VCWL. Apps do not use the browser DOM: a renderer written in Rust and compiled to
 WebAssembly keeps its own element tree, applies the styles, lays out, paints into a single
 `<canvas>` and handles input. JavaScript is limited to a host that connects the two modules to
-browser APIs (canvas drawing, text measurement, `fetch`, events).
+browser APIs (canvas drawing, text measurement, `fetch`, events) and keeps an invisible DOM
+mirror of the semantic elements for screen readers, native text input and crawlers.
 
 ```vcwl
 app "Counter"
@@ -25,7 +26,8 @@ component App {
 ```
 
 This is an experimental project; see [known limitations](docs/limitations.md) before relying on it.
-In particular, the canvas renderer is not accessible to screen readers.
+`examples/tokenforge` is a full website (a remake of https://chteau.github.io/tokenforge) built
+with it.
 
 ## Status
 
@@ -90,6 +92,7 @@ src/prelude.vcwl standard library, written in VCWL
 render/         the renderer (Rust → render.wasm): element tree, styles, layout, paint, input
 runtime/        browser/Node host (vcwl.js), boot and dev-reload scripts
 examples/todo/  routed todo app with components, forms and tests
+examples/tokenforge/  remake of the tokenforge website (fetch, charts, docs pages)
 tests/          compiler tests (Rust), CLI tests, browser tests (puppeteer)
 bench/          keyed-list benchmark against hand-written DOM code
 docs/           reference, architecture, ADRs

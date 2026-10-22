@@ -351,6 +351,13 @@ pub enum View {
         block: StyleBlock,
         span: Span,
     },
+    /// `style bind width: expr %` sets one property from a number computed at run time.
+    StyleBind {
+        prop: Ident,
+        value: Expr,
+        unit: Option<String>,
+        span: Span,
+    },
     Routes {
         arms: Vec<(Option<String>, Span, Vec<View>)>,
         span: Span,

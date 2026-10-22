@@ -1,0 +1,19 @@
+import "./data.vcwl"
+
+fn test_formatting() {
+    assert(fmt_k(1444788.0, false) == "1.44M", "millions")
+    assert(fmt_k(603940.0, false) == "604k", "thousands")
+    assert(fmt_k(9738.0, true) == "9.7k", "small")
+    assert(fmt_k(1040000.0, false) == "1.04M", "padded")
+    assert(pct(50.94) == "−51%", "saving")
+    assert(pct(-12.2) == "+12%", "increase")
+    assert(fmt_int(-6482.0) == "6,482", "int")
+    assert(fmt_int(1234567.0) == "1,234,567", "int2")
+}
+
+fn test_log() {
+    let e = ln(10.0) - 2.302585093
+    assert(e < 0.000001 && e > -0.000001, "ln 10")
+    let p = log_pos(100.0, 10.0, 1000.0) - 50.0
+    assert(p < 0.0001 && p > -0.0001, "log axis")
+}

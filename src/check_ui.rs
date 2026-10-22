@@ -167,6 +167,7 @@ struct Spec {
 const COMMON: &[(&str, ArgTy, AttrKind)] = &[
     ("label", ArgTy::Str, AttrKind::Attr("aria-label")),
     ("title", ArgTy::Str, AttrKind::Attr("title")),
+    ("id", ArgTy::Str, AttrKind::Attr("id")),
 ];
 const CLICK: &[(&str, &str, Payload)] = &[
     ("click", "click", Payload::None),
@@ -247,8 +248,10 @@ fn spec(name: &str) -> Option<Spec> {
             args: &[
                 ("to", ArgTy::Str, AttrKind::Route),
                 ("href", ArgTy::Str, AttrKind::Attr("href")),
+                ("current", ArgTy::Bool, AttrKind::Attr("aria-current")),
                 ("label", ArgTy::Str, AttrKind::Attr("aria-label")),
                 ("title", ArgTy::Str, AttrKind::Attr("title")),
+                ("id", ArgTy::Str, AttrKind::Attr("id")),
             ],
             ..texty("a")
         },
@@ -916,10 +919,10 @@ impl Checker<'_> {
                     let c = self.named_style(name, cx)?;
                     cx.root_classes.push(c);
                 }
-                View::StyleIf { span, .. } => {
+                View::StyleIf { span, .. } | View::StyleBind { span, .. } => {
                     return Err(Diag::ty(
                         *span,
-                        "`style if` must be placed inside an element",
+                        "this `style` must be placed inside an element",
                     ));
                 }
             }
@@ -1245,6 +1248,45 @@ impl Checker<'_> {
                 View::StyleIf { cond, block, .. } => {
                     let t = self.render_expr(cond, Some(&Type::Bool))?;
                     te.class_ifs.push((cx.sheet.block(block)?, t));
+                }
+                View::StyleBind {
+                    prop, value, unit, ..
+                } => {
+                    let Some((css, needs_unit)) = crate::style::bind_prop(&prop.name) else {
+                        return Err(Diag::ty(
+                            prop.span,
+                            format!("`{}` cannot be bound to a value", prop.name),
+                        )
+                        .help("bind takes a property with one length (`width`, `left`, `size`, ...) or one number (`opacity`, `grow`)"));
+                    };
+                    if needs_unit != unit.is_some() {
+                        return Err(Diag::ty(
+                            value.span,
+                            if needs_unit {
+                                format!(
+                                    "`{}` needs a unit after the value, e.g. `%` or `px`",
+                                    prop.name
+                                )
+                            } else {
+                                format!("`{}` takes a plain number", prop.name)
+                            },
+                        ));
+                    }
+                    let t = self.render_expr(value, None)?;
+                    if !matches!(t.ty, Type::Int | Type::Float) {
+                        return Err(Diag::ty(
+                            value.span,
+                            format!(
+                                "a bound style value must be an Int or Float, found `{}`",
+                                self.show(&t.ty)
+                            ),
+                        ));
+                    }
+                    let t = self.to_string_expr(t)?;
+                    // The renderer reads `style:<property>:<unit>` attributes after the classes.
+                    let name = format!("style:{css}:{}", unit.as_deref().unwrap_or(""));
+                    te.attrs
+                        .push((AttrKind::Attr(Box::leak(name.into_boxed_str())), t));
                 }
                 other => {
                     if !sp.children {

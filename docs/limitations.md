@@ -23,19 +23,26 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## Rendering (canvas, see [ADR 10](adr/0010-canvas-renderer.md))
 
-- **No accessibility tree.** Screen readers see a single canvas. Keyboard navigation (Tab order,
-  Enter/Space activation, visible focus) works; everything announced by assistive technology does not.
-- No find-in-page, no text selection or copy outside text fields, no autofill, spellcheck or
-  password managers, no browser context menus on content, no middle-click on links.
-- No input method (IME) composition and no mobile virtual keyboard: text fields accept keys that
-  produce a character on their own (including pasted text), not composed input.
-- No undo/redo in text fields.
+- Assistive technology reads an invisible DOM mirror of the semantic elements
+  ([ADR 11](adr/0011-accessibility-mirror.md)). Generic containers are left out, hidden
+  (`display: none`) subtrees are omitted, and reading order is tree order, not visual order.
+  Screen-reader browse mode does not scroll the canvas to the text it reads; focusing a control
+  does. Live regions work only through `aria-live` attributes the app sets.
+- Text fields are edited by the browser (IME, autocorrect, virtual keyboards, undo), but the caret
+  and selection are drawn by the renderer: composition text is shown without an underline, and
+  Up/Down in a `textarea` move by the browser's line breaks, which can differ from the renderer's.
+  `on keydown` fires for every key, but the app cannot prevent the browser's edit.
+- No text selection or copy outside text fields (`copy()` writes to the clipboard from handlers),
+  no browser context menus on content, no middle-click on links. Find-in-page searches the mirror,
+  so matches are found but highlighted only approximately.
 - CSS subset: no margin collapsing, no inline padding/borders/backgrounds on `span`-like elements,
   no `vertical-align` (items in a line are centered), no `align-content`, no grid rows placement or
   named areas, `position: absolute` resolves against the parent element, `sticky` behaves as
-  `relative`. Transitions and animations jump to their end state.
+  `relative`. Only `opacity`, `transform`, `color` and `background` (colors) transition; other
+  properties change at once, and there are no keyframe animations.
 - Rotated elements are hit-tested by their bounding box.
-- `render.wasm` adds 107 KB (gzip) to every app.
+- `render.wasm` adds 114 KB (gzip) to every app.
+- Components cannot take child content (no slots); compose with properties instead.
 
 ## Platform
 

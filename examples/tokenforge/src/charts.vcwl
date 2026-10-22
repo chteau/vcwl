@@ -1,0 +1,412 @@
+// Charts built from boxes: bar lengths and dot positions are bound to the data with `style bind`.
+
+import "./data.vcwl"
+import "./theme.vcwl"
+
+style Native {
+    background: #3f8fd8
+    when light {
+        background: #2a78d6
+    }
+}
+
+style Forge {
+    background: #d16a47
+    when light {
+        background: #c4572f
+    }
+}
+
+style Track {
+    background: #faf9f50d
+    when light {
+        background: #1414130b
+    }
+}
+
+style Swatch {
+    width: 10px
+    height: 10px
+}
+
+export component Legend(native: String, forge: String) {
+    row(gap: 16px, wrap: wrap) {
+        style {
+            size: 13px
+            margin: 0 0 10px
+        }
+        style Secondary
+        row(gap: 7px, align: center) {
+            box {
+                style Swatch
+                style Native
+            }
+            text(native)
+        }
+        row(gap: 7px, align: center) {
+            box {
+                style Swatch
+                style Forge
+            }
+            text(forge)
+        }
+    }
+}
+
+struct Bar {
+    i: Int,
+    native: Float,
+    forge: Float,
+    n_label: String,
+    f_label: String,
+}
+
+fn bars(c: Curve) -> [Bar] {
+    let n = c.series.native.points
+    let f = c.series.tokenforge.points
+    var top = 1.0
+    for p in n.concat(f) {
+        top = top.max(p)
+    }
+    var out: [Bar] = []
+    var i = 0
+    while i < n.len().max(f.len()) {
+        let a = n.get(i).unwrap_or(0.0)
+        let z = f.get(i).unwrap_or(0.0)
+        out = out.push(Bar { i: i + 1, native: a / top * 100.0, forge: z / top * 100.0, n_label: fmt_k(a, true), f_label: fmt_k(z, true) })
+        i += 1
+    }
+    out
+}
+
+/// Context size of each API request in the two sessions of the same task.
+export component ContextChart(c: Curve) {
+    let list = bars(c)
+    let n = c.series.native
+    let f = c.series.tokenforge
+
+    column(gap: 12px) {
+        row(gap: 26px, wrap: wrap) {
+            Counter(label: "clean Claude Code", value: fmt_k(n.total, false), requests: n.requests, forge: false)
+            Counter(label: "tokenforge", value: fmt_k(f.total, false), requests: f.requests, forge: true)
+        }
+        row(gap: 4px, align: end) {
+            style {
+                height: 180px
+                padding: 0 0 4px
+                border-bottom: 1px solid #4a4944
+            }
+            for b in list key b.i {
+                row(gap: 1px, align: end, grow: 1) {
+                    style {
+                        height: 100%
+                        min-width: 0
+                    }
+                    box(label: "request {b.i}: clean {b.n_label}, tokenforge {b.f_label}", grow: 1) {
+                        style Native
+                        style bind height: b.native %
+                    }
+                    box(grow: 1) {
+                        style Forge
+                        style bind height: b.forge %
+                    }
+                }
+            }
+        }
+        row(justify: between) {
+            style Small
+            text("request 1")
+            text("request {list.len()}")
+        }
+    }
+}
+
+component Counter(label: String, value: String, requests: Int, forge: Bool) {
+    column {
+        row(gap: 6px, align: center) {
+            style {
+                size: 12px
+            }
+            style Muted
+            box {
+                style {
+                    width: 16px
+                    height: 2px
+                }
+                style Native
+                style if forge {
+                    background: #d16a47
+                }
+            }
+            text(label)
+        }
+        span("{value} tokens · {requests} requests") {
+            style {
+                size: 20px
+                weight: 700
+            }
+        }
+    }
+}
+
+struct Dot {
+    id: String,
+    label: String,
+    lo: Float,
+    hi: Float,
+    native: Float,
+    forge: Float,
+    saved: String,
+    worse: Bool,
+}
+
+fn dots(tasks: [Task]) -> [Dot] {
+    var lo = 1000000000.0
+    var hi = 1.0
+    for t in tasks {
+        lo = lo.min(t.tokenforge.total).min(t.native.total)
+        hi = hi.max(t.tokenforge.total).max(t.native.total)
+    }
+    lo = lo * 0.8
+    hi = hi * 1.15
+    var out: [Dot] = []
+    for t in tasks {
+        let a = log_pos(t.tokenforge.total, lo, hi)
+        let z = log_pos(t.native.total, lo, hi)
+        out = out.push(Dot { id: t.id, label: t.label, lo: a.min(z), hi: a.max(z), native: z, forge: a, saved: pct(t.savings), worse: t.qualityDiff < 0.0 })
+    }
+    out
+}
+
+/// Total tokens per task on a log axis; each line runs from clean Claude Code to TokenForge.
+export component Dumbbell(tasks: [Task]) {
+    let list = dots(tasks)
+
+    column(gap: 2px) {
+        for d in list key d.id {
+            row(gap: 12px, align: center) {
+                style {
+                    height: 26px
+                    size: 13px
+                }
+                span(d.label) {
+                    style {
+                        width: 230px
+                        shrink: 0
+                        white-space: nowrap
+                        overflow: hidden
+                        when viewport < 600px {
+                            width: 110px
+                            size: 12px
+                        }
+                    }
+                    style Secondary
+                }
+                box(label: "{d.label}: {d.saved}") {
+                    style {
+                        position: relative
+                        grow: 1
+                        height: 100%
+                        min-width: 0
+                    }
+                    box {
+                        style {
+                            position: absolute
+                            top: 12px
+                            height: 2px
+                            background: #8f8d86
+                        }
+                        style bind left: d.lo %
+                            style bind width: d.hi - d.lo %
+                    }
+                    box {
+                        style DotStyle
+                        style Native
+                        style bind left: d.native %
+                    }
+                    box {
+                        style DotStyle
+                        style Forge
+                        style bind left: d.forge %
+                    }
+                }
+                span(d.saved) {
+                    style {
+                        width: 48px
+                        shrink: 0
+                        text-align: right
+                        weight: 600
+                    }
+                    style if d.worse {
+                        color: #fab219
+                    }
+                }
+            }
+        }
+    }
+}
+
+style DotStyle {
+    position: absolute
+    top: 7px
+    width: 12px
+    height: 12px
+    radius: 6px
+    margin-left: -6px
+}
+
+struct LeanBar {
+    level: String,
+    width: Float,
+    tokens: String,
+    clean: Bool,
+}
+
+/// Fixed context per request at each lean level.
+export component LeanChart(b: Bench) {
+    let top = lean_tokens(b, "off")
+    let list = lean_bars(b, top)
+
+    column(gap: 8px) {
+        for l in list key l.level {
+            row(gap: 12px, align: center) {
+                span(if l.clean { "clean (off)" } else { l.level }) {
+                    style {
+                        width: 90px
+                        size: 13px
+                        shrink: 0
+                    }
+                    style Secondary
+                }
+                box {
+                    style {
+                        grow: 1
+                        height: 18px
+                    }
+                    style Track
+                    box {
+                        style {
+                            height: 100%
+                        }
+                        style Forge
+                        style if l.clean {
+                            background: #3f8fd8
+                        }
+                        style bind width: l.width %
+                    }
+                }
+                span(l.tokens) {
+                    style {
+                        width: 52px
+                        size: 13px
+                        weight: 600
+                        text-align: right
+                        shrink: 0
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn lean_bars(b: Bench, top: Float) -> [LeanBar] {
+    var out: [LeanBar] = []
+    for l in b.lean {
+        out = out.push(LeanBar { level: l.level, width: l.tokens / top * 100.0, tokens: fmt_k(l.tokens, true), clean: l.level == "off" })
+    }
+    out
+}
+
+struct Call {
+    i: Int,
+    floor: Float,
+    reread: Float,
+    fresh: Float,
+}
+
+/// A sketch of what each call re-sends: the fixed part, earlier outputs again, and new output.
+export component Anatomy(floor: Float) {
+    let list = calls(floor)
+
+    column(gap: 6px) {
+        for c in list key c.i {
+            row(gap: 10px, align: center) {
+                span("call {c.i}") {
+                    style {
+                        width: 52px
+                        size: 12px
+                        shrink: 0
+                    }
+                    style Muted
+                }
+                row {
+                    style {
+                        grow: 1
+                        height: 16px
+                    }
+                    box {
+                        style {
+                            background: #8c74e6
+                        }
+                        style bind width: c.floor %
+                    }
+                    box {
+                        style {
+                            background: #3f8fd8
+                            opacity: 0.6
+                        }
+                        style bind width: c.reread %
+                    }
+                    box {
+                        style {
+                            background: #3f8fd8
+                        }
+                        style bind width: c.fresh %
+                    }
+                }
+            }
+        }
+        row(gap: 14px, wrap: wrap) {
+            style Small
+            LegendItem(text: "tools and instructions", color: 1)
+            LegendItem(text: "earlier output, sent again", color: 2)
+            LegendItem(text: "new output", color: 3)
+        }
+    }
+}
+
+component LegendItem(text: String, color: Int) {
+    row(gap: 6px, align: center) {
+        box {
+            style Swatch
+            style if color == 1 {
+                background: #8c74e6
+            }
+            style if color == 2 {
+                background: #3f8fd880
+            }
+            style if color == 3 {
+                background: #3f8fd8
+            }
+        }
+        span(text)
+    }
+}
+
+fn calls(floor: Float) -> [Call] {
+    // Output sizes are made up to show the shape; the floor is measured.
+    let outputs = [6.0, 9.0, 4.0, 12.0, 5.0, 8.0]
+    var total = floor
+    for o in outputs {
+        total += o
+    }
+    var out: [Call] = []
+    var sent = 0.0
+    var i = 0
+    for o in outputs {
+        i += 1
+        out = out.push(Call { i: i, floor: floor / total * 100.0, reread: sent / total * 100.0, fresh: o / total * 100.0 })
+        sent += o
+    }
+    out
+}

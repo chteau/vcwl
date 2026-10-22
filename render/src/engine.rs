@@ -3,12 +3,16 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use crate::anim::{self, Anim};
+
 use crate::css::num;
 use crate::dom::{self, Effect, Id, Kind, Tree};
 use crate::layout::{self, Cx, Rect, clamp};
 use crate::paint::{self, Edit, Hit, Painter, Popup};
 use crate::style::{Cursor, Media, Overflow, Position, Sheet};
 use crate::text::{Fonts, Measure};
+
+pub mod semantics;
 
 #[derive(Debug, PartialEq)]
 pub enum Payload {
@@ -98,6 +102,12 @@ pub struct Engine {
     cursor: Cursor,
     blink_start: f64,
     pub now: f64,
+    /// The accessibility mirror may be out of date.
+    sem_dirty: bool,
+    /// Running transitions by node.
+    anims: HashMap<Id, Vec<Anim>>,
+    /// Smooth page scroll in progress: from, to, start time.
+    page_scroll: Option<(f32, f32, f64)>,
 }
 
 impl Engine {
@@ -132,11 +142,15 @@ impl Engine {
             cursor: Cursor::Auto,
             blink_start: 0.0,
             now: 0.0,
+            sem_dirty: true,
+            anims: HashMap::new(),
+            page_scroll: None,
         }
     }
 
     /// Schedules style, layout and paint for nodes marked dirty.
     fn invalidate(&mut self) {
+        self.sem_dirty = true;
         self.style_dirty = true;
         self.layout_dirty = true;
         self.paint_dirty = true;
@@ -150,7 +164,11 @@ impl Engine {
     }
 
     pub fn dirty(&self) -> bool {
-        self.paint_dirty || self.layout_dirty || self.style_dirty
+        self.paint_dirty
+            || self.layout_dirty
+            || self.style_dirty
+            || !self.anims.is_empty()
+            || self.page_scroll.is_some()
     }
 
     pub fn apply(&mut self, buf: &[u8]) -> Result<(), String> {
@@ -265,8 +283,10 @@ impl Engine {
 
     fn update_layout(&mut self, m: &mut dyn Measure) {
         if self.style_dirty {
+            let mut prev = Vec::new();
             self.sheet
-                .restyle(&mut self.tree, &self.media, self.restyle_all);
+                .restyle_tracked(&mut self.tree, &self.media, self.restyle_all, &mut prev);
+            self.start_transitions(prev);
             self.style_dirty = false;
             self.restyle_all = false;
             self.layout_dirty = true;
@@ -288,7 +308,10 @@ impl Engine {
             layout::layout_root(&mut cx);
             if self.sheet.uses_container_queries() {
                 // Container sizes are now known; match the queries and lay out again.
-                self.sheet.restyle(&mut self.tree, &self.media, true);
+                let mut prev = Vec::new();
+                self.sheet
+                    .restyle_tracked(&mut self.tree, &self.media, true, &mut prev);
+                self.start_transitions(prev);
                 let mut cx = Cx {
                     t: &mut self.tree,
                     m,
@@ -316,9 +339,15 @@ impl Engine {
             self.paint_dirty = true;
         }
         self.update_layout(m);
+        self.step_page_scroll(now);
+        self.reveal();
+        if !self.anims.is_empty() {
+            self.paint_dirty = true;
+        }
         if !self.paint_dirty {
             return None;
         }
+        let saved = self.animate(now);
         let viewport = Rect {
             x: 0.0,
             y: 0.0,
@@ -336,9 +365,134 @@ impl Engine {
         );
         p.paint();
         let (out, hits) = (p.out, p.hits);
+        for (id, s) in saved {
+            self.tree.m(id).style = s;
+        }
         self.hits = hits;
         self.paint_dirty = false;
         Some(out)
+    }
+
+    fn scroll_to_anchor(&mut self, id: &str) {
+        let Some(target) = (0..self.tree.nodes.len() as Id)
+            .find(|&i| self.tree.get(i).is_some_and(|n| n.attr("id") == Some(id)))
+        else {
+            return;
+        };
+        let max = (self.tree.n(0).lay.rect.h - self.media.height).max(0.0);
+        let from = self.tree.n(0).lay.scroll.1;
+        let to = clamp(from + self.abs(target).y, 0.0, max);
+        if self.media.reduced_motion {
+            self.tree.m(0).lay.scroll.1 = to;
+            self.paint_dirty = true;
+            self.sem_dirty = true;
+        } else {
+            self.page_scroll = Some((from, to, self.now));
+        }
+    }
+
+    fn step_page_scroll(&mut self, now: f64) {
+        let Some((from, to, start)) = self.page_scroll else {
+            return;
+        };
+        let k = (((now - start) / 450.0) as f32).clamp(0.0, 1.0);
+        let eased = 1.0 - (1.0 - k) * (1.0 - k) * (1.0 - k);
+        self.tree.m(0).lay.scroll.1 = from + (to - from) * eased;
+        if k >= 1.0 {
+            self.page_scroll = None;
+            self.sem_dirty = true;
+        }
+        self.paint_dirty = true;
+    }
+
+    /// Scrolls the page back to the top (after a route change).
+    pub fn scroll_to_top(&mut self) {
+        self.page_scroll = None;
+        self.tree.m(0).lay.scroll = (0.0, 0.0);
+        self.paint_dirty = true;
+        self.sem_dirty = true;
+    }
+
+    /// A key typed into a natively edited text field (only delivered as a `keydown` event).
+    pub fn field_keydown(&mut self, key: &str) {
+        if let Some(f) = self.focus
+            && self.is_text_field(f)
+        {
+            self.emit(f, "keydown", Payload::Str(key.to_string()));
+        }
+    }
+
+    fn start_transitions(&mut self, prev: Vec<(Id, crate::style::Style)>) {
+        if self.media.reduced_motion {
+            self.anims.clear();
+            return;
+        }
+        for (id, old) in prev {
+            let list = self.anims.entry(id).or_default();
+            anim::start(&old, &self.tree.n(id).style, list, self.now);
+            if list.is_empty() {
+                self.anims.remove(&id);
+            }
+        }
+    }
+
+    /// Ends `when appear` styles of elements that came into view (their transitions start
+    /// on the next frame).
+    fn reveal(&mut self) {
+        if !self.sheet.uses_appear() {
+            return;
+        }
+        let vh = self.media.height;
+        let mut shown = Vec::new();
+        for id in 0..self.tree.nodes.len() as Id {
+            let Some(n) = self.tree.get(id) else { continue };
+            if n.flags & dom::SEEN != 0 || !n.classes.iter().any(|c| self.sheet.appears(c)) {
+                continue;
+            }
+            let r = self.abs(id);
+            if r.y < vh * 0.92 && r.y + r.h > 0.0 {
+                shown.push(id);
+            }
+        }
+        for id in shown {
+            self.tree.m(id).flags |= dom::SEEN;
+            self.tree.mark_style(id);
+            self.invalidate();
+        }
+    }
+
+    /// Writes animated values into the styles of animating nodes (and of descendants that
+    /// inherit an animated color) for painting; returns the styles to restore afterwards.
+    fn animate(&mut self, now: f64) -> Vec<(Id, crate::style::Style)> {
+        let mut saved = Vec::new();
+        let ids: Vec<Id> = self.anims.keys().copied().collect();
+        for id in ids {
+            if self.tree.get(id).is_none() {
+                self.anims.remove(&id);
+                continue;
+            }
+            let target = self.tree.n(id).style.color;
+            saved.push((id, self.tree.n(id).style.clone()));
+            let list = self.anims.get_mut(&id).unwrap();
+            let s = &mut self.tree.m(id).style;
+            if !anim::apply(s, list, now) {
+                self.anims.remove(&id);
+            }
+            let color = self.tree.n(id).style.color;
+            if color != target {
+                let mut stack = self.tree.n(id).children.clone();
+                while let Some(c) = stack.pop() {
+                    if self.tree.n(c).style.color == target {
+                        saved.push((c, self.tree.n(c).style.clone()));
+                        self.tree.m(c).style.color = color;
+                        stack.extend(self.tree.n(c).children.iter().copied());
+                    }
+                }
+            }
+        }
+        // Restore in reverse so a node saved twice gets its first (target) style back.
+        saved.reverse();
+        saved
     }
 
     /// Milliseconds until the next frame is needed without input (caret blink), or -1.
@@ -593,6 +747,7 @@ impl Engine {
             root.scroll.1 = clamp(root.scroll.1 + r.y + r.h - vh + 8.0, 0.0, max);
         }
         self.paint_dirty = true;
+        self.sem_dirty = true;
     }
 
     // ----- events -----
@@ -850,6 +1005,8 @@ impl Engine {
 
     fn follow(&mut self, href: &str, new_tab: bool) {
         match href.strip_prefix('#') {
+            // `#name` scrolls to the element with that id; `#/path` is a route.
+            Some(id) if !new_tab && !id.starts_with('/') => self.scroll_to_anchor(id),
             Some(path) if !new_tab => self.out.push_back(Out::Navigate(path.to_string())),
             _ => self.out.push_back(Out::Open {
                 url: href.to_string(),
@@ -954,6 +1111,7 @@ impl Engine {
         }
         self.popup = None;
         self.paint_dirty = true;
+        self.sem_dirty = true;
     }
 
     pub fn wheel(&mut self, x: f32, y: f32, dx: f32, dy: f32) {
@@ -1461,6 +1619,13 @@ impl Writer {
         self
     }
 
+    fn rect(&mut self, r: Rect) -> &mut Self {
+        for v in [r.x, r.y, r.w, r.h] {
+            self.0.extend(v.to_le_bytes());
+        }
+        self
+    }
+
     fn str(&mut self, s: &str) -> &mut Self {
         self.int(s.len() as i32);
         self.0.extend(s.as_bytes());
@@ -1508,6 +1673,33 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn anchors_scroll_and_appear_styles_transition_in() {
+        let mut b = Buf::default();
+        b.create(1, "div").class(1, "tall").insert(0, 1, 0);
+        b.create(2, "div")
+            .class(2, "fade")
+            .attr(2, "id", "below")
+            .insert(0, 2, 0);
+        b.create(3, "div").class(3, "tall").insert(0, 3, 0);
+        let css = ".tall{height:2000px}.fade{height:10px;transition:opacity 100ms linear}.fade:appear{opacity:0}";
+        let mut e = engine(&b, css);
+        assert_eq!(e.tree.n(2).style.opacity, 0.0, "below the fold");
+        e.follow("#below", false);
+        assert!(e.out.is_empty(), "an anchor is not a route");
+        e.frame(&mut Mono, 1000.0);
+        assert!(e.abs(2).y.abs() < 1.0, "scrolled to the anchor");
+        e.frame(&mut Mono, 1000.0);
+        assert_eq!(e.tree.n(2).style.opacity, 1.0);
+        let list = e.frame(&mut Mono, 1050.0).unwrap();
+        let half = list
+            .windows(2)
+            .any(|w| w[0] == paint::op::ALPHA && f32::from_bits(w[1]) == 0.5);
+        assert!(half, "painted halfway through the transition");
+        e.frame(&mut Mono, 2000.0);
+        assert!(!e.dirty(), "the transition finished");
     }
 
     #[test]

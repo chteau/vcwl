@@ -95,6 +95,24 @@ The host (`runtime/vcwl.js`) forwards browser events to the renderer, delivers e
 replays display lists on the canvas each animation frame, and performs effects the renderer asks
 for: title, hash navigation, opening links, `fetch`, image loading, cursor, clipboard writes.
 
+
+### Accessibility mirror
+
+After each canvas paint the host asks the renderer for `semantics()`: a pre-order list of the
+semantic elements and text runs with their viewport rectangles, states and `aria-*` attributes,
+each with a hash. The host keeps one transparent `position: fixed` DOM element per entry over the
+canvas (`pointer-events: none`), skips entries whose hash is unchanged, and reorders children with
+a longest-increasing-subsequence pass. Keyboard focus lives on mirror elements; text fields are
+edited natively and report value and selection back with `field_input`. See
+[ADR 11](adr/0011-accessibility-mirror.md).
+
+### Transitions
+
+`render/src/anim.rs`: when a restyle changes `opacity`, `transform`, `color` or a background color
+of a node whose style has `transition`, an animation starts from the current painted value. At
+each frame the animated values are written into the styles for painting and restored afterwards,
+so style comparison and layout always see the target style. `when appear` rules match until the
+element's flag `SEEN` is set, which happens the first frame its box is in the viewport.
 ## Components and reactivity
 
 Each component instance is a GC struct: a dirty bitmask, one field per property/state/derived value,

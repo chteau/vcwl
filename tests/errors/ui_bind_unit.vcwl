@@ -1,0 +1,8 @@
+// error: `width` needs a unit after the value
+app "T"
+
+component App {
+    box {
+        style bind width: 50
+    }
+}

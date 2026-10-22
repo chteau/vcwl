@@ -1,0 +1,222 @@
+app "TokenForge" {
+    capabilities {
+        network: allow("self")
+    }
+}
+
+import "./data.vcwl"
+import "./theme.vcwl"
+import "./home.vcwl"
+import "./benchmark.vcwl"
+import "./docs.vcwl"
+import "./roadmap.vcwl"
+
+component App {
+    state bench: Bench? = None
+    state failed: String = ""
+
+    on mount {
+        fetch get("bench.json") as Bench {
+            Ok(b) => {
+                bench = Some(b)
+            }
+            Err(e) => {
+                failed = e.message()
+            }
+        }
+    }
+
+    box {
+        style Page
+
+        link("Skip to content", href: "#view") {
+            style {
+                position: fixed
+                left: -999px
+                top: 8px
+                z: 50
+                padding: 6px 10px
+                background: #d16a47
+                color: #1a1918
+                when focus {
+                    left: 8px
+                }
+            }
+        }
+        TopBar()
+        column {
+            style {
+                max-width: 1200px
+                margin: 0 auto
+                padding: 84px 32px 40px
+                when viewport < 700px {
+                    padding: 76px 16px 32px
+                }
+            }
+            main(id: "view") {
+                match bench {
+                    Some(b) => {
+                        routes {
+                            "/" => Home(b: b)
+                            "/benchmark" => Benchmark(b: b)
+                            "/docs/install" => Docs(b: b, page: "install")
+                            "/docs/lean" => Docs(b: b, page: "lean")
+                            "/docs/faq" => Docs(b: b, page: "faq")
+                            "/roadmap" => Roadmap()
+                            _ => Home(b: b)
+                        }
+                    }
+                    None => {
+                        paragraph(if failed == "" { "Loading the benchmark data…" } else { "Could not load the benchmark data: {failed}" }) {
+                            style Muted
+                        }
+                    }
+                }
+            }
+            Footer(version: "x")
+        }
+    }
+}
+
+component TopBar {
+    header {
+        style {
+            position: fixed
+            top: 0
+            left: 0
+            right: 0
+            z: 20
+            background: #141413db
+            border-bottom: 1px solid #faf9f512
+            when light {
+                background: #f4f2ecdb
+                border-bottom: 1px solid #14141317
+            }
+        }
+        row(gap: 16px, align: center) {
+            style {
+                max-width: 1200px
+                margin: 0 auto
+                padding: 10px 32px
+                when viewport < 700px {
+                    padding: 8px 12px
+                    gap: 8px
+                }
+            }
+            link(href: "#/", label: "TokenForge home") {
+                style {
+                    display: flex
+                    align: center
+                    gap: 10px
+                    margin-right: auto
+                    weight: 600
+                    letter-spacing: 0.08em
+                    case: upper
+                    size: 12px
+                    color: #faf9f5
+                    decoration: none
+                    when light {
+                        color: #141413
+                    }
+                }
+                image(src: "logo.svg", alt: "") {
+                    style {
+                        width: 26px
+                        height: 26px
+                    }
+                }
+                span("TokenForge") {
+                    style {
+                        when viewport < 520px {
+                            display: none
+                        }
+                    }
+                }
+            }
+            nav(label: "Main") {
+                style {
+                    display: flex
+                    align: center
+                    gap: 4px
+                }
+                NavLink(text: "Home", to: "/", on: route == "/")
+                NavLink(text: "Benchmark", to: "/benchmark", on: route == "/benchmark")
+                NavLink(text: "Docs", to: "/docs/install", on: route.starts_with("/docs"))
+                NavLink(text: "Roadmap", to: "/roadmap", on: route == "/roadmap")
+                link("GitHub", href: "https://github.com/chteau/tokenforge") {
+                    style NavItem
+                    style {
+                        margin-left: 6px
+                        border: 1px solid #faf9f524
+                        when viewport < 700px {
+                            display: none
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+style NavItem {
+    padding: 8px 12px
+    decoration: none
+    color: #c2c0b6
+    size: 14px
+    transition: background 150ms, color 150ms
+    when hover {
+        background: #faf9f50d
+        color: #faf9f5
+    }
+    when light {
+        color: #46453f
+    }
+    when viewport < 520px {
+        padding: 8px 8px
+        size: 13px
+    }
+}
+
+component NavLink(text: String, to: String, on: Bool) {
+    link(text, to: to, current: on) {
+        style NavItem
+        style if on {
+            color: #faf9f5
+            weight: 600
+            shadow: inset 0 -2px 0 #d16a47
+            when light {
+                color: #141413
+            }
+        }
+    }
+}
+
+component Footer(version: String) {
+    footer {
+        style {
+            display: flex
+            wrap: wrap
+            justify: between
+            gap: 8px 20px
+            margin: 48px 0 0
+            padding: 16px 0 0
+            border-top: 1px solid #faf9f512
+            size: 12px
+        }
+        style Secondary
+        paragraph {
+            text("TokenForge {version} · MIT licensed · ")
+            link("github.com/chteau/tokenforge", href: "https://github.com/chteau/tokenforge") {
+                style Accent
+            }
+        }
+        paragraph {
+            style Muted
+            text("Every number on this site comes from the plugin repo's ")
+            code("bench/") {
+                style Code
+            }
+            text(" data and README. Rebuilt in VCWL: no HTML or CSS, drawn on a canvas.")
+        }
+    }
+}

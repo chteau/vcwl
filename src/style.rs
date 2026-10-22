@@ -97,6 +97,16 @@ const OVERFLOW: &[(&str, &str)] = &[
     ("clip", "clip"),
 ];
 
+/// CSS name of a property that `style bind` can set, and whether its value needs a unit.
+pub fn bind_prop(name: &str) -> Option<(&'static str, bool)> {
+    let p = prop(name)?;
+    match p.kind {
+        PropKind::Lengths(1, _) => Some((p.css[0], true)),
+        PropKind::Number(..) => Some((p.css[0], false)),
+        _ => None,
+    }
+}
+
 fn prop(name: &str) -> Option<Prop> {
     use PropKind::*;
     let p = |css, kind| Some(Prop { css, kind });
@@ -663,6 +673,7 @@ fn condition(toks: &[Token], span: Span) -> Result<(Vec<String>, String)> {
             "active" => (vec![], ":active".into()),
             "disabled" => (vec![], ":disabled".into()),
             "checked" => (vec![], ":checked".into()),
+            "appear" => (vec![], ":appear".into()),
             "reduced-motion" => (
                 vec!["@media (prefers-reduced-motion:reduce)".into()],
                 String::new(),
@@ -684,7 +695,7 @@ fn condition(toks: &[Token], span: Span) -> Result<(Vec<String>, String)> {
 
 fn cond_err(span: Span) -> Diag {
     Diag::ty(span, "unsupported style condition")
-        .help("use `when viewport < 600px`, `when container >= 30rem`, `when hover`, `when focus`, `when active`, `when disabled`, `when dark` or `when reduced-motion`")
+        .help("use `when viewport < 600px`, `when container >= 30rem`, `when hover`, `when focus`, `when active`, `when disabled`, `when appear`, `when dark` or `when reduced-motion`")
 }
 
 fn decl(p: &Ident, toks: &[Token], span: Span) -> Result<String> {

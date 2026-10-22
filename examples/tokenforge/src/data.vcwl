@@ -1,0 +1,201 @@
+// The benchmark data (public/bench.json, from the plugin repo's bench/) and number formatting.
+
+export struct Side {
+    total: Float,
+    requests: Float,
+    toolCalls: Float,
+    quality: Float,
+}
+
+export struct Task {
+    id: String,
+    group: String,
+    label: String,
+    language: String,
+    native: Side,
+    tokenforge: Side,
+    savings: Float,
+    savingsPriceWeighted: Float,
+    qualityDiff: Float,
+}
+
+export struct Lean {
+    level: String,
+    tokens: Float,
+}
+
+export struct Aggregate {
+    tasks: Int,
+    runs: Int,
+    medianSavings: Float,
+    meanSavings: Float,
+    pooledSavings: Float,
+    medianPriceWeighted: Float,
+    minPriceWeighted: Float,
+    maxPriceWeighted: Float,
+    medianToolCallReduction: Float,
+    tasksCheaper: Int,
+    tasksFewerTokens: Int,
+    firstRequestOverhead: Float,
+    scratchMedian: Float,
+    existingMedian: Float,
+    academicMedian: Float,
+    scratchTasks: Int,
+    qualityWorse: [String],
+}
+
+export struct Series {
+    total: Float,
+    requests: Int,
+    points: [Float],
+}
+
+export struct Sides {
+    native: Series,
+    tokenforge: Series,
+}
+
+export struct Curve {
+    label: String,
+    title: String,
+    series: Sides,
+}
+
+export struct Build {
+    version: String,
+    builds: [String],
+    tasks: Int,
+    groups: [String],
+}
+
+export struct Bench {
+    pluginVersion: String,
+    claudeCodeVersion: String,
+    leanSource: String,
+    defaultLean: String,
+    model: [String],
+    builds: [Build],
+    aggregate: Aggregate,
+    lean: [Lean],
+    curve: Curve,
+    tasks: [Task],
+}
+
+export fn model_name() -> String {
+    "Claude Opus 5.5"
+}
+
+/// "Measured with" line naming the TokenForge builds behind a figure ("" = all groups).
+export fn measured(b: Bench, group: String) -> String {
+    var parts: [String] = []
+    for x in b.builds {
+        if group == "" || contains(x.groups, group) {
+            let s = if x.builds.len() > 1 { "builds" } else { "build" }
+            let hashes = x.builds.join(", ")
+            parts = parts.push("{x.version} ({s} {hashes})")
+        }
+    }
+    let list = parts.join(", ")
+    "Measured with TokenForge {list}, Claude Code {b.claudeCodeVersion}."
+}
+
+export fn contains(xs: [String], x: String) -> Bool {
+    for y in xs {
+        if y == x {
+            return true
+        }
+    }
+    false
+}
+
+export fn lean_tokens(b: Bench, level: String) -> Float {
+    for l in b.lean {
+        if l.level == level {
+            return l.tokens
+        }
+    }
+    0.0
+}
+
+export fn tasks_in(b: Bench, group: String) -> [Task] {
+    var out: [Task] = []
+    for t in b.tasks {
+        if t.group == group {
+            out = out.push(t)
+        }
+    }
+    out
+}
+
+/// Rounded to an integer, as text.
+export fn r(n: Float) -> String {
+    n.round().to_int().to_string()
+}
+
+fn fixed(x: Float, digits: Int) -> String {
+    let scale = if digits == 1 { 10 } else { 100 }
+    let t = (x * scale.to_float()).round().to_int()
+    let frac = (t % scale).to_string()
+    let pad = if digits == 2 && t % scale < 10 { "0" } else { "" }
+    (t / scale).to_string() + "." + pad + frac
+}
+
+/// 1,444,788 -> "1.44M", 603,940 -> "604k", 9,738 -> "9.7k" (with `small`).
+export fn fmt_k(n: Float, small: Bool) -> String {
+    if n >= 1000000.0 {
+        return fixed(n / 1000000.0, 2) + "M"
+    }
+    if small && n < 100000.0 {
+        return fixed(n / 1000.0, 1) + "k"
+    }
+    r(n / 1000.0) + "k"
+}
+
+/// A saving as "−51%" (or "+12%" for an increase).
+export fn pct(n: Float) -> String {
+    if n < 0.0 { "+" + r(-n) + "%" } else { "−" + r(n) + "%" }
+}
+
+/// 6482 -> "6,482".
+export fn fmt_int(n: Float) -> String {
+    let s = n.abs().round().to_int().to_string()
+    var out = ""
+    var i = 0
+    while i < s.len() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out = out + ","
+        }
+        out = out + s.slice(i, i + 1)
+        i += 1
+    }
+    out
+}
+
+/// Natural logarithm (VCWL has no math library): x = m * 2^k, ln m = 2 atanh((m-1)/(m+1)).
+export fn ln(x: Float) -> Float {
+    var m = x
+    var k = 0.0
+    while m >= 2.0 {
+        m = m / 2.0
+        k += 1.0
+    }
+    while m < 1.0 {
+        m = m * 2.0
+        k -= 1.0
+    }
+    let y = (m - 1.0) / (m + 1.0)
+    var term = y
+    var sum = 0.0
+    var i = 1.0
+    while i < 40.0 {
+        sum += term / i
+        term = term * y * y
+        i += 2.0
+    }
+    2.0 * sum + k * 0.6931471805599453
+}
+
+/// Position of `v` on a log axis from `lo` to `hi`, in percent.
+export fn log_pos(v: Float, lo: Float, hi: Float) -> Float {
+    (ln(v) - ln(lo)) / (ln(hi) - ln(lo)) * 100.0
+}

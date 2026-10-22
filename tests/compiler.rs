@@ -92,3 +92,20 @@ fn invalid_programs_are_rejected() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn apps_compile_to_valid_modules() {
+    for path in vcwl_files("tests/apps") {
+        let mut sm = SourceMap::default();
+        let out = compile(&path, &mut sm, &Options { dev: false }).unwrap_or_else(|f| {
+            panic!(
+                "{}: {}",
+                path.display(),
+                f.diags.iter().map(|d| d.render(&sm)).collect::<String>()
+            )
+        });
+        vcwl::codegen::validate(&out.wasm).unwrap();
+        let css = &out.app.as_ref().unwrap().css;
+        assert!(css.contains(":appear"), "{css}");
+    }
+}

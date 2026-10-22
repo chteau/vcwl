@@ -3,6 +3,7 @@
 //! replays on a `<canvas>`, and turns pointer and keyboard input into application events.
 //! The browser DOM is not used. The only browser service it calls is text measurement.
 
+pub mod anim;
 pub mod css;
 pub mod dom;
 pub mod engine;
@@ -202,6 +203,50 @@ mod wasm {
     #[unsafe(no_mangle)]
     pub extern "C" fn poll() -> usize {
         output(with(|e| e.poll()))
+    }
+
+    /// The accessibility mirror if it changed (see `Engine::semantics`); 0 otherwise.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn semantics() -> usize {
+        with(|e| e.semantics(&mut Host)).map_or(0, output)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn focus_state() -> usize {
+        output(with(|e| e.focus_state()))
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn focus_node(id: u32) {
+        with(|e| e.focus_node(id));
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn activate_node(id: u32) {
+        with(|e| e.activate_node(id));
+    }
+
+    /// A mirrored text field changed: value in the input buffer, selection in UTF-16 units.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn field_input(id: u32, len: usize, start: i32, end: i32, backward: i32) {
+        let v = input(len);
+        with(|e| e.field_input(id, &v, start, end, backward != 0));
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn scroll_to_top() {
+        with(|e| e.scroll_to_top());
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn field_keydown(len: usize) {
+        let k = input(len);
+        with(|e| e.field_keydown(&k));
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn choose_index(id: u32, i: u32) {
+        with(|e| e.choose_index(id, i as usize));
     }
 
     #[unsafe(no_mangle)]
