@@ -14,4 +14,5 @@ members = ["render"]
 vcwl-render = { path = "render" }
 wasm-encoder = "0.262.0"
 wasmparser = "0.262.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
 wasmtime = { version = "50.0.0", default-features = false, features = ["runtime", "cranelift", "gc", "gc-drc", "std", "anyhow"] }

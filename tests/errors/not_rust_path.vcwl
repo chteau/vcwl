@@ -1,0 +1,5 @@
+// error: `::` is a path separator
+fn main() {
+    let x = Color::Red
+    print("{x}")
+}

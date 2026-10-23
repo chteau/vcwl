@@ -1,0 +1,4 @@
+name = "params"
+routing = "path"
+prerender = true
+prerender_routes = ["/post/1", "/post/hello"]

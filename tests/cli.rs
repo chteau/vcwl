@@ -301,3 +301,60 @@ fn packages_resolve_from_dependencies() {
         "the package's server function"
     );
 }
+
+fn scratch(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("vcwl-cli-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn vcwl_at(dir: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_vcwl"))
+        .args(args)
+        .current_dir(dir)
+        .env("VCWL_NO_UPDATE_CHECK", "1")
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn enterprise_project_builds() {
+    let d = scratch("enterprise");
+    let o = vcwl_at(&d, &["new", "--enterprise", "corp"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let o = vcwl_at(&d.join("corp"), &["build"]);
+    assert!(
+        o.status.success(),
+        "{}{}",
+        stdout(&o),
+        String::from_utf8_lossy(&o.stderr)
+    );
+}
+
+#[test]
+fn doctor_runs() {
+    let o = vcwl("examples/todo", &["doctor"]);
+    assert!(stdout(&o).contains("0 crabs detected"), "{}", stdout(&o));
+}
+
+#[test]
+fn deploy_folder_copies_and_writes_manifest() {
+    let d = scratch("deploy");
+    assert!(vcwl_at(&d, &["new", "site"]).status.success());
+    let site = d.join("site");
+    let target = d.join("public");
+    let o = vcwl_at(
+        &site,
+        &["deploy", "folder", target.to_str().unwrap(), "--yes"],
+    );
+    assert!(
+        o.status.success(),
+        "{}{}",
+        stdout(&o),
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(site.join("dist/.vcwl-manifest.json").is_file());
+    assert!(target.join("index.html").is_file());
+    assert!(target.join(".vcwl-manifest.json").is_file());
+}

@@ -1,0 +1,17 @@
+// Browser-test fixture: route parameters with path routing.
+app "Params" {
+}
+
+component App {
+    column(gap: 16px) {
+        row(gap: 12px) {
+            link("Home", to: "/")
+            link("Post 42", to: "/post/42")
+        }
+        routes {
+            "/" => heading("Home page", level: 1)
+            "/post/:id" => heading("Post {id}", level: 1)
+            _ => heading("Not found", level: 1)
+        }
+    }
+}

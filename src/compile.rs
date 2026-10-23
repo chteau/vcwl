@@ -40,6 +40,17 @@ pub fn load(
     paths.push(PathBuf::new());
     imports.push(Vec::new());
 
+    if entry.extension().is_some_and(|e| e == "rs") {
+        return Err(vec![Diag::compile(
+            Span::default(),
+            format!(
+                "`{}` is a Rust file. rustc is down the hall, second door on the left",
+                entry.display()
+            ),
+        )
+        .help("VCWL sources end in `.vcwl`")]);
+    }
+
     let mut queue = vec![(entry.to_path_buf(), None::<(usize, Span)>)];
     while let Some((path, from)) = queue.pop() {
         let canon = crate::project::canonical(&path).unwrap_or(path.clone());
@@ -66,8 +77,14 @@ pub fn load(
         };
         let display = path.display().to_string();
         let base = sm.add(&display, text.clone());
-        let toks = lexer::lex(&text, base).map_err(|d| vec![d])?;
-        let file = parser::parse_file(&display, &toks, &mut next_id).map_err(|d| vec![d])?;
+        let parsed = lexer::lex(&text, base)
+            .and_then(|toks| parser::parse_file(&display, &toks, &mut next_id));
+        let file = match parsed {
+            Ok(f) => f,
+            Err(d) => {
+                return Err(vec![crate::notrust::diagnose(&text, base).unwrap_or(d)]);
+            }
+        };
         let idx = files.len();
         if let Some((f, _)) = from {
             imports[f].push(idx);

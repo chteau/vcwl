@@ -2587,6 +2587,11 @@ impl<'a> Checker<'a> {
             Type::Adt(id, _) if *id == self.prelude_adt("Option") => Some("opt"),
             Type::Adt(id, _) if *id == self.prelude_adt("Result") => Some("res"),
             Type::Adt(id, _) if *id == self.prelude_adt("HttpError") => Some("http"),
+            Type::Adt(id, _) if *id == self.prelude_adt("Map") => Some("map"),
+            Type::Adt(id, _) if *id == self.prelude_adt("Set") => Some("set"),
+            Type::Adt(id, _) if *id == self.prelude_adt("Tuple2") => Some("tup2"),
+            Type::Adt(id, _) if *id == self.prelude_adt("Tuple3") => Some("tup3"),
+            Type::Adt(id, _) if *id == self.prelude_adt("Tuple4") => Some("tup4"),
             _ => None,
         };
         if let Some(p) = prefix

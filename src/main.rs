@@ -6,7 +6,9 @@ use vcwl::project::{self, Project};
 const USAGE: &str = "usage: vcwl <command> [args]
 
 commands:
-  new <dir>              create a starter application
+  new [--enterprise] <dir>  create a starter application
+  deploy <netlify|pages|folder DIR> [--yes]  build and ship dist/
+  doctor                 check the environment and the project
   dev [--port N]         build in development mode, serve and rebuild on changes
   check [file]           parse and type-check without producing artifacts
   build [--dev]          compile the project to static files in dist/
@@ -39,6 +41,8 @@ fn main() -> ExitCode {
     let r = match cmd.as_str() {
         "new" => cmd_new(rest),
         "build" => cmd_build(rest),
+        "deploy" => vcwl::deploy::run(rest),
+        "doctor" => vcwl::doctor::run(rest),
         "check" => cmd_check(rest),
         "clean" => cmd_clean(),
         "run" => cmd_run(rest),
@@ -79,8 +83,16 @@ fn project() -> Result<Project, String> {
 }
 
 fn cmd_new(rest: &[String]) -> Result<(), String> {
-    let dir = rest.first().ok_or("usage: vcwl new <dir>")?;
-    project::new_project(Path::new(dir))?;
+    let enterprise = rest.iter().any(|a| a == "--enterprise");
+    let dir = rest
+        .iter()
+        .find(|a| *a != "--enterprise")
+        .ok_or("usage: vcwl new [--enterprise] <dir>")?;
+    if enterprise {
+        vcwl::enterprise::new_enterprise(Path::new(dir))?;
+    } else {
+        project::new_project(Path::new(dir))?;
+    }
     println!("created {dir}\n\n  cd {dir}\n  vcwl dev");
     Ok(())
 }

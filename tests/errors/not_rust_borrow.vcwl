@@ -1,0 +1,8 @@
+// error: there is no borrow checker here, only vibes
+fn show(s: &String) {
+    print(s)
+}
+
+fn main() {
+    show("hi")
+}

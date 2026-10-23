@@ -19,6 +19,7 @@ use std::collections::HashMap;
 
 use crate::check_ui::{
     AttrKind, CompSig, Payload, Special, SwitchKind, TComp, TElem, TFill, TVarKind, TView,
+    route_params,
 };
 use crate::diag::{SourceMap, Span};
 use crate::ir::*;
@@ -793,13 +794,13 @@ impl Lower<'_> {
                 TView::Switch { kind, branches } => {
                     let d = match kind {
                         SwitchKind::If(x) | SwitchKind::Match(x, _) => self.deps(cx, x),
-                        SwitchKind::Routes(_) => BIT_ROUTE,
+                        SwitchKind::Routes(..) => BIT_ROUTE,
                     };
                     // Branch contents may use values bound by this switch (match arms).
                     branches
                         .iter()
                         .fold(d, |acc, br| acc | self.views_deps(cx, br))
-                        | if matches!(kind, SwitchKind::Match(..)) {
+                        | if matches!(kind, SwitchKind::Match(..) | SwitchKind::Routes(..)) {
                             BIT_BOUND
                         } else {
                             0
@@ -2089,9 +2090,19 @@ impl Lower<'_> {
                 }
             }
         }
+        if let SwitchKind::Routes(_, params) = kind {
+            for ((bs, _, _), ps) in bscopes.iter().zip(params) {
+                for (_, id) in ps {
+                    let t = comp.locals[*id].ty.clone();
+                    let vt = self.vt(&t).unwrap_or(VT::I32);
+                    let f = self.add_field(*bs, vt);
+                    self.u().scopes[*bs].bound.insert(*id, f);
+                }
+            }
+        }
         let sel_deps = match kind {
             SwitchKind::If(x) | SwitchKind::Match(x, _) => self.deps(&g.mount, x),
-            SwitchKind::Routes(_) => BIT_ROUTE,
+            SwitchKind::Routes(..) => BIT_ROUTE,
         };
         let mut branch_deps = Vec::new();
         for (bs, _, br) in &bscopes {
@@ -2108,6 +2119,7 @@ impl Lower<'_> {
         let create_m = self.switch_create(
             &mut g.mount,
             si,
+            kind,
             &bscopes,
             &pats,
             get(newidx_m),
@@ -2144,6 +2156,7 @@ impl Lower<'_> {
         let create_u = self.switch_create(
             &mut g.update,
             si,
+            kind,
             &bscopes,
             &pats,
             get(newidx_u),
@@ -2201,6 +2214,30 @@ impl Lower<'_> {
                     (k, IExpr::Seq(body))
                 })
                 .collect(),
+            (SwitchKind::Routes(_, params), _) if params.iter().any(|ps| !ps.is_empty()) => {
+                bscopes
+                    .iter()
+                    .enumerate()
+                    .map(|(k, (bs, bf, _))| {
+                        let bty = self.u().scopes[*bs].ty;
+                        let uf = self.u().scopes[*bs].fns.update;
+                        let fr = un(UnOp::RefAsNonNull, IExpr::StructGet(ty, *bf, b(get(0))));
+                        let mut body = Vec::new();
+                        let binds = self.route_binds(kind, k);
+                        let mask = if binds.is_empty() {
+                            get(1)
+                        } else {
+                            bin(Op::I64Or, get(1), IExpr::I64(BIT_BOUND))
+                        };
+                        for (id, v) in binds {
+                            let f = self.u().scopes[*bs].bound[&id];
+                            body.push(IExpr::StructSet(bty, f, b(fr.clone()), b(v)));
+                        }
+                        body.push(IExpr::Call(FuncRef::Local(uf), vec![fr, mask]));
+                        (k, IExpr::Seq(body))
+                    })
+                    .collect()
+            }
             _ => vec![],
         };
         let same_branch = if rebind.is_empty() {
@@ -2287,18 +2324,27 @@ impl Lower<'_> {
                     None,
                 )
             }
-            SwitchKind::Routes(paths) => {
+            SwitchKind::Routes(paths, _) => {
                 let route = self.u().g.route;
                 let id = self.fns.iter().position(|f| f.name == "str_eq").unwrap();
                 let eq = self.fn_inst(id, &[]);
+                let id = self
+                    .fns
+                    .iter()
+                    .position(|f| f.name == "route_matches")
+                    .unwrap();
+                let matches = self.fn_inst(id, &[]);
                 let mut e = IExpr::I32(paths.len() as i32 - 1);
                 for (k, p) in paths.iter().enumerate().rev() {
                     if let Some(p) = p {
                         let lit = self.string_const(p);
-                        let test = IExpr::Call(
-                            FuncRef::Local(eq),
-                            vec![un(UnOp::RefAsNonNull, IExpr::GlobalGet(route)), lit],
-                        );
+                        let f = if route_params(p).is_empty() { eq } else { matches };
+                        let args = if route_params(p).is_empty() {
+                            vec![un(UnOp::RefAsNonNull, IExpr::GlobalGet(route)), lit]
+                        } else {
+                            vec![lit, un(UnOp::RefAsNonNull, IExpr::GlobalGet(route))]
+                        };
+                        let test = IExpr::Call(FuncRef::Local(f), args);
                         e = IExpr::If(Some(VT::I32), b(test), vec![IExpr::I32(k as i32)], vec![e]);
                     }
                 }
@@ -2332,6 +2378,7 @@ impl Lower<'_> {
         &mut self,
         cx: &mut FnCx,
         si: usize,
+        kind: &SwitchKind,
         bscopes: &[(usize, u32, Vec<TView>)],
         pats: &[Option<TPat>],
         idx: IExpr,
@@ -2358,6 +2405,10 @@ impl Lower<'_> {
                     }
                 }
             }
+            for (id, v) in self.route_binds(kind, k) {
+                let fld = self.u().scopes[*bs].bound[&id];
+                body.push(IExpr::StructSet(bty, fld, b(get(f)), b(v)));
+            }
             body.push(IExpr::Call(
                 FuncRef::Local(fns.mount),
                 vec![
@@ -2370,6 +2421,38 @@ impl Lower<'_> {
             arms.push((k, IExpr::Seq(body)));
         }
         switch_on(idx, arms)
+    }
+
+    /// The `:name` parameters bound by arm `k` of a `routes` switch, with code reading each
+    /// value from the current route.
+    fn route_binds(&mut self, kind: &SwitchKind, k: usize) -> Vec<(LocalId, IExpr)> {
+        let SwitchKind::Routes(paths, params) = kind else {
+            return vec![];
+        };
+        let (Some(Some(pat)), Some(ps)) = (paths.get(k), params.get(k)) else {
+            return vec![];
+        };
+        if ps.is_empty() {
+            return vec![];
+        }
+        let route = self.u().g.route;
+        let id = self
+            .fns
+            .iter()
+            .position(|f| f.name == "route_param")
+            .unwrap();
+        let param = self.fn_inst(id, &[]);
+        ps.iter()
+            .map(|(name, id)| {
+                let pat = self.string_const(pat);
+                let name = self.string_const(name);
+                let v = IExpr::Call(
+                    FuncRef::Local(param),
+                    vec![pat, un(UnOp::RefAsNonNull, IExpr::GlobalGet(route)), name],
+                );
+                (*id, v)
+            })
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]

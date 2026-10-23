@@ -1,0 +1,55 @@
+// expect: 3
+// expect: Some(2)
+// expect: true
+// expect: false
+// expect: a,b,c
+// expect: 20
+// expect: 2
+// expect: b=9
+// expect: 6
+// expect: h|é|l
+// expect: éll
+// expect: 3
+// expect: x,y,z
+// expect: y
+// expect: 1
+// expect: x
+// expect: 7
+
+fn main() {
+    var m: Map<Int> = empty_map()
+    m = m.set("c", 3)
+    m = m.set("a", 1)
+    m = m.set("b", 2)
+    print(m.len())
+    match m.get("b") {
+        Some(v) => print("Some({v})"),
+        None => print("None"),
+    }
+    print(m.has("a"))
+    print(m.has("zz"))
+    print(m.keys().join(","))
+    print(m.set("b", 9).values().sum() + 7)
+    print(m.remove("a").len())
+    for e in m.set("b", 9).entries() {
+        if e._0() == "b" {
+            print("b={e._1()}")
+        }
+    }
+
+    let word = "héllo🦀"
+    print(word.char_len())
+    let cs = word.chars()
+    print("{cs[0]}|{cs[1]}|{cs[2]}")
+    print(word.char_slice(1, 4))
+
+    var s = empty_set().add("y").add("x").add("y")
+    print(s.len() + 1)
+    let t = empty_set().add("z").add("y")
+    print(s.union(t).items().join(","))
+    print(s.intersect(t).items().join(","))
+    print(s.remove("x").len())
+    print(s.remove("y").items().join(","))
+    let tr = (1, "a", 2.0)
+    print(tr._0() + 6)
+}

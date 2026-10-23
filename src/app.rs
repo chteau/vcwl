@@ -66,7 +66,7 @@ fn collect_routes(views: &[crate::check_ui::TView], out: &mut Vec<String>) {
         match v {
             TView::Element(e) => collect_routes(&e.children, out),
             TView::Switch { kind, branches } => {
-                if let SwitchKind::Routes(paths) = kind {
+                if let SwitchKind::Routes(paths, _) = kind {
                     for p in paths.iter().flatten() {
                         if !out.contains(p) {
                             out.push(p.clone());

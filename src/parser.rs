@@ -573,10 +573,35 @@ impl<'a> Parser<'a> {
                 span: start.to(self.prev_span()),
             }
         } else if self.eat("(") {
-            self.expect(")")?;
-            TypeExpr {
-                kind: TypeExprKind::Unit,
-                span: start.to(self.prev_span()),
+            if self.eat(")") {
+                TypeExpr {
+                    kind: TypeExprKind::Unit,
+                    span: start.to(self.prev_span()),
+                }
+            } else {
+                let mut items = vec![self.type_expr()?];
+                let mut comma = false;
+                while self.eat(",") {
+                    comma = true;
+                    if self.is(")") {
+                        break;
+                    }
+                    items.push(self.type_expr()?);
+                }
+                self.expect(")")?;
+                if items.len() == 1 && !comma {
+                    items.remove(0)
+                } else if (2..=4).contains(&items.len()) {
+                    TypeExpr {
+                        kind: TypeExprKind::Named(format!("Tuple{}", items.len()), items),
+                        span: start.to(self.prev_span()),
+                    }
+                } else {
+                    return Err(Diag::syntax(
+                        start.to(self.prev_span()),
+                        "tuple types have 2 to 4 elements",
+                    ));
+                }
             }
         } else if self.eat_kw("fn") {
             self.expect("(")?;
@@ -634,10 +659,17 @@ impl<'a> Parser<'a> {
             if self.at_eof() {
                 return Err(Diag::syntax(start, "unclosed `{`"));
             }
-            match self.stmt()? {
-                Stmt::Expr(e) if self.is("}") && !self.prev_is(";") => tail = Some(Box::new(e)),
-                s => stmts.push(s),
+            let mut batch = self.stmts()?;
+            if self.is("}")
+                && !self.prev_is(";")
+                && let Some(Stmt::Expr(_)) = batch.last()
+            {
+                let Some(Stmt::Expr(e)) = batch.pop() else {
+                    unreachable!()
+                };
+                tail = Some(Box::new(e));
             }
+            stmts.extend(batch);
         }
         self.bump();
         Ok(Block {
@@ -645,6 +677,64 @@ impl<'a> Parser<'a> {
             tail,
             span: start.to(self.prev_span()),
         })
+    }
+
+    fn stmts(&mut self) -> Result<Vec<Stmt>> {
+        let start = self.span();
+        if (self.is_kw("let") || self.is_kw("var")) && matches!(self.peek_at(1), Tok::Punct("(")) {
+            let mutable = self.bump().tok == Tok::Ident("var".into());
+            let pat = self.pattern()?;
+            self.expect("=")
+                .map_err(|d| d.help("bindings must be initialized, e.g. `let x = 0`"))?;
+            let value = self.expr()?;
+            self.stmt_end()?;
+            let span = start.to(self.prev_span());
+            let tmp = Ident {
+                name: format!("_tup{}", pat.span.lo),
+                span: pat.span,
+            };
+            let mut out = vec![Stmt::Let {
+                name: tmp.clone(),
+                mutable: false,
+                ty: None,
+                value,
+                span,
+            }];
+            out.extend(self.destructure(&tmp, &pat, mutable, span));
+            return Ok(out);
+        }
+        Ok(vec![self.stmt()?])
+    }
+
+    fn destructure(&mut self, tmp: &Ident, pat: &Pattern, mutable: bool, span: Span) -> Vec<Stmt> {
+        let mut names = Vec::new();
+        pat_binds(pat, &mut names);
+        let mut out = Vec::new();
+        for name in names {
+            let scrut = self.mk(ExprKind::Ident(tmp.name.clone()), pat.span);
+            let body = self.mk(ExprKind::Ident(name.clone()), pat.span);
+            let value = self.mk(
+                ExprKind::Match {
+                    scrut: Box::new(scrut),
+                    arms: vec![Arm {
+                        pat: keep_bind(pat, &name),
+                        body,
+                    }],
+                },
+                pat.span,
+            );
+            out.push(Stmt::Let {
+                name: Ident {
+                    name,
+                    span: pat.span,
+                },
+                mutable,
+                ty: None,
+                value,
+                span,
+            });
+        }
+        out
     }
 
     fn prev_is(&self, p: &str) -> bool {
@@ -683,10 +773,24 @@ impl<'a> Parser<'a> {
             });
         }
         if self.eat_kw("for") {
-            let var = self.ident()?;
+            let (var, pat) = if self.is("(") {
+                let p = self.pattern()?;
+                let tmp = Ident {
+                    name: format!("_tup{}", p.span.lo),
+                    span: p.span,
+                };
+                (tmp, Some(p))
+            } else {
+                (self.ident()?, None)
+            };
             self.expect_kw("in")?;
             let iter = self.expr_no_struct()?;
-            let body = self.block()?;
+            let mut body = self.block()?;
+            if let Some(p) = pat {
+                let mut stmts = self.destructure(&var, &p, false, p.span);
+                stmts.append(&mut body.stmts);
+                body.stmts = stmts;
+            }
             return Ok(Stmt::For {
                 var,
                 iter,
@@ -934,6 +1038,24 @@ impl<'a> Parser<'a> {
         loop {
             if self.is(".") {
                 self.bump();
+                if let Tok::Int(n @ 0..=3) = *self.peek() {
+                    let sp = self.bump().span;
+                    let name = Ident {
+                        name: format!("_{n}"),
+                        span: sp,
+                    };
+                    let span = e.span.to(sp);
+                    e = self.mk(
+                        ExprKind::Method {
+                            recv: Box::new(e),
+                            name,
+                            type_args: Vec::new(),
+                            args: Vec::new(),
+                        },
+                        span,
+                    );
+                    continue;
+                }
                 let name = self.ident()?;
                 if self.is("(") && !self.token().nl {
                     self.bump();
@@ -1084,6 +1206,36 @@ impl<'a> Parser<'a> {
                     return Ok(self.mk(ExprKind::Unit, span.to(self.prev_span())));
                 }
                 let mut e = self.expr()?;
+                if self.is(",") {
+                    let mut items = vec![e];
+                    while self.eat(",") {
+                        if self.is(")") {
+                            break;
+                        }
+                        items.push(self.expr()?);
+                    }
+                    self.expect(")")?;
+                    let full = span.to(self.prev_span());
+                    if !(2..=4).contains(&items.len()) {
+                        return Err(Diag::syntax(full, "tuples have 2 to 4 elements"));
+                    }
+                    let callee = Ident {
+                        name: format!("Tuple{}", items.len()),
+                        span,
+                    };
+                    let args = items
+                        .into_iter()
+                        .map(|value| Arg { name: None, value })
+                        .collect();
+                    return Ok(self.mk(
+                        ExprKind::Call {
+                            callee,
+                            type_args: Vec::new(),
+                            args,
+                        },
+                        full,
+                    ));
+                }
                 self.expect(")")?;
                 e.span = span.to(self.prev_span());
                 Ok(e)
@@ -1314,6 +1466,34 @@ impl<'a> Parser<'a> {
                             "string patterns cannot contain interpolation",
                         ));
                     }
+                }
+            }
+            Tok::Punct("(") => {
+                self.bump();
+                let mut items = Vec::new();
+                let mut comma = false;
+                while !self.is(")") {
+                    items.push(self.pattern()?);
+                    if !self.eat(",") {
+                        break;
+                    }
+                    comma = true;
+                }
+                self.expect(")")?;
+                let span = start.to(self.prev_span());
+                if items.len() == 1 && !comma {
+                    return Ok(items.remove(0));
+                }
+                if !(2..=4).contains(&items.len()) {
+                    return Err(Diag::syntax(span, "tuple patterns have 2 to 4 elements"));
+                }
+                PatKind::Variant {
+                    qual: None,
+                    name: Ident {
+                        name: format!("Tuple{}", items.len()),
+                        span,
+                    },
+                    args: items,
                 }
             }
             Tok::Ident(s) if s == "_" => {
@@ -1781,4 +1961,29 @@ impl<'a> Parser<'a> {
             span: start.to(self.prev_span()),
         })
     }
+}
+
+fn pat_binds(p: &Pattern, out: &mut Vec<String>) {
+    match &p.kind {
+        PatKind::Bind(n) => out.push(n.clone()),
+        PatKind::Variant { args, .. } => args.iter().for_each(|a| pat_binds(a, out)),
+        _ => {}
+    }
+}
+
+fn keep_bind(p: &Pattern, name: &str) -> Pattern {
+    let kind = match &p.kind {
+        PatKind::Bind(n) if n != name => PatKind::Wild,
+        PatKind::Variant {
+            qual,
+            name: vn,
+            args,
+        } => PatKind::Variant {
+            qual: qual.clone(),
+            name: vn.clone(),
+            args: args.iter().map(|a| keep_bind(a, name)).collect(),
+        },
+        k => k.clone(),
+    };
+    Pattern { kind, span: p.span }
 }

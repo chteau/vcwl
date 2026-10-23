@@ -367,6 +367,16 @@ fn route_dir(route: &str) -> Result<String, String> {
     }
 }
 
+/// Whether the concrete `url` is shown by route pattern `pat` (`:name` matches one segment).
+fn route_fits(pat: &str, url: &str) -> bool {
+    let p: Vec<&str> = pat.trim_matches('/').split('/').collect();
+    let u: Vec<&str> = url.trim_matches('/').split('/').collect();
+    p.len() == u.len()
+        && p.iter()
+            .zip(&u)
+            .all(|(a, b)| if a.starts_with(':') { !b.is_empty() } else { a == b })
+}
+
 /// The site's base path from its `url` (`https://user.github.io/repo/` gives `/repo/`).
 fn base_path(url: Option<&str>) -> String {
     let path = url
@@ -382,7 +392,20 @@ fn base_path(url: Option<&str>) -> String {
 }
 
 /// The pages to write: one with hash routing, one per route and `404.html` with path routing.
-fn pages(routing: Routing, routes: &[String], meta: &Meta) -> Result<Vec<Page>, String> {
+fn pages(
+    routing: Routing,
+    routes: &[String],
+    extra: &[String],
+    meta: &Meta,
+) -> Result<Vec<Page>, String> {
+    let is_param = |r: &str| r.split('/').any(|s| s.starts_with(':'));
+    for url in extra {
+        if !routes.iter().any(|r| route_fits(r, url)) {
+            return Err(format!(
+                "vcwl.toml: prerender_routes entry \"{url}\" matches no route of the app"
+            ));
+        }
+    }
     if routing == Routing::Hash {
         return Ok(vec![Page {
             file: "index.html".into(),
@@ -399,9 +422,14 @@ fn pages(routing: Routing, routes: &[String], meta: &Meta) -> Result<Vec<Page>, 
     list.extend(
         routes
             .iter()
-            .filter(|r| !r.trim_matches('/').is_empty())
+            .filter(|r| !r.trim_matches('/').is_empty() && !is_param(r))
             .cloned(),
     );
+    for url in extra {
+        if !list.contains(url) {
+            list.push(url.clone());
+        }
+    }
     let mut out = Vec::new();
     for route in list {
         let rel = route_dir(&route)?;
@@ -781,7 +809,18 @@ pub fn build(entry: &Path, out: &Path, dev: bool) -> Result<Vec<(String, usize)>
             ));
         }
     };
-    let pages = pages(routing, &app.routes, &meta)?;
+    let extra: Vec<String> = setting("prerender_routes")
+        .map(|v| {
+            v.trim()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .split(',')
+                .map(|s| s.trim().trim_matches('"').to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let pages = pages(routing, &app.routes, &extra, &meta)?;
     // JavaScript modules whose exports implement `extern fn`s: `@web`'s, the packages', then the
     // app's own (later modules win on equal names).
     let mut js = Vec::new();

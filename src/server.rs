@@ -3,17 +3,19 @@
 //! The compiler puts server functions in their own module (`dist-server/server.wasm`), each
 //! exported as `__fn_<name>`. A call is `POST /__vcwl/fn/<name>` with the arguments as a JSON
 //! array; the response is the JSON of the result. Each call runs in a fresh instance (no state
-//! survives between calls except the store), one call at a time, with a time and memory limit.
+//! survives between calls except the store, the SQLite database and the session cookie), calls run
+//! in parallel, each with a time and memory limit.
 //! The host functions mirror the browser host's (`runtime/vcwl.js`): text travels through the
 //! I/O region of linear memory, JSON values through integer handles.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use wasmtime::{
     Caller, Config, Engine, InstancePre, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
@@ -376,6 +378,369 @@ impl Kv {
     }
 }
 
+// ----- host calls -----
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    if !s.len().is_multiple_of(2) || !s.is_ascii() {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// HMAC-SHA256 (RFC 2104).
+pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    let mut block = [0u8; 64];
+    if key.len() > 64 {
+        block[..32].copy_from_slice(&crate::sha256::digest(key));
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    let mut inner: Vec<u8> = block.iter().map(|b| b ^ 0x36).collect();
+    inner.extend_from_slice(data);
+    let mut outer: Vec<u8> = block.iter().map(|b| b ^ 0x5c).collect();
+    outer.extend_from_slice(&crate::sha256::digest(&inner));
+    crate::sha256::digest(&outer)
+}
+
+const SESSION_COOKIE: &str = "vcwl_session";
+
+/// The cookie value of a session: hex(json) + "." + hex(HMAC(secret, json)).
+pub fn encode_session(secret: &[u8], session: &BTreeMap<String, String>) -> String {
+    let obj = Json::Obj(
+        session
+            .iter()
+            .map(|(k, v)| (k.clone(), Rc::new(Json::Str(v.clone()))))
+            .collect(),
+    );
+    let mut json = String::new();
+    obj.write(&mut json);
+    format!(
+        "{}.{}",
+        hex(json.as_bytes()),
+        hex(&hmac_sha256(secret, json.as_bytes()))
+    )
+}
+
+/// The session of a `Cookie` header; missing, malformed or tampered cookies give an empty one.
+pub fn decode_session(secret: &[u8], cookie_header: Option<&str>) -> BTreeMap<String, String> {
+    let decode = || -> Option<BTreeMap<String, String>> {
+        let value = cookie_header?.split(';').find_map(|c| {
+            let (k, v) = c.trim().split_once('=')?;
+            (k == SESSION_COOKIE).then_some(v)
+        })?;
+        let (data, mac) = value.split_once('.')?;
+        let data = unhex(data)?;
+        let mac = unhex(mac)?;
+        let expected = hmac_sha256(secret, &data);
+        if mac.len() != expected.len()
+            || mac.iter().zip(expected).fold(0u8, |acc, (a, b)| acc | (a ^ b)) != 0
+        {
+            return None;
+        }
+        let Json::Obj(fields) = Json::parse(std::str::from_utf8(&data).ok()?)? else {
+            return None;
+        };
+        Some(
+            fields
+                .into_iter()
+                .filter_map(|(k, v)| match &*v {
+                    Json::Str(s) => Some((k, s.clone())),
+                    _ => None,
+                })
+                .collect(),
+        )
+    };
+    decode().unwrap_or_default()
+}
+
+/// What host calls of one server function call can reach.
+pub struct HostCtx {
+    pub db: Arc<Mutex<Option<rusqlite::Connection>>>,
+    pub db_path: PathBuf,
+    pub session: BTreeMap<String, String>,
+    pub session_changed: bool,
+}
+
+impl HostCtx {
+    pub fn new(db: Arc<Mutex<Option<rusqlite::Connection>>>, db_path: PathBuf) -> HostCtx {
+        HostCtx {
+            db,
+            db_path,
+            session: BTreeMap::new(),
+            session_changed: false,
+        }
+    }
+
+    fn with_db<T>(
+        &self,
+        f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, String> {
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        if db.is_none() {
+            if let Some(dir) = self.db_path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            let conn = rusqlite::Connection::open(&self.db_path).map_err(|e| e.to_string())?;
+            *db = Some(conn);
+        }
+        f(db.as_ref().expect("opened above")).map_err(|e| e.to_string())
+    }
+}
+
+fn arg(args: &Json, i: usize) -> Option<&Json> {
+    match args {
+        Json::Arr(a) => a.get(i).map(|v| &**v),
+        _ => None,
+    }
+}
+
+fn arg_str(args: &Json, i: usize) -> Result<&str, String> {
+    match arg(args, i) {
+        Some(Json::Str(s)) => Ok(s),
+        _ => Err(format!("argument {} must be a string", i + 1)),
+    }
+}
+
+fn sql_params(args: &Json) -> Result<Vec<String>, String> {
+    match arg(args, 1) {
+        None | Some(Json::Null) => Ok(Vec::new()),
+        Some(Json::Arr(items)) => Ok(items
+            .iter()
+            .map(|v| match &**v {
+                Json::Str(s) => s.clone(),
+                other => {
+                    let mut s = String::new();
+                    other.write(&mut s);
+                    s
+                }
+            })
+            .collect()),
+        _ => Err("the SQL parameters must be an array".into()),
+    }
+}
+
+fn sql_value(v: rusqlite::types::ValueRef<'_>) -> Json {
+    use rusqlite::types::ValueRef;
+    match v {
+        ValueRef::Null => Json::Null,
+        ValueRef::Integer(i) => Json::Num(i as f64),
+        ValueRef::Real(f) => Json::Num(f),
+        ValueRef::Text(t) => Json::Str(String::from_utf8_lossy(t).into_owned()),
+        ValueRef::Blob(b) => Json::Str(hex(b)),
+    }
+}
+
+fn sql_query(ctx: &HostCtx, args: &Json) -> Result<Json, String> {
+    let sql = arg_str(args, 0)?;
+    let params = sql_params(args)?;
+    ctx.with_db(|db| {
+        let mut stmt = db.prepare(sql)?;
+        let cols: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+        let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            let mut fields = Vec::with_capacity(cols.len());
+            for (i, c) in cols.iter().enumerate() {
+                fields.push((c.clone(), Rc::new(sql_value(row.get_ref(i)?))));
+            }
+            out.push(Rc::new(Json::Obj(fields)));
+        }
+        Ok(Json::Arr(out))
+    })
+}
+
+fn sql_exec(ctx: &HostCtx, args: &Json) -> Result<Json, String> {
+    let sql = arg_str(args, 0)?;
+    let params = sql_params(args)?;
+    ctx.with_db(|db| {
+        let n = db.execute(sql, rusqlite::params_from_iter(params.iter()))?;
+        Ok(Json::Num(n as f64))
+    })
+}
+
+/// An HTTP client in a language that is not Rust: we do not pull in an async runtime, a TLS
+/// stack and four hundred transitive crates to fetch one URL. We ask curl, like adults.
+fn http(args: &Json) -> Result<Json, String> {
+    let method = arg_str(args, 0)?;
+    let url = arg_str(args, 1)?;
+    let body = match arg(args, 2) {
+        None | Some(Json::Null) => "",
+        Some(Json::Str(s)) => s.as_str(),
+        _ => return Err("argument 3 must be a string".into()),
+    };
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(format!("not an http(s) URL: {url}"));
+    }
+    if method.is_empty() || !method.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return Err(format!("bad HTTP method: {method}"));
+    }
+    let mut cmd = Command::new("curl");
+    cmd.args([
+        "-sS",
+        "-X",
+        method,
+        "--max-time",
+        "10",
+        "-w",
+        "\n%{http_code}",
+    ]);
+    if !body.is_empty() {
+        cmd.args(["--data-binary", "@-"]);
+    }
+    cmd.arg(url)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("cannot run curl: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(body.as_bytes())
+            .map_err(|e| format!("curl: {e}"))?;
+    }
+    let out = child.wait_with_output().map_err(|e| format!("curl: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let (body, code) = text.rsplit_once('\n').ok_or("curl: no status code")?;
+    let status: f64 = code
+        .trim()
+        .parse()
+        .map_err(|_| format!("curl: bad status code {code:?}"))?;
+    Ok(Json::Obj(vec![
+        ("status".into(), Rc::new(Json::Num(status))),
+        ("body".into(), Rc::new(Json::Str(body.to_string()))),
+    ]))
+}
+
+/// Runs host call `name`; the result is `{"ok": value}` or `{"err": message}`.
+pub fn host_call(ctx: &mut HostCtx, name: &str, args: &Json) -> Json {
+    let result = match name {
+        "sql.query" => sql_query(ctx, args),
+        "sql.exec" => sql_exec(ctx, args),
+        "http" => http(args),
+        "session.get" => arg_str(args, 0).map(|k| match ctx.session.get(k) {
+            Some(v) => Json::Str(v.clone()),
+            None => Json::Null,
+        }),
+        "session.set" => arg_str(args, 0).and_then(|k| {
+            let k = k.to_string();
+            match arg(args, 1) {
+                Some(Json::Str(v)) => {
+                    if ctx.session.get(&k) != Some(v) {
+                        ctx.session.insert(k, v.clone());
+                        ctx.session_changed = true;
+                    }
+                    Ok(Json::Null)
+                }
+                None | Some(Json::Null) => {
+                    ctx.session_changed |= ctx.session.remove(&k).is_some();
+                    Ok(Json::Null)
+                }
+                _ => Err("argument 2 must be a string or null".into()),
+            }
+        }),
+        "time.now" => Ok(Json::Num(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0.0, |d| d.as_millis() as f64),
+        )),
+        _ => Err(format!("unknown host call `{name}`")),
+    };
+    match result {
+        Ok(v) => Json::Obj(vec![("ok".into(), Rc::new(v))]),
+        Err(e) => Json::Obj(vec![("err".into(), Rc::new(Json::Str(e)))]),
+    }
+}
+
+// ----- rate limits -----
+
+/// `vcwl.limits.toml`: calls per minute per client, overall and per function.
+#[derive(Debug, Default, PartialEq)]
+pub struct Limits {
+    pub calls_per_minute: Option<u32>,
+    pub functions: BTreeMap<String, u32>,
+}
+
+impl Limits {
+    pub fn parse(text: &str) -> Result<Limits, String> {
+        let mut limits = Limits::default();
+        let mut section = String::new();
+        for (n, line) in text.lines().enumerate() {
+            let line = line.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some(s) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                section = s.trim().to_string();
+                continue;
+            }
+            let bad = || format!("vcwl.limits.toml:{}: expected `name = N`", n + 1);
+            let (k, v) = line.split_once('=').ok_or_else(bad)?;
+            let k = k.trim().trim_matches('"');
+            let v: u32 = v.trim().parse().map_err(|_| bad())?;
+            match section.as_str() {
+                "" if k == "calls_per_minute" => limits.calls_per_minute = Some(v),
+                "functions" => {
+                    limits.functions.insert(k.to_string(), v);
+                }
+                _ => {
+                    return Err(format!(
+                        "vcwl.limits.toml:{}: unknown setting `{k}`",
+                        n + 1
+                    ));
+                }
+            }
+        }
+        Ok(limits)
+    }
+}
+
+fn random_bytes() -> [u8; 32] {
+    let mut buf = [0u8; 32];
+    if std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .is_ok()
+    {
+        return buf;
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let seed = format!("{nanos}:{}:{:p}", std::process::id(), &buf);
+    crate::sha256::digest(seed.as_bytes())
+}
+
+/// The session signing key: `VCWL_SECRET`, else a random key kept in the store.
+fn session_secret(kv: &mut Kv) -> Vec<u8> {
+    if let Ok(s) = std::env::var("VCWL_SECRET")
+        && !s.is_empty()
+    {
+        return s.into_bytes();
+    }
+    const KEY: &str = "__vcwl_secret";
+    if let Some(Json::Str(s)) = kv.map.get(KEY).and_then(|t| Json::parse(t))
+        && let Some(b) = unhex(&s)
+    {
+        return b;
+    }
+    let secret = random_bytes();
+    let mut text = String::new();
+    quote(&hex(&secret), &mut text);
+    kv.map.insert(KEY.into(), text);
+    if let Err(e) = kv.save() {
+        eprintln!("[server] {e}");
+    }
+    secret.to_vec()
+}
+
 // ----- runtime -----
 
 struct State {
@@ -384,6 +749,7 @@ struct State {
     kv: Arc<Mutex<Kv>>,
     changed: bool,
     limits: StoreLimits,
+    host: HostCtx,
 }
 
 /// Outcome of a server function call.
@@ -404,6 +770,12 @@ pub struct Functions {
     pre: InstancePre<State>,
     names: Vec<String>,
     kv: Arc<Mutex<Kv>>,
+    db: Arc<Mutex<Option<rusqlite::Connection>>>,
+    db_path: PathBuf,
+    secret: Vec<u8>,
+    limits: Limits,
+    /// (client, function or "") → (window start, calls in the window).
+    rates: Mutex<HashMap<(String, String), (Instant, u32)>>,
 }
 
 fn io_read(caller: &mut Caller<'_, State>, len: i32) -> wasmtime::Result<String> {
@@ -583,6 +955,27 @@ fn linker(engine: &Engine) -> wasmtime::Result<Linker<State>> {
             Ok(())
         },
     )?;
+    l.func_wrap(
+        "vcwl",
+        "host",
+        |mut c: Caller<'_, State>, name_len: i32, len: i32| {
+            let text = io_read(&mut c, len)?;
+            let split = (name_len.max(0) as usize).min(text.len());
+            let (name, args) = if text.is_char_boundary(split) {
+                text.split_at(split)
+            } else {
+                (text.as_str(), "")
+            };
+            let result = match Json::parse(args) {
+                Some(a) => host_call(&mut c.data_mut().host, name, &a),
+                None => Json::Obj(vec![(
+                    "err".into(),
+                    Rc::new(Json::Str("host call arguments are not valid JSON".into())),
+                )]),
+            };
+            Ok(push(&mut c, Rc::new(result)))
+        },
+    )?;
     l.func_wrap("vcwl", "respond", |mut c: Caller<'_, State>, len: i32| {
         let v = io_read(&mut c, len)?;
         c.data_mut().response = Some(Ok(v));
@@ -622,11 +1015,20 @@ impl Functions {
                 std::thread::sleep(TICK);
             }
         });
+        let mut db_path = store.clone().into_os_string();
+        db_path.push(".sqlite");
+        let mut kv = Kv::open(store)?;
+        let secret = session_secret(&mut kv);
         Ok(Functions {
             engine,
             pre,
             names,
-            kv: Arc::new(Mutex::new(Kv::open(store)?)),
+            kv: Arc::new(Mutex::new(kv)),
+            db: Arc::new(Mutex::new(None)),
+            db_path: PathBuf::from(db_path),
+            secret,
+            limits: Limits::default(),
+            rates: Mutex::new(HashMap::new()),
         })
     }
 
@@ -634,23 +1036,71 @@ impl Functions {
         &self.names
     }
 
-    /// Calls server function `name` with the JSON array `args`.
+    pub fn set_limits(&mut self, limits: Limits) {
+        self.limits = limits;
+    }
+
+    /// Counts a call of `name` by `client`; false when it is over a limit.
+    pub fn allow(&self, client: &str, name: &str) -> bool {
+        let checks = [
+            (String::new(), self.limits.calls_per_minute),
+            (name.to_string(), self.limits.functions.get(name).copied()),
+        ];
+        let now = Instant::now();
+        let mut rates = self.rates.lock().unwrap_or_else(|e| e.into_inner());
+        rates.retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(60));
+        let over = checks.iter().any(|(key, limit)| {
+            limit.is_some_and(|max| {
+                rates
+                    .get(&(client.to_string(), key.clone()))
+                    .is_some_and(|(_, n)| *n >= max)
+            })
+        });
+        if over {
+            return false;
+        }
+        for (key, limit) in checks {
+            if limit.is_some() {
+                rates
+                    .entry((client.to_string(), key))
+                    .or_insert((now, 0))
+                    .1 += 1;
+            }
+        }
+        true
+    }
+
+    /// Calls server function `name` with the JSON array `args`, without a session.
     pub fn call(&self, name: &str, args: &str) -> Reply {
+        self.call_with_cookie(name, args, None).0
+    }
+
+    /// Calls server function `name` with the session of the `Cookie` header; also returns the
+    /// `Set-Cookie` value when the session changed.
+    pub fn call_with_cookie(
+        &self,
+        name: &str,
+        args: &str,
+        cookie: Option<&str>,
+    ) -> (Reply, Option<String>) {
         if !self.names.iter().any(|n| n == name) {
-            return Reply::NotFound;
+            return (Reply::NotFound, None);
         }
         let Some(args) = Json::parse(args) else {
-            return Reply::BadRequest("the body is not valid JSON".into());
+            return (
+                Reply::BadRequest("the body is not valid JSON".into()),
+                None,
+            );
         };
-        // One call at a time: calls see each other's writes in order, like a single thread.
-        static CALLS: Mutex<()> = Mutex::new(());
-        let _turn = CALLS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut host = HostCtx::new(self.db.clone(), self.db_path.clone());
+        host.session = decode_session(&self.secret, cookie);
         let state = State {
             json: vec![Rc::new(args)],
             response: None,
             kv: self.kv.clone(),
             changed: false,
             limits: StoreLimitsBuilder::new().memory_size(256 << 20).build(),
+            host,
         };
         let mut store = Store::new(&self.engine, state);
         store.limiter(|s| &mut s.limits);
@@ -664,7 +1114,14 @@ impl Functions {
         {
             eprintln!("[server] {e}");
         }
-        match (run, store.data_mut().response.take()) {
+        let host = &store.data().host;
+        let set_cookie = host.session_changed.then(|| {
+            format!(
+                "{SESSION_COOKIE}={}; HttpOnly; SameSite=Lax; Path=/",
+                encode_session(&self.secret, &host.session)
+            )
+        });
+        let reply = match (run, store.data_mut().response.take()) {
             (Ok(()), Some(Ok(v))) => Reply::Ok(v),
             (Ok(()), Some(Err(msg))) => Reply::BadRequest(msg),
             (Ok(()), None) => Reply::Failed(format!("{name}: no response")),
@@ -675,7 +1132,8 @@ impl Functions {
                 };
                 Reply::Failed(format!("{name}: {msg}"))
             }
-        }
+        };
+        (reply, set_cookie)
     }
 }
 
@@ -774,6 +1232,15 @@ impl Response {
 
 /// `POST /__vcwl/fn/<name>`, or `None` if the request is not a server function call.
 pub fn function_call(req: &Request, fns: Option<&Functions>) -> Option<Response> {
+    function_call_from(req, fns, None)
+}
+
+/// [`function_call`] for a client at `peer`, which rate limits are counted against.
+pub fn function_call_from(
+    req: &Request,
+    fns: Option<&Functions>,
+    peer: Option<std::net::IpAddr>,
+) -> Option<Response> {
     let name = req.path.strip_prefix("/__vcwl/fn/")?;
     let text = |code, msg: &str| Response::new(code, "text/plain; charset=utf-8", msg.to_string());
     if req.method != "POST" {
@@ -801,10 +1268,22 @@ pub fn function_call(req: &Request, fns: Option<&Functions>) -> Option<Response>
     let Some(fns) = fns else {
         return Some(text("404 Not Found", "this app has no server functions"));
     };
-    let start = std::time::Instant::now();
-    let reply = fns.call(name, &String::from_utf8_lossy(&req.body));
+    let client = peer.map_or_else(|| "local".to_string(), |ip| ip.to_string());
+    if !fns.allow(&client, name) {
+        println!("[server] {name}: rate limited {client}");
+        return Some(text(
+            "429 Too Many Requests",
+            "rate limited. VCWL is not Rust: it cannot be blazingly fast for you indefinitely",
+        ));
+    }
+    let start = Instant::now();
+    let (reply, set_cookie) = fns.call_with_cookie(
+        name,
+        &String::from_utf8_lossy(&req.body),
+        req.header("cookie"),
+    );
     let ms = start.elapsed().as_secs_f64() * 1000.0;
-    Some(match reply {
+    let mut res = match reply {
         Reply::Ok(v) => {
             println!("[server] {name} ok in {ms:.1} ms");
             Response::new("200 OK", "application/json", v)
@@ -818,7 +1297,11 @@ pub fn function_call(req: &Request, fns: Option<&Functions>) -> Option<Response>
             eprintln!("[server] {m}");
             text("500 Internal Server Error", "the server function failed")
         }
-    })
+    };
+    if let Some(c) = set_cookie {
+        res.headers.push(format!("set-cookie: {c}"));
+    }
+    Some(res)
 }
 
 /// Where `save`/`load` keep their data (`store` in vcwl.toml).
@@ -832,7 +1315,13 @@ pub fn store_path(p: &Project) -> PathBuf {
 pub fn load_functions(p: &Project) -> Result<Option<Functions>, String> {
     let file = project::server_dir(&p.out).join("server.wasm");
     match std::fs::read(&file) {
-        Ok(wasm) => Functions::load(&wasm, store_path(p)).map(Some),
+        Ok(wasm) => {
+            let mut fns = Functions::load(&wasm, store_path(p))?;
+            if let Ok(text) = std::fs::read_to_string(p.root.join("vcwl.limits.toml")) {
+                fns.set_limits(Limits::parse(&text)?);
+            }
+            Ok(Some(fns))
+        }
         Err(_) => Ok(None),
     }
 }
@@ -875,7 +1364,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     .write(&conn, false);
                 return;
             };
-            let res = function_call(&req, fns.as_ref().as_ref()).unwrap_or_else(|| {
+            let peer = conn.peer_addr().ok().map(|a| a.ip());
+            let res = function_call_from(&req, fns.as_ref().as_ref(), peer).unwrap_or_else(|| {
                 match req.method.as_str() {
                     "GET" | "HEAD" => crate::devserver::static_file(&out, &req.path),
                     _ => {
@@ -933,5 +1423,89 @@ mod tests {
         }
         assert_eq!(format_float(2.0), "2.0");
         assert_eq!(json_number(f64::NAN), "null");
+    }
+
+    fn text_of(v: &Json) -> String {
+        let mut s = String::new();
+        v.write(&mut s);
+        s
+    }
+
+    #[test]
+    fn hmac_rfc4231_case_2() {
+        assert_eq!(
+            hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+
+    #[test]
+    fn session_cookie_roundtrip_and_tamper() {
+        let secret = b"secret";
+        let mut s = BTreeMap::new();
+        s.insert("user".to_string(), "ada".to_string());
+        let v = encode_session(secret, &s);
+        let header = format!("a=b; {SESSION_COOKIE}={v}");
+        assert_eq!(decode_session(secret, Some(&header)), s);
+        assert!(decode_session(b"other", Some(&header)).is_empty());
+        let (data, mac) = v.split_once('.').unwrap();
+        let mut forged = BTreeMap::new();
+        forged.insert("user".to_string(), "root".to_string());
+        let forged_data = encode_session(secret, &forged);
+        let forged_data = forged_data.split_once('.').unwrap().0;
+        assert_ne!(forged_data, data);
+        let tampered = format!("{SESSION_COOKIE}={forged_data}.{mac}");
+        assert!(decode_session(secret, Some(&tampered)).is_empty());
+        assert!(decode_session(secret, None).is_empty());
+    }
+
+    #[test]
+    fn sql_query_and_exec() {
+        let dir = std::env::temp_dir().join(format!("vcwl-sql-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut ctx = HostCtx::new(Arc::new(Mutex::new(None)), dir.join("store.json.sqlite"));
+        let exec = |ctx: &mut HostCtx, args: &str| {
+            text_of(&host_call(ctx, "sql.exec", &Json::parse(args).unwrap()))
+        };
+        assert_eq!(exec(&mut ctx, r#"["create table t (a, b)", []]"#), r#"{"ok":0}"#);
+        assert_eq!(
+            exec(&mut ctx, r#"["insert into t values (?, ?)", ["1", "x"]]"#),
+            r#"{"ok":1}"#
+        );
+        let rows = host_call(
+            &mut ctx,
+            "sql.query",
+            &Json::parse(r#"["select a, b, 2 as n, 1.5 as f, null as z, x'ab01' as y from t where b = ?", ["x"]]"#)
+                .unwrap(),
+        );
+        assert_eq!(
+            text_of(&rows),
+            r#"{"ok":[{"a":"1","b":"x","n":2,"f":1.5,"z":null,"y":"ab01"}]}"#
+        );
+        assert!(exec(&mut ctx, r#"["nonsense", []]"#).starts_with(r#"{"err":"#));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parses_limits() {
+        let l = Limits::parse("calls_per_minute = 60\n\n[functions]\nlogin = 5 # tight\n").unwrap();
+        assert_eq!(l.calls_per_minute, Some(60));
+        assert_eq!(l.functions.get("login"), Some(&5));
+        assert!(Limits::parse("calls_per_minute = lots").is_err());
+        assert!(Limits::parse("[other]\nx = 1").is_err());
+    }
+
+    #[test]
+    fn unknown_host_call_and_session() {
+        let mut ctx = HostCtx::new(Arc::new(Mutex::new(None)), PathBuf::from("unused.sqlite"));
+        assert_eq!(
+            text_of(&host_call(&mut ctx, "nope", &Json::Arr(vec![]))),
+            r#"{"err":"unknown host call `nope`"}"#
+        );
+        let set = Json::parse(r#"["k", "v"]"#).unwrap();
+        assert_eq!(text_of(&host_call(&mut ctx, "session.set", &set)), r#"{"ok":null}"#);
+        assert!(ctx.session_changed);
+        let get = Json::parse(r#"["k"]"#).unwrap();
+        assert_eq!(text_of(&host_call(&mut ctx, "session.get", &get)), r#"{"ok":"v"}"#);
     }
 }

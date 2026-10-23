@@ -123,7 +123,13 @@ pub struct TElem {
 pub enum SwitchKind {
     If(TExpr),
     Match(TExpr, Vec<TPat>),
-    Routes(Vec<Option<String>>),
+    /// Route paths (`None`: fallback) and, per arm, the `:name` parameters it binds.
+    Routes(Vec<Option<String>>, Vec<Vec<(String, LocalId)>>),
+}
+
+/// The `:name` parameters of a route path, in order.
+pub fn route_params(path: &str) -> Vec<&str> {
+    path.split('/').filter_map(|s| s.strip_prefix(':')).collect()
 }
 
 #[derive(Clone, Debug)]
@@ -832,7 +838,7 @@ impl Checker<'_> {
             TView::Switch { kind, branches } => {
                 match kind {
                     SwitchKind::If(x) | SwitchKind::Match(x, _) => self.zonk_expr(x),
-                    SwitchKind::Routes(_) => {}
+                    SwitchKind::Routes(..) => {}
                 }
                 branches
                     .iter_mut()
@@ -1015,7 +1021,9 @@ impl Checker<'_> {
                 View::Routes { arms, span } => {
                     let mut paths = Vec::new();
                     let mut branches = Vec::new();
+                    let mut params = Vec::new();
                     for (path, aspan, body) in arms {
+                        let mut names: Vec<&str> = Vec::new();
                         if let Some(p) = path {
                             if !p.starts_with('/') {
                                 return Err(Diag::ty(
@@ -1026,9 +1034,41 @@ impl Checker<'_> {
                             if paths.contains(&Some(p.clone())) {
                                 return Err(Diag::ty(*aspan, format!("duplicate route \"{p}\"")));
                             }
+                            for n in route_params(p) {
+                                let ident = n
+                                    .chars()
+                                    .next()
+                                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                                    && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                                if !ident {
+                                    return Err(Diag::ty(
+                                        *aspan,
+                                        format!(
+                                            "route parameter `:{n}` in \"{p}\" must be a name (letters, digits, `_`)"
+                                        ),
+                                    ));
+                                }
+                                if names.contains(&n) {
+                                    return Err(Diag::ty(
+                                        *aspan,
+                                        format!("duplicate route parameter `:{n}` in \"{p}\""),
+                                    ));
+                                }
+                                names.push(n);
+                            }
                         }
+                        self.local_scopes.push(Vec::new());
+                        let mut bound = Vec::new();
+                        for n in &names {
+                            let l = self.bind(n, Type::Str, false);
+                            self.ui.as_mut().unwrap().bound.push(l);
+                            bound.push((n.to_string(), l));
+                        }
+                        let r = self.check_views(body, cx, false);
+                        self.local_scopes.pop();
                         paths.push(path.clone());
-                        branches.push(self.scoped_views(body, cx)?);
+                        params.push(bound);
+                        branches.push(r?);
                     }
                     if !paths.contains(&None) {
                         return Err(Diag::ty(
@@ -1043,7 +1083,7 @@ impl Checker<'_> {
                         ));
                     }
                     out.push(TView::Switch {
-                        kind: SwitchKind::Routes(paths),
+                        kind: SwitchKind::Routes(paths, params),
                         branches,
                     });
                 }

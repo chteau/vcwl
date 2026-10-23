@@ -54,7 +54,8 @@ pub fn lex(src: &str, base: u32) -> Result<Vec<Token>> {
             return Ok(out);
         };
         let tok = if c.is_ascii_digit() {
-            lx.number()?
+            let after_dot = matches!(out.last(), Some(Token { tok: Tok::Punct("."), .. }));
+            lx.number(after_dot)?
         } else if c.is_alphabetic() || c == '_' {
             while lx.peek().is_some_and(|c| c.is_alphanumeric() || c == '_') {
                 lx.bump();
@@ -162,13 +163,14 @@ impl Lexer<'_> {
         }
     }
 
-    fn number(&mut self) -> Result<Tok> {
+    fn number(&mut self, after_dot: bool) -> Result<Tok> {
         let start = self.pos;
         let mut float = false;
         while self.peek().is_some_and(|c| c.is_ascii_digit() || c == '_') {
             self.bump();
         }
-        if self.peek() == Some('.') && self.peek2().is_some_and(|c| c.is_ascii_digit()) {
+        if !after_dot
+            && self.peek() == Some('.') && self.peek2().is_some_and(|c| c.is_ascii_digit()) {
             float = true;
             self.bump();
             while self.peek().is_some_and(|c| c.is_ascii_digit() || c == '_') {

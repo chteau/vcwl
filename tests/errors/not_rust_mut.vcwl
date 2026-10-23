@@ -1,0 +1,5 @@
+// error: `let mut` is a bit much
+fn main() {
+    let mut x = 1
+    print("{x}")
+}
