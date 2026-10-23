@@ -305,11 +305,9 @@ fn arr_last<T>(a: [T]) -> T? {
     a.get(__arr_len(a) - 1)
 }
 
+// Amortized O(1) when `a` is the newest array built from its storage (see `vec_type`).
 fn arr_push<T>(a: [T], x: T) -> [T] {
-    let n = __arr_len(a)
-    let out = __arr_alloc(n + 1, x)
-    __arr_copy(out, 0, a, 0, n)
-    out
+    __arr_push(a, x)
 }
 
 fn arr_set<T>(a: [T], i: Int, x: T) -> [T] {
@@ -340,9 +338,10 @@ fn arr_concat<T>(a: [T], b: [T]) -> [T] {
     if la == 0 {
         return b
     }
-    let out = __arr_alloc(la + lb, a[0])
-    __arr_copy(out, la, b, 0, lb)
-    __arr_copy(out, 0, a, 0, la)
+    var out = a
+    for x in b {
+        out = __arr_push(out, x)
+    }
     out
 }
 
@@ -368,6 +367,113 @@ fn arr_reverse<T>(a: [T]) -> [T] {
         __arr_set(out, i, a[n - 1 - i])
     }
     out
+}
+
+fn arr_map<T, U>(a: [T], f: fn(T) -> U) -> [U] {
+    let n = __arr_len(a)
+    if n == 0 {
+        return []
+    }
+    let out = __arr_alloc(n, f(a[0]))
+    for i in 1..n {
+        __arr_set(out, i, f(a[i]))
+    }
+    out
+}
+
+fn arr_filter<T>(a: [T], keep: fn(T) -> Bool) -> [T] {
+    let n = __arr_len(a)
+    if n == 0 {
+        return a
+    }
+    let out = __arr_alloc(n, a[0])
+    var count = 0
+    for x in a {
+        if keep(x) {
+            __arr_set(out, count, x)
+            count += 1
+        }
+    }
+    let res = __arr_alloc(count, a[0])
+    __arr_copy(res, 0, out, 0, count)
+    res
+}
+
+fn arr_fold<T, A>(a: [T], init: A, f: fn(A, T) -> A) -> A {
+    var acc = init
+    for x in a {
+        acc = f(acc, x)
+    }
+    acc
+}
+
+fn arr_each<T>(a: [T], f: fn(T)) {
+    for x in a {
+        f(x)
+    }
+}
+
+fn arr_any<T>(a: [T], test: fn(T) -> Bool) -> Bool {
+    for x in a {
+        if test(x) {
+            return true
+        }
+    }
+    false
+}
+
+fn arr_all<T>(a: [T], test: fn(T) -> Bool) -> Bool {
+    for x in a {
+        if !test(x) {
+            return false
+        }
+    }
+    true
+}
+
+fn arr_find<T>(a: [T], test: fn(T) -> Bool) -> T? {
+    for x in a {
+        if test(x) {
+            return Some(x)
+        }
+    }
+    None
+}
+
+// Stable bottom-up merge sort; `less(a, b)` says whether `a` goes before `b`.
+fn arr_sort_by<T>(a: [T], less: fn(T, T) -> Bool) -> [T] {
+    let n = __arr_len(a)
+    if n < 2 {
+        return a
+    }
+    var src = __arr_alloc(n, a[0])
+    __arr_copy(src, 0, a, 0, n)
+    var dst = __arr_alloc(n, a[0])
+    var width = 1
+    while width < n {
+        var lo = 0
+        while lo < n {
+            let mid = (lo + width).min(n)
+            let hi = (lo + 2 * width).min(n)
+            var i = lo
+            var j = mid
+            for k in lo..hi {
+                if i < mid && (j >= hi || !less(src[j], src[i])) {
+                    __arr_set(dst, k, src[i])
+                    i += 1
+                } else {
+                    __arr_set(dst, k, src[j])
+                    j += 1
+                }
+            }
+            lo = hi
+        }
+        let t = src
+        src = dst
+        dst = t
+        width = width * 2
+    }
+    src
 }
 
 fn arr_join(a: [String], sep: String) -> String {

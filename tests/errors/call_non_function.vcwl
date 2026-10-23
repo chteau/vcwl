@@ -1,0 +1,4 @@
+// error: type error: `Int` is not a function
+fn main() {
+    let x = (1)(2)
+}

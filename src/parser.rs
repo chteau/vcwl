@@ -44,7 +44,11 @@ pub fn parse_file(path: &str, toks: &[Token], next_id: &mut u32) -> Result<File>
     };
     let mut items = Vec::new();
     while !p.at_eof() {
-        items.push(p.item()?);
+        if p.is_kw("impl") {
+            items.extend(p.impl_block()?);
+        } else {
+            items.push(p.item()?);
+        }
     }
     Ok(File {
         path: path.to_string(),
@@ -246,7 +250,7 @@ impl<'a> Parser<'a> {
         let exported = self.eat_kw("export");
         if self.is_kw("server") && matches!(self.peek_at(1), Tok::Ident(s) if s == "fn") {
             self.bump();
-            let mut f = self.func(exported)?;
+            let mut f = self.func(exported, false)?;
             f.server = true;
             Ok(Item::Fn(f))
         } else if self.is_kw("extern") && matches!(self.peek_at(1), Tok::Ident(s) if s == "fn") {
@@ -278,7 +282,9 @@ impl<'a> Parser<'a> {
                 span,
             }))
         } else if self.is_kw("fn") {
-            self.func(exported).map(Item::Fn)
+            self.func(exported, false).map(Item::Fn)
+        } else if self.eat_kw("interface") {
+            self.interface(start, exported)
         } else if self.eat_kw("struct") {
             let name = self.ident()?;
             let generics = self.generic_params()?;
@@ -298,6 +304,7 @@ impl<'a> Parser<'a> {
                 exported,
                 generics,
                 fields,
+                interface: false,
                 span: start.to(self.prev_span()),
             }))
         } else if self.eat_kw("enum") {
@@ -358,7 +365,7 @@ impl<'a> Parser<'a> {
                 block,
             }))
         } else {
-            self.err("an item (`fn`, `struct`, `enum`, `component`, `style`, `import` or `app`)")
+            self.err("an item (`fn`, `struct`, `enum`, `interface`, `impl`, `component`, `style`, `import` or `app`)")
         }
     }
 
@@ -402,12 +409,79 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn func(&mut self, exported: bool) -> Result<FnDecl> {
+    /// `impl [Interface for] Type[<T, ...>] { fn ... }`: the `Item::Impl` followed by its methods,
+    /// named `Type.method`, with the impl's type parameters first.
+    fn impl_block(&mut self) -> Result<Vec<Item>> {
+        let start = self.bump().span;
+        let first = self.ident()?;
+        let (iface, ty) = if self.eat_kw("for") {
+            (Some(first), self.ident()?)
+        } else {
+            (None, first)
+        };
+        let generics = self.generic_params()?;
+        let span = start.to(self.prev_span());
+        self.expect("{")?;
+        let mut items = vec![Item::Impl(ImplDecl {
+            ty: ty.clone(),
+            iface,
+            span,
+        })];
+        while !self.is("}") {
+            let mut f = self.func(true, true)?;
+            f.name.name = format!("{}.{}", ty.name, f.name.name);
+            f.generics = generics.iter().cloned().chain(f.generics).collect();
+            items.push(Item::Fn(f));
+        }
+        self.expect("}")?;
+        Ok(items)
+    }
+
+    /// `interface Name { fn m(self, a: A) -> R ... }`: a struct with one `fn(A) -> R` field per method.
+    fn interface(&mut self, start: Span, exported: bool) -> Result<Item> {
+        let name = self.ident()?;
+        self.expect("{")?;
+        let mut fields = Vec::new();
+        while !self.is("}") {
+            let fstart = self.expect_kw("fn")?;
+            let m = self.ident()?;
+            self.expect("(")?;
+            let params = self.params_self(true)?;
+            let ret = if self.eat("->") {
+                Some(Box::new(self.type_expr()?))
+            } else {
+                None
+            };
+            let ty = TypeExpr {
+                kind: TypeExprKind::Fn(params.into_iter().skip(1).map(|p| p.ty).collect(), ret),
+                span: fstart.to(self.prev_span()),
+            };
+            fields.push((m, ty));
+            self.eat(",");
+            self.eat(";");
+        }
+        self.expect("}")?;
+        Ok(Item::Struct(StructDecl {
+            name,
+            exported,
+            generics: Vec::new(),
+            fields,
+            interface: true,
+            span: start.to(self.prev_span()),
+        }))
+    }
+
+    /// `method`: the first parameter may be a bare `self` (of type `Self`).
+    fn func(&mut self, exported: bool, method: bool) -> Result<FnDecl> {
         let start = self.expect_kw("fn")?;
         let name = self.ident()?;
         let generics = self.generic_params()?;
         self.expect("(")?;
-        let params = self.params(false)?;
+        let params = if method {
+            self.params_self(false)?
+        } else {
+            self.params(false)?
+        };
         let ret = if self.eat("->") {
             Some(self.type_expr()?)
         } else {
@@ -438,6 +512,32 @@ impl<'a> Parser<'a> {
             }
             self.expect(">")?;
         }
+        Ok(out)
+    }
+
+    /// Parameter list of a method; `required` demands the leading `self`.
+    fn params_self(&mut self, required: bool) -> Result<Vec<Param>> {
+        let mut out = Vec::new();
+        if matches!(self.peek(), Tok::Ident(s) if s == "self")
+            && !matches!(self.peek_at(1), Tok::Punct(":"))
+        {
+            let name = self.ident()?;
+            let ty = TypeExpr {
+                kind: TypeExprKind::Named("Self".into(), Vec::new()),
+                span: name.span,
+            };
+            out.push(Param {
+                name,
+                ty,
+                default: None,
+            });
+            if !self.eat(",") && !self.is(")") {
+                return self.err("`,` or `)`");
+            }
+        } else if required {
+            return self.err("`self` (interface methods take `self` first)");
+        }
+        out.extend(self.params(false)?);
         Ok(out)
     }
 
@@ -478,6 +578,25 @@ impl<'a> Parser<'a> {
                 kind: TypeExprKind::Unit,
                 span: start.to(self.prev_span()),
             }
+        } else if self.eat_kw("fn") {
+            self.expect("(")?;
+            let mut params = Vec::new();
+            while !self.is(")") {
+                params.push(self.type_expr()?);
+                if !self.eat(",") {
+                    break;
+                }
+            }
+            self.expect(")")?;
+            let ret = if self.eat("->") {
+                Some(Box::new(self.type_expr()?))
+            } else {
+                None
+            };
+            return Ok(TypeExpr {
+                kind: TypeExprKind::Fn(params, ret),
+                span: start.to(self.prev_span()),
+            });
         } else {
             let name = self.ident()?;
             let mut args = Vec::new();
@@ -641,6 +760,15 @@ impl<'a> Parser<'a> {
 
     fn fetch(&mut self) -> Result<Stmt> {
         let start = self.expect_kw("fetch")?;
+        let mut f = self.fetch_head(start)?;
+        self.expect("{")?;
+        f.arms = self.arms()?;
+        f.span = start.to(self.prev_span());
+        Ok(Stmt::Fetch(Box::new(f)))
+    }
+
+    /// `method(args) [as T]` after `fetch` or `await`.
+    fn fetch_head(&mut self, start: Span) -> Result<Fetch> {
         let method = self.ident()?;
         self.expect("(")?;
         let mut args = Vec::new();
@@ -656,15 +784,13 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        self.expect("{")?;
-        let arms = self.arms()?;
-        Ok(Stmt::Fetch(Box::new(Fetch {
+        Ok(Fetch {
             method,
             args,
             ty,
-            arms,
+            arms: Vec::new(),
             span: start.to(self.prev_span()),
-        })))
+        })
     }
 
     // ----- expressions -----
@@ -842,6 +968,11 @@ impl<'a> Parser<'a> {
                     let span = e.span.to(name.span);
                     e = self.mk(ExprKind::Field(Box::new(e), name), span);
                 }
+            } else if self.is("(") && !self.token().nl {
+                self.bump();
+                let args = self.call_args()?;
+                let span = e.span.to(self.prev_span());
+                e = self.mk(ExprKind::Apply(Box::new(e), args), span);
             } else if self.is("[") && !self.token().nl {
                 self.bump();
                 let idx = self.expr()?;
@@ -957,6 +1088,17 @@ impl<'a> Parser<'a> {
                 e.span = span.to(self.prev_span());
                 Ok(e)
             }
+            Tok::Punct("|" | "||") => self.lambda(),
+            Tok::Ident(ref k)
+                if k == "await"
+                    && matches!(self.peek_at(1), Tok::Ident(_))
+                    && matches!(self.peek_at(2), Tok::Punct("(")) =>
+            {
+                self.bump();
+                let f = self.fetch_head(span)?;
+                let s = f.span;
+                Ok(self.mk(ExprKind::Await(Box::new(f)), s))
+            }
             Tok::Punct("[") => {
                 self.bump();
                 let mut items = Vec::new();
@@ -1038,6 +1180,48 @@ impl<'a> Parser<'a> {
             }
             _ => self.err("an expression"),
         }
+    }
+
+    /// `|a, b: T| expr` or `|a| -> R { ... }`.
+    fn lambda(&mut self) -> Result<Expr> {
+        let start = self.span();
+        let mut params = Vec::new();
+        if !self.eat("||") {
+            self.expect("|")?;
+            while !self.is("|") {
+                let name = self.ident()?;
+                let ty = if self.eat(":") {
+                    Some(self.type_expr()?)
+                } else {
+                    None
+                };
+                params.push((name, ty));
+                if !self.eat(",") {
+                    break;
+                }
+            }
+            self.expect("|")?;
+        }
+        let (ret, body) = if self.eat("->") {
+            let ret = self.type_expr()?;
+            let b = self.block()?;
+            let s = b.span;
+            (Some(ret), self.mk(ExprKind::Block(b), s))
+        } else {
+            let saved = std::mem::replace(&mut self.no_struct, false);
+            let body = self.expr();
+            self.no_struct = saved;
+            (None, body?)
+        };
+        let span = start.to(body.span);
+        Ok(self.mk(
+            ExprKind::Lambda {
+                params,
+                ret,
+                body: Box::new(body),
+            },
+            span,
+        ))
     }
 
     fn struct_lit(&mut self, name: Ident) -> Result<Expr> {

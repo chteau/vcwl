@@ -1,0 +1,102 @@
+// expect: (4, 6)
+// expect: 5
+// expect: circle 3.14
+// expect: square 9.0
+// expect: total 12.14
+// expect: 2 shapes
+// expect: biggest square
+// expect: 42 1
+
+struct Vec2 {
+    x: Int,
+    y: Int,
+}
+
+impl Vec2 {
+    fn new(x: Int, y: Int) -> Self {
+        Vec2 { x: x, y: y }
+    }
+
+    fn add(self, o: Vec2) -> Vec2 {
+        Vec2.new(self.x + o.x, self.y + o.y)
+    }
+
+    fn to_string(self) -> String {
+        "({self.x}, {self.y})"
+    }
+
+    fn manhattan(self) -> Int {
+        self.x.abs() + self.y.abs()
+    }
+}
+
+interface Shape {
+    fn area(self) -> Float
+    fn name(self) -> String
+}
+
+struct Circle {
+    r: Float,
+}
+
+struct Square {
+    side: Float,
+}
+
+impl Shape for Circle {
+    fn area(self) -> Float {
+        3.14 * self.r * self.r
+    }
+    fn name(self) -> String {
+        "circle"
+    }
+}
+
+impl Shape for Square {
+    fn area(self) -> Float {
+        self.side * self.side
+    }
+    fn name(self) -> String {
+        "square"
+    }
+}
+
+fn describe(s: Shape) -> String {
+    "{s.name()} {s.area()}"
+}
+
+fn biggest(shapes: [Shape]) -> Shape {
+    shapes.sort_by(|a, b| a.area() > b.area())[0]
+}
+
+struct Stack<T> {
+    items: [T],
+}
+
+impl Stack<T> {
+    fn push(self, x: T) -> Stack<T> {
+        Stack { items: self.items.push(x) }
+    }
+    fn top(self) -> T? {
+        self.items.last()
+    }
+    fn size(self) -> Int {
+        self.items.len()
+    }
+}
+
+fn main() {
+    let v = Vec2.new(1, 2).add(Vec2 { x: 3, y: 4 })
+    print(v.to_string())
+    print(Vec2.new(-2, 3).manhattan().to_string())
+    let shapes: [Shape] = [Circle { r: 1.0 }, Square { side: 3.0 }]
+    for s in shapes {
+        print(describe(s))
+    }
+    let total = shapes.fold(0.0, |acc, s| acc + s.area())
+    print("total {total}")
+    print("{shapes.len()} shapes")
+    print("biggest {biggest(shapes).name()}")
+    let st = Stack { items: [] }.push(1).push(42)
+    print("{st.top().unwrap_or(0)} {st.size() - 1}")
+}

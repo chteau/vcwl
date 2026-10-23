@@ -44,6 +44,11 @@ const KEYWORDS: &[&str] = &[
     "routes",
     "font",
     "key",
+    "impl",
+    "interface",
+    "self",
+    "await",
+    "as",
 ];
 const ELEMENTS: &[&str] = &[
     "text",

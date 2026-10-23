@@ -1,0 +1,25 @@
+// expect: 200000 199999
+// expect: [1, 2, 3] [1, 2, 9] [1, 2, 3, 4] [1, 2]
+// expect: [1, 2, 3, 4, 5, 6]
+
+fn show(xs: [Int]) -> String {
+    "[" + xs.map(|x| x.to_string()).join(", ") + "]"
+}
+
+fn main() {
+    var xs: [Int] = []
+    for i in 0..200000 {
+        xs = xs.push(i)
+    }
+    print("{xs.len()} {xs[199999]}")
+    // Older versions keep their elements when a newer one or a sibling appends.
+    let base = [1, 2].push(3)
+    let a = base.push(4)
+    let c = base.set(2, 9)
+    let older = [1, 2]
+    let _x = older.push(7)
+    print("{show(base)} {show(c)} {show(a)} {show(older)}")
+    let sibling = base.push(5)
+    assert(a[3] == 4 && sibling[3] == 5, "siblings share storage only up to their own length")
+    print(show([1, 2, 3].concat([4, 5]).push(6)))
+}

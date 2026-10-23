@@ -27,6 +27,16 @@ pub enum Item {
     App(AppDecl),
     Style(NamedStyle),
     Font(FontDecl),
+    /// `impl [Interface for] Type { fn ... }`; its methods follow it as `Item::Fn`s named
+    /// `Type.method`.
+    Impl(ImplDecl),
+}
+
+#[derive(Clone, Debug)]
+pub struct ImplDecl {
+    pub ty: Ident,
+    pub iface: Option<Ident>,
+    pub span: Span,
 }
 
 /// `font "Family" from "path" [weight N[..M]] [italic]`: a font file shipped with the app, or
@@ -77,6 +87,8 @@ pub struct StructDecl {
     pub exported: bool,
     pub generics: Vec<Ident>,
     pub fields: Vec<(Ident, TypeExpr)>,
+    /// `interface Name { fn m(self, ...) -> R }`: a struct of closures, one per method.
+    pub interface: bool,
     pub span: Span,
 }
 
@@ -101,6 +113,8 @@ pub enum TypeExprKind {
     Array(Box<TypeExpr>),
     Optional(Box<TypeExpr>),
     Unit,
+    /// `fn(A, B) -> R`.
+    Fn(Vec<TypeExpr>, Option<Box<TypeExpr>>),
 }
 
 #[derive(Clone, Debug)]
@@ -252,6 +266,17 @@ pub enum ExprKind {
         args: Vec<Arg>,
     },
     Field(Box<Expr>, Ident),
+    /// `f(args)` where `f` is any expression other than a plain name.
+    Apply(Box<Expr>, Vec<Arg>),
+    /// `await get(url) as T`, `await server_fn(args)`: a `Fetch` without arms whose value is the
+    /// `Result`; only as a statement of an event handler (the rest of the block runs later).
+    Await(Box<Fetch>),
+    /// `|a, b: Int| body` or `|x| -> T { ... }`.
+    Lambda {
+        params: Vec<(Ident, Option<TypeExpr>)>,
+        ret: Option<TypeExpr>,
+        body: Box<Expr>,
+    },
     Index(Box<Expr>, Box<Expr>),
     /// `expr?`: unwraps `Ok`/`Some`, or returns the `Err`/`None` from the enclosing function.
     Try(Box<Expr>),

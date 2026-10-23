@@ -4,10 +4,15 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## Language
 
-- No closures or first-class functions, traits/interfaces, tuples, or maps.
-- No `async`; `fetch` is a statement with arms that run on completion.
+- No tuples or maps. Interfaces have no type parameters, and generic types cannot implement them.
+- Closures capture copies of the values they use: they cannot assign to captured variables or
+  component state, and they cannot `emit`, `fetch` or `navigate`.
+- `await` only works in event handlers, at the top level of the handler's body, and only on
+  `fetch`-able calls (HTTP, server functions, `extern fn`s); there are no `async` functions.
 - Strings are byte arrays: `len` and `slice` count bytes, not characters.
-- Arrays are immutable values; `push`/`set` copy the array (O(n) per update).
+- Arrays are immutable values. `push` (and `concat`) append in place when the array is the
+  newest one built from its storage (`xs = xs.push(x)` in a loop is amortized O(1)); pushing onto
+  an older version, `set`, `remove_at` and `slice` copy (O(n)).
 - `Float.round` rounds half away from zero; `Float.to_int` saturates.
 - Generic functions are monomorphized: code size grows with the number of instantiations.
 

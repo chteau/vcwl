@@ -13,7 +13,7 @@ test("the project site renders, satire and disclaimer included", async () => {
   const t = await tree(app.page);
   assert.ok(t.nodes.some((n) => n.text === "VCWL is going to revolutionize web development."));
   assert.ok(t.nodes.some((n) => n.text?.startsWith("// satire.")));
-  assert.equal(t.all("article").length, 15);
+  assert.equal(t.all("article").length, 16);
 });
 
 test("the terminal types its lines one by one", async () => {

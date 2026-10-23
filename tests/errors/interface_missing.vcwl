@@ -1,0 +1,14 @@
+// error: type error: `Dog` does not implement `Pet`: it needs `fn name(self) -> String`
+interface Pet {
+    fn name(self) -> String
+}
+
+struct Dog {
+    age: Int,
+}
+
+impl Pet for Dog {
+}
+
+fn main() {
+}

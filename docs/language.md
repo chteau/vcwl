@@ -20,7 +20,7 @@ This describes the language as implemented. Programs are UTF-8 files ending in `
 | `Bool` | `true`, `false` | `i32` |
 | `String` | immutable UTF-8 text | GC byte array |
 | `()` | unit | — |
-| `[T]` | immutable array | GC array |
+| `[T]` | immutable array | GC struct over a shared GC array |
 | `T?` | `Option<T>`: `Some(v)` or `None` | enum |
 | `Result<T, E>` | `Ok(v)` or `Err(e)` | enum |
 | user structs and enums | | GC structs |
@@ -116,6 +116,63 @@ fn total(parts: [String]) -> Result<Int, String> {
 }
 ```
 
+## Functions as values
+
+Closures are written `|params| body`; parameter and return types are inferred from where the
+closure is used, or written out (`|a: Int, b: Int| -> Int { a + b }`). Function types are
+`fn(A, B) -> R`, and `fn(A)` returns `()`. A named function is a value too.
+
+```vcwl
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n                       // captures a copy of `n`
+}
+
+let add2 = make_adder(2)
+add2(40)                            // 42
+[3, 1, 2].sort_by(|a, b| a < b)     // [1, 2, 3]
+[1, 2, 3].map(double)               // a named function as an argument
+```
+
+Closures capture copies of the values they use (in components, state too: a view that uses a
+closure updates when the state it captured changes). They cannot assign to captured variables.
+`return` inside a closure returns from the closure.
+
+## Methods and interfaces
+
+```vcwl
+impl Point {
+    fn new(x: Int, y: Int) -> Self {      // no `self`: called as `Point.new(1, 2)`
+        Point { x: x, y: y }
+    }
+    fn len(self) -> Float {               // called as `p.len()`
+        (self.x * self.x + self.y * self.y).to_float().sqrt()
+    }
+}
+
+impl Stack<T> {                           // generic types name their type parameters
+    fn top(self) -> T? { self.items.last() }
+}
+
+interface Shape {
+    fn area(self) -> Float
+}
+
+impl Shape for Circle {
+    fn area(self) -> Float { 3.14159 * self.r * self.r }
+}
+
+let shapes: [Shape] = [Circle { r: 1.0 }, Square { side: 2.0 }]
+shapes.map(|s| s.area())
+```
+
+- Methods are public: they are visible wherever their type is. A method wins over a function of
+  the same name called with method syntax.
+- `Self` is the type of the `impl`.
+- A value converts to an interface it implements wherever the interface type is expected
+  (arguments, annotated `let`s, array elements, struct fields, return values). The interface value
+  holds one closure per method; calling `s.area()` calls the implementation's method.
+- A struct field of function type is called like a method: `button.on_press()`.
+
 ## Methods (prelude)
 
 Methods are prelude functions found by the receiver's type (`s.len()` calls `str_len(s)`).
@@ -126,7 +183,8 @@ Methods are prelude functions found by the receiver's type (`s.len()` calls `str
 - `Float`: `to_string`, `to_int`, `floor`, `ceil`, `round`, `sqrt`, `abs`, `min`, `max`.
 - `Bool`: `to_string`.
 - `[T]`: `len`, `is_empty`, `get` (→ `T?`), `first`, `last`, `push`, `set`, `remove_at`, `concat`,
-  `slice`, `reverse`; `[String]`: `join`; `[Int]`: `sum`.
+  `slice`, `reverse`, `map`, `filter`, `fold(init, f)`, `each`, `any`, `all`, `find` (→ `T?`),
+  `sort_by(less)`; `[String]`: `join`; `[Int]`: `sum`.
 - `T?`: `is_some`, `is_none`, `unwrap_or`. `Result`: `is_ok`, `is_err`, `unwrap_or`, `ok`.
 - `HttpError`: `message`.
 
@@ -430,6 +488,28 @@ on click {
   component values but not the handler's local variables. If the component was removed in the
   meantime, the response is discarded.
 - `fetch` requires a `network` capability; the host refuses other origins.
+
+`await` writes the same thing in order. The handler stops at the `await`; the rest of it runs
+when the response arrives, with `Result<T, HttpError>` as the value:
+
+```vcwl
+on click {
+    loading = true
+    let res = await get("/api/items") as [Item]
+    loading = false
+    match res {
+        Ok(items) => list = items,
+        Err(e) => error = e.message(),
+    }
+    let saved = await save_all(list)        // server functions and `extern fn`s too
+}
+```
+
+- `await` starts a statement (`let x = await ...` or `await ...`) directly in a handler's body,
+  not inside `if`, `match`, loops or closures; any number of them can follow each other.
+- The rest of the handler keeps its local variables (as copies taken at the `await`, which it
+  may change) and reads component state as it is when the response arrives.
+- As with `fetch`, nothing runs if the component was removed in the meantime.
 
 ### Server functions
 

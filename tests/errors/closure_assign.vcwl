@@ -1,0 +1,8 @@
+// error: type error: a closure cannot assign to `n`
+fn main() {
+    var n = 0
+    let f = || {
+        n = 1
+    }
+    f()
+}

@@ -15,6 +15,7 @@ commands:
   fmt [--check] [files]  format source files
   lint [files]           warnings about unused names, placeholder text and deep views
   lsp                    language server for editors (stdin/stdout)
+  upgrade                install the latest release (after a short math quiz)
   clean                  remove build artifacts
   run <file>             compile a program and run its `main` with Node.js
   compile <file> [-o f]  compile a single file to a .wasm module
@@ -34,6 +35,7 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     let rest = &args[1..];
+    vcwl::update::notify(cmd);
     let r = match cmd.as_str() {
         "new" => cmd_new(rest),
         "build" => cmd_build(rest),
@@ -47,6 +49,8 @@ fn main() -> ExitCode {
         "fmt" => vcwl::fmt::run(rest),
         "lint" => vcwl::lint::run(rest),
         "lsp" => vcwl::lsp::run(rest),
+        "upgrade" => vcwl::update::upgrade(rest),
+        "__update-check" => vcwl::update::refresh(),
         "install" | "add" | "remove" | "publish" | "search" | "audit" => vcwl::pkg::run(cmd, rest),
         "--version" | "-V" | "version" => {
             println!("vcwl {}", env!("CARGO_PKG_VERSION"));

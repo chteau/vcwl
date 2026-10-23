@@ -33,9 +33,12 @@ call `__` intrinsics, which lower to WebAssembly instructions or host imports.
 
 ## Data representation
 
-WebAssembly GC types (one recursive type group): strings are `(array (mut i8))`, arrays are
-`(array (mut T))`, structs are GC structs, enums are a base struct holding the tag with one
-subtype per variant. Memory is managed by the engine's garbage collector; there is no allocator in
+WebAssembly GC types (one recursive type group): strings are `(array (mut i8))`; an array is a
+struct `{len, data: (array (mut T)), tip}` whose `data` may be longer than `len` and shared with
+the other versions `push` built from it (`tip`, a mutable counter, says how much of `data` the
+newest version uses: only that one appends in place); structs are GC structs; enums are a base
+struct holding the tag with one subtype per variant; closures are `{code: (ref func), env}` with
+`call_ref`, and interface values are structs of closures. Memory is managed by the engine's garbage collector; there is no allocator in
 the module. Linear memory (2 pages, growable) only carries data between the module and the host.
 
 ## Browser protocol

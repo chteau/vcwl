@@ -113,6 +113,7 @@ an application secure.
 | `vcwl check` · `vcwl test` · `vcwl fmt` · `vcwl lint` | type-check, test, format, lint |
 | `vcwl install` · `add` · `remove` · `publish` · `search` · `audit` | packages |
 | `vcwl lsp` | language server on stdin/stdout |
+| `vcwl upgrade` | install the latest release (after a short math quiz) |
 | `vcwl run <file>` · `vcwl compile <file>` | run a program's `main` in Node.js, or compile one file |
 
 ## Documentation

@@ -2,6 +2,31 @@
 
 All notable changes, grouped by milestone.
 
+## 0.2.0 — 2026-10-23
+
+- Closures and first-class functions: `|x| x * 2`, `|a, b: Int| -> Int { ... }`, function types
+  `fn(Int) -> String`, named functions as values, and calls through any expression
+  (`make_adder(1)(2)`, `button.on_press()`). Closures capture copies of the values they use,
+  component state included (views update when it changes); they cannot assign to them.
+- Array methods that take functions: `map`, `filter`, `fold`, `each`, `any`, `all`, `find`,
+  `sort_by` (stable merge sort).
+- Methods: `impl Type { fn name(self, ...) ... }`, `Self`, and functions without `self` called as
+  `Type.name(...)`; generic types name their parameters (`impl Stack<T>`).
+- Interfaces: `interface Shape { fn area(self) -> Float }` and `impl Shape for Circle { ... }`. A
+  value whose type implements the interface converts to it wherever a `Shape` is expected, so
+  arrays can mix implementations (`let shapes: [Shape] = [Circle {...}, Square {...}]`).
+- `await` in event handlers: `let res = await get(url) as T` (or a server function or
+  `extern fn`); the rest of the handler runs when the response arrives, with its local variables.
+- Arrays keep spare room: `push` and `concat` append in place when the array is the newest
+  version of its storage, so building an array with `xs = xs.push(x)` is amortized O(1) instead
+  of O(n) per element. Older versions are unaffected.
+- Editors highlight `impl`, `interface`, `await`, `as`, `self` and `Self`, and `vcwl lsp`
+  completes them.
+- `vcwl upgrade` installs the latest release, once you solve a random math problem. Other commands
+  print a notice when a newer release exists; the check runs in the background at most once a
+  day, never blocks a command, and is off with `VCWL_NO_UPDATE_CHECK=1` or in CI. Programs written
+  for 0.1.0 compile unchanged.
+
 ## 0.1.0 — 2026-10-22
 
 The first release, republished in place the same day with the changes under "Republished".

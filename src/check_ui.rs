@@ -683,8 +683,7 @@ impl Checker<'_> {
             let default = match &p.default {
                 Some(d) => {
                     let t = self.check_expr(d, Some(ty))?;
-                    self.coerce(&t.ty, ty, d.span)?;
-                    Some(t)
+                    Some(self.coerce_into(t, ty)?)
                 }
                 None => None,
             };
@@ -728,9 +727,9 @@ impl Checker<'_> {
                 Some(t) => Some(self.resolve_type(t)?),
                 None => None,
             };
-            let t = self.check_expr(value, ann.as_ref())?;
+            let mut t = self.check_expr(value, ann.as_ref())?;
             if let Some(a) = &ann {
-                self.coerce(&t.ty, a, value.span)?;
+                t = self.coerce_into(t, a)?;
             }
             let ty = ann.unwrap_or_else(|| t.ty.clone());
             let ty = self.zonk(&ty);
@@ -740,7 +739,6 @@ impl Checker<'_> {
                     "component values cannot have type `()`",
                 ));
             }
-            let mut t = t;
             self.zonk_expr(&mut t);
             let kind = if is_state {
                 TVarKind::State(t)
@@ -870,10 +868,10 @@ impl Checker<'_> {
     fn render_expr(&mut self, e: &ast::Expr, expected: Option<&Type>) -> Result<TExpr> {
         self.ctx = Ctx::Render;
         let t = self.check_expr(e, expected)?;
-        if let Some(exp) = expected {
-            self.coerce(&t.ty, exp, e.span)?;
+        match expected {
+            Some(exp) => self.coerce_into(t, exp),
+            None => Ok(t),
         }
-        Ok(t)
     }
 
     fn check_views(&mut self, views: &[View], cx: &mut ViewCx, top: bool) -> Result<Vec<TView>> {
@@ -1156,6 +1154,7 @@ impl Checker<'_> {
                 }
                 None => None,
             };
+            self.await_top = true;
             let b = self.check_block(body, None)?;
             Ok(THandler {
                 param: p,
@@ -1796,8 +1795,7 @@ impl Checker<'_> {
             (None, None) => Ok(TStmt::Emit(i, None)),
             (Some(t), Some(v)) => {
                 let tv = self.check_expr(v, Some(t))?;
-                self.coerce(&tv.ty, t, v.span)?;
-                Ok(TStmt::Emit(i, Some(tv)))
+                Ok(TStmt::Emit(i, Some(self.coerce_into(tv, t)?)))
             }
             (None, Some(v)) => Err(Diag::ty(
                 v.span,
@@ -1816,7 +1814,9 @@ impl Checker<'_> {
 
     /// `fetch method(url[, body]) as T { arms }`. The arms run when the response arrives,
     /// after the handler has returned, so they see component values but not handler locals.
-    pub fn check_fetch(&mut self, f: &ast::Fetch) -> Result<TStmt> {
+    /// `resume`: the arms continue an `await`, so they see the handler's values (as copies)
+    /// instead of hiding them.
+    pub fn check_fetch(&mut self, f: &ast::Fetch, resume: bool) -> Result<TStmt> {
         if self.ctx != Ctx::Handler || self.ui.is_none() {
             return Err(Diag::ty(
                 f.span,
@@ -1858,8 +1858,7 @@ impl Checker<'_> {
             let mut args = Vec::new();
             for (a, p) in f.args.iter().zip(&sig.params) {
                 let v = self.check_expr(a, Some(p))?;
-                self.coerce(&v.ty, p, a.span)?;
-                args.push(v);
+                args.push(self.coerce_into(v, p)?);
             }
             let url = TExpr {
                 kind: TK::Str(if sig.ext {
@@ -1919,7 +1918,11 @@ impl Checker<'_> {
             self.fetch_span.get_or_insert(f.span);
         }
 
-        self.fetch_hidden = self.local_scopes.split_off(self.handler_base);
+        if resume {
+            self.begin_resume();
+        } else {
+            self.fetch_hidden = self.local_scopes.split_off(self.handler_base);
+        }
         self.local_scopes.push(Vec::new());
         let r = (|| {
             let params = ["$kind", "$status", "$len"].map(|n| self.bind(n, Type::Int, false));
@@ -1952,6 +1955,7 @@ impl Checker<'_> {
                 },
                 span: f.span,
             };
+            self.await_top = resume;
             let arms = self.check_expr(&m, Some(&Type::Unit))?;
             let on_done = TExpr {
                 kind: TK::Block(vec![TStmt::Let(result, call), TStmt::Expr(arms)], None),
@@ -1964,10 +1968,20 @@ impl Checker<'_> {
                 body,
                 params,
                 on_done,
+                captures: Vec::new(),
                 span: f.span,
             })))
         })();
         self.local_scopes.pop();
+        if resume {
+            let captures = self.end_resume();
+            return r.map(|mut s| {
+                if let TStmt::Fetch(f) = &mut s {
+                    f.captures = captures;
+                }
+                s
+            });
+        }
         let hidden = std::mem::take(&mut self.fetch_hidden);
         self.local_scopes.extend(hidden);
         r

@@ -28,6 +28,16 @@ pub struct Lower<'a> {
     helpers: HashMap<&'static str, u32>,
     pub strings: HashMap<String, (u32, u32)>,
     pub ui: Option<Box<crate::lower_ui::UiState>>,
+    /// Function value types: (closure struct `{code, env}`, code signature `(env, params) -> ret`).
+    closures: HashMap<Type, (u32, u32)>,
+    /// Adapters that let a named function instance be called as a closure.
+    fn_values: HashMap<(usize, Vec<Type>), u32>,
+    /// `[T]` struct type by element array type, and back.
+    vecs: HashMap<u32, u32>,
+    vec_data: HashMap<u32, u32>,
+    tip_ty: Option<u32>,
+    /// Helpers generated per element array type.
+    typed_helpers: HashMap<(&'static str, u32), u32>,
 }
 
 /// Per-function lowering state.
@@ -91,6 +101,12 @@ impl<'a> Lower<'a> {
             helpers: HashMap::new(),
             strings: HashMap::new(),
             ui: None,
+            closures: HashMap::new(),
+            fn_values: HashMap::new(),
+            vecs: HashMap::new(),
+            vec_data: HashMap::new(),
+            tip_ty: None,
+            typed_helpers: HashMap::new(),
         }
     }
 
@@ -117,11 +133,9 @@ impl<'a> Lower<'a> {
             Type::Bool => VT::I32,
             Type::Str => VT::Ref(self.str_ty),
             Type::Unit | Type::Never => return None,
-            Type::Array(e) => {
-                let s = self.storage(e);
-                VT::Ref(self.m.array_type(s))
-            }
+            Type::Array(e) => VT::Ref(self.vec_type(e)),
             Type::Adt(..) => VT::Ref(self.base_type(t)),
+            Type::Fn(..) => VT::Ref(self.closure_type(t).0),
             Type::Param(p) => panic!("unsubstituted type parameter {p}"),
             Type::Var(_) => panic!("inference variable survived checking"),
         })
@@ -194,6 +208,328 @@ impl<'a> Lower<'a> {
                 l
             }
         }
+    }
+
+    /// `[T]` is `{len, data, tip}`. `data` (a mutable Wasm array) may be longer than `len` and
+    /// shared by the versions of an array built by `push`; `tip.used` is the length of the
+    /// newest version, the only one that may write past its own end. Arrays not grown by `push`
+    /// have no tip.
+    pub fn vec_type(&mut self, elem: &Type) -> u32 {
+        let st = self.storage(elem);
+        let data = self.m.array_type(st);
+        if let Some(&v) = self.vecs.get(&data) {
+            return v;
+        }
+        let tip = self.tip_type();
+        let v = self.m.add_type(TypeDef::Struct {
+            fields: vec![
+                (Storage::Val(VT::I32), false),
+                (Storage::Val(VT::Ref(data)), false),
+                (Storage::Val(VT::RefNull(tip)), false),
+            ],
+            sup: None,
+            is_final: true,
+        });
+        self.vecs.insert(data, v);
+        self.vec_data.insert(v, data);
+        v
+    }
+
+    fn tip_type(&mut self) -> u32 {
+        if let Some(t) = self.tip_ty {
+            return t;
+        }
+        let t = self.m.add_type(TypeDef::Struct {
+            fields: vec![(Storage::Val(VT::I32), true)],
+            sup: None,
+            is_final: true,
+        });
+        self.tip_ty = Some(t);
+        t
+    }
+
+    /// The element array type of `[T]` struct type `vec`.
+    pub fn vec_data_type(&self, vec: u32) -> u32 {
+        self.vec_data[&vec]
+    }
+
+    /// Length (`i32`) of array value `v` of struct type `vec`.
+    pub fn vec_len(vec: u32, v: IExpr) -> IExpr {
+        IExpr::StructGet(vec, 0, b(v))
+    }
+
+    /// Element storage of array value `v`; only the first `vec_len` elements belong to it.
+    pub fn vec_items(vec: u32, v: IExpr) -> IExpr {
+        IExpr::StructGet(vec, 1, b(v))
+    }
+
+    /// An array with exactly the elements of Wasm array `data`.
+    pub fn vec_from(&mut self, vec: u32, data: IExpr, len: IExpr) -> IExpr {
+        let tip = self.tip_type();
+        IExpr::StructNew(vec, vec![len, data, IExpr::Null(tip)])
+    }
+
+    fn typed_helper(
+        &mut self,
+        name: &'static str,
+        data: u32,
+        build: impl FnOnce(&mut Self) -> Func,
+    ) -> FuncRef {
+        if let Some(&i) = self.typed_helpers.get(&(name, data)) {
+            return FuncRef::Local(i);
+        }
+        let f = build(self);
+        self.m.funcs.push(f);
+        let i = self.m.funcs.len() as u32 - 1;
+        self.typed_helpers.insert((name, data), i);
+        FuncRef::Local(i)
+    }
+
+    /// `(n: i64, fill) -> [T]`.
+    fn helper_arr_alloc(&mut self, vec: u32) -> FuncRef {
+        let data = self.vec_data_type(vec);
+        let TypeDef::Array {
+            elem: Storage::Val(et),
+        } = self.m.types[data as usize]
+        else {
+            unreachable!()
+        };
+        self.typed_helper("arr_alloc", data, |this| {
+            let n = un(UnOp::I32WrapI64, get(0));
+            let body = this.vec_from(vec, IExpr::ArrayNew(data, b(get(1)), b(n.clone())), n);
+            Func {
+                name: "arr_alloc".into(),
+                params: vec![VT::I64, et],
+                result: Some(VT::Ref(vec)),
+                locals: vec![],
+                body: vec![body],
+                export: None,
+            }
+        })
+    }
+
+    /// `(a: [T], x) -> [T]`: writes `x` in place when `a` is the newest version of its storage
+    /// and there is room; otherwise copies into storage twice as large.
+    fn helper_arr_push(&mut self, vec: u32) -> FuncRef {
+        let data = self.vec_data_type(vec);
+        let tip = self.tip_type();
+        let TypeDef::Array {
+            elem: Storage::Val(et),
+        } = self.m.types[data as usize]
+        else {
+            unreachable!()
+        };
+        self.typed_helper("arr_push", data, |_| {
+            // params: a, x; locals: len, items, tip, grown
+            let (a, x, len, items, t, grown) = (0, 1, 2, 3, 4, 5);
+            let len1 = bin(Op::I32Add, get(len), IExpr::I32(1));
+            let fits = IExpr::If(
+                Some(VT::I32),
+                b(un(UnOp::I32Eqz, un(UnOp::RefIsNull, get(t)))),
+                vec![bin(
+                    Op::I32And,
+                    bin(Op::I32Eq, IExpr::StructGet(tip, 0, b(get(t))), get(len)),
+                    bin(Op::I32LtU, get(len), IExpr::ArrayLen(b(get(items)))),
+                )],
+                vec![IExpr::I32(0)],
+            );
+            let cap = IExpr::If(
+                Some(VT::I32),
+                b(bin(Op::I32LtU, get(len), IExpr::I32(4))),
+                vec![IExpr::I32(8)],
+                vec![bin(Op::I32Add, get(len), get(len))],
+            );
+            let body = vec![
+                set(len, IExpr::StructGet(vec, 0, b(get(a)))),
+                set(items, IExpr::StructGet(vec, 1, b(get(a)))),
+                set(t, IExpr::StructGet(vec, 2, b(get(a)))),
+                IExpr::If(
+                    None,
+                    b(fits),
+                    vec![
+                        IExpr::ArraySet(data, b(get(items)), b(get(len)), b(get(x))),
+                        IExpr::StructSet(
+                            tip,
+                            0,
+                            b(un(UnOp::RefAsNonNull, get(t))),
+                            b(len1.clone()),
+                        ),
+                        IExpr::Return(Some(b(IExpr::StructNew(
+                            vec,
+                            vec![len1.clone(), get(items), get(t)],
+                        )))),
+                    ],
+                    vec![],
+                ),
+                set(grown, IExpr::ArrayNew(data, b(get(x)), b(cap))),
+                IExpr::ArrayCopy(
+                    data,
+                    [
+                        b(get(grown)),
+                        b(IExpr::I32(0)),
+                        b(get(items)),
+                        b(IExpr::I32(0)),
+                        b(get(len)),
+                    ],
+                ),
+                IExpr::StructNew(
+                    vec,
+                    vec![len1.clone(), get(grown), IExpr::StructNew(tip, vec![len1])],
+                ),
+            ];
+            Func {
+                name: "arr_push".into(),
+                params: vec![VT::Ref(vec), et],
+                result: Some(VT::Ref(vec)),
+                locals: vec![VT::I32, VT::Ref(data), VT::RefNull(tip), VT::Ref(data)],
+                body,
+                export: None,
+            }
+        })
+    }
+
+    /// The closure struct and code signature of function type `t`.
+    pub fn closure_type(&mut self, t: &Type) -> (u32, u32) {
+        if let Some(&c) = self.closures.get(t) {
+            return c;
+        }
+        let Type::Fn(ps, r) = t else {
+            panic!("closure type of non-function")
+        };
+        let mut params = vec![VT::Any];
+        params.extend(ps.iter().filter_map(|p| self.vt(p)));
+        let result = self.vt(r);
+        let sig = self.m.add_type(TypeDef::Func { params, result });
+        let cl = self.m.add_type(TypeDef::Struct {
+            fields: vec![
+                (Storage::Val(VT::Ref(sig)), false),
+                (Storage::Val(VT::Any), false),
+            ],
+            sup: None,
+            is_final: true,
+        });
+        self.closures.insert(t.clone(), (cl, sig));
+        (cl, sig)
+    }
+
+    /// Adds `f` as a function of signature `sig` (a `ref.func` target) and returns its index.
+    fn push_ref_target(&mut self, f: Func, sig: u32) -> u32 {
+        self.m.funcs.push(f);
+        let idx = self.m.funcs.len() as u32 - 1;
+        self.m.sig_override.push((idx, sig));
+        idx
+    }
+
+    /// The struct type holding captured values (shared by identical capture lists, since the
+    /// function that creates an environment and the one that reads it compute it separately).
+    pub fn env_type(&mut self, cx: &FnCx, captures: &[(TExpr, LocalId)]) -> u32 {
+        let fields = captures
+            .iter()
+            .map(|(c, _)| {
+                let t = self.ty(cx, &c.ty);
+                (self.storage(&t), false)
+            })
+            .collect();
+        let t = TypeDef::Struct {
+            fields,
+            sup: None,
+            is_final: true,
+        };
+        match self.m.types.iter().position(|x| *x == t) {
+            Some(i) => i as u32,
+            None => self.m.add_type(t),
+        }
+    }
+
+    /// Evaluates captured values (in the creating function) into a new environment struct.
+    pub fn capture_env(&mut self, cx: &mut FnCx, captures: &[(TExpr, LocalId)]) -> (u32, IExpr) {
+        let et = self.env_type(cx, captures);
+        let vals = captures
+            .iter()
+            .map(|(c, _)| self.field_value(cx, c))
+            .collect();
+        (et, IExpr::StructNew(et, vals))
+    }
+
+    /// Copies an environment (`anyref` parameter `param`) into the locals holding the captures.
+    pub fn load_env(
+        &mut self,
+        cx: &mut FnCx,
+        et: u32,
+        captures: &[(TExpr, LocalId)],
+        param: u32,
+    ) -> Vec<IExpr> {
+        let e = cx.temp(VT::Ref(et));
+        let mut out = vec![set(e, IExpr::RefCast(et, b(get(param))))];
+        for (i, (_, loc)) in captures.iter().enumerate() {
+            if let Some(x) = self.local(cx, *loc) {
+                out.push(set(x, IExpr::StructGet(et, i as u32, b(get(e)))));
+            }
+        }
+        out
+    }
+
+    /// A closure: its captured values go in an environment struct, its body in a new function.
+    fn lower_lambda(&mut self, cx: &mut FnCx, l: &tir::TLambda, ty: &Type) -> IExpr {
+        let (cl, sig) = self.closure_type(ty);
+        let Type::Fn(_, r) = ty else { unreachable!() };
+        let mut inner = FnCx::new(vec![VT::Any], cx.tlocals.clone(), cx.subst.clone());
+        for &p in &l.params {
+            let t = inner.tlocals[p].ty.subst(&inner.subst);
+            if let Some(vt) = self.vt(&t) {
+                let x = inner.temp(vt);
+                inner.map.insert(p, x);
+            }
+        }
+        inner.n_params = inner.locals.len() as u32;
+        let params = inner.locals.clone();
+        let mut body = Vec::new();
+        let env = if l.captures.is_empty() {
+            IExpr::NullAny
+        } else {
+            let (et, env) = self.capture_env(cx, &l.captures);
+            body.extend(self.load_env(&mut inner, et, &l.captures, 0));
+            env
+        };
+        let result = self.vt(r);
+        body.push(self.expr_as(&mut inner, &l.body, result));
+        let f = Func {
+            name: "closure".into(),
+            params,
+            result,
+            locals: inner.body_locals(),
+            body,
+            export: None,
+        };
+        let idx = self.push_ref_target(f, sig);
+        IExpr::StructNew(cl, vec![IExpr::RefFunc(idx), env])
+    }
+
+    /// Named function `id` as a closure value.
+    fn fn_value(&mut self, id: usize, targs: Vec<Type>, ty: &Type) -> IExpr {
+        let (cl, sig) = self.closure_type(ty);
+        let idx = match self.fn_values.get(&(id, targs.clone())) {
+            Some(&i) => i,
+            None => {
+                let target = self.fn_inst(id, &targs);
+                let TypeDef::Func { params, result } = self.m.types[sig as usize].clone() else {
+                    unreachable!()
+                };
+                let args = (1..params.len() as u32).map(get).collect();
+                let f = Func {
+                    name: format!("{}_value", self.fns[id].name),
+                    params,
+                    result,
+                    locals: vec![],
+                    body: vec![IExpr::Call(FuncRef::Local(target), args)],
+                    export: None,
+                };
+                let i = self.push_ref_target(f, sig);
+                self.fn_values.insert((id, targs), i);
+                i
+            }
+        };
+        IExpr::StructNew(cl, vec![IExpr::RefFunc(idx), IExpr::NullAny])
     }
 
     pub fn fn_inst(&mut self, id: usize, targs: &[Type]) -> u32 {
@@ -360,8 +696,10 @@ impl<'a> Lower<'a> {
                 let VT::Ref(at) = self.vt(&ty).unwrap() else {
                     unreachable!()
                 };
-                let xs = items.iter().map(|f| self.field_value(cx, f)).collect();
-                IExpr::ArrayNewFixed(at, xs)
+                let xs: Vec<IExpr> = items.iter().map(|f| self.field_value(cx, f)).collect();
+                let n = IExpr::I32(xs.len() as i32);
+                let data = IExpr::ArrayNewFixed(self.vec_data_type(at), xs);
+                self.vec_from(at, data, n)
             }
             TK::Index(arr, idx) => {
                 let at_ty = self.ty(cx, &arr.ty);
@@ -408,6 +746,20 @@ impl<'a> Lower<'a> {
                     v => IExpr::Return(v),
                 }
             }
+            TK::Lambda(l) => self.lower_lambda(cx, l, &ty),
+            TK::FnRef(id, targs) => {
+                let targs = targs.iter().map(|t| self.ty(cx, t)).collect();
+                self.fn_value(*id, targs, &ty)
+            }
+            TK::CallValue(f, args) => {
+                let fty = self.ty(cx, &f.ty);
+                let (cl, sig) = self.closure_type(&fty);
+                let t = cx.temp(VT::Ref(cl));
+                let fv = self.expr(cx, f);
+                let mut xs = vec![IExpr::StructGet(cl, 1, b(IExpr::LocalTee(t, b(fv))))];
+                xs.extend(args.iter().map(|a| self.expr(cx, a)));
+                IExpr::CallRef(sig, xs, b(IExpr::StructGet(cl, 0, b(get(t)))))
+            }
         }
     }
 
@@ -422,8 +774,10 @@ impl<'a> Lower<'a> {
         }
     }
 
+    /// `a[i]` for array value `a` of struct type `at`.
     pub fn bounds_checked_get(&mut self, cx: &mut FnCx, at: u32, a: IExpr, i: IExpr) -> IExpr {
         let ta = cx.temp(VT::Ref(at));
+        let data = self.vec_data_type(at);
         let ti = cx.temp(VT::I64);
         let panic = self.panic_call("array index out of bounds");
         IExpr::Seq(vec![
@@ -434,12 +788,16 @@ impl<'a> Lower<'a> {
                 b(bin(
                     Op::I64GeU,
                     get(ti),
-                    un(UnOp::I64ExtendI32U, IExpr::ArrayLen(b(get(ta)))),
+                    un(UnOp::I64ExtendI32U, Self::vec_len(at, get(ta))),
                 )),
                 vec![panic],
                 vec![],
             ),
-            IExpr::ArrayGet(at, b(get(ta)), b(un(UnOp::I32WrapI64, get(ti)))),
+            IExpr::ArrayGet(
+                data,
+                b(Self::vec_items(at, get(ta))),
+                b(un(UnOp::I32WrapI64, get(ti))),
+            ),
         ])
     }
 
@@ -595,20 +953,25 @@ impl<'a> Lower<'a> {
                 let VT::Ref(at) = self.vt(&at_ty).unwrap() else {
                     unreachable!()
                 };
-                let ta = cx.temp(VT::Ref(at));
+                let data = self.vec_data_type(at);
+                let ta = cx.temp(VT::Ref(data));
+                let n = cx.temp(VT::I32);
                 let idx = cx.temp(VT::I32);
                 let a = self.expr(cx, arr);
                 let elem = self.local(cx, *id);
                 cx.loops.push((brk, cont));
                 let body = self.stmt_expr(cx, body);
                 cx.loops.pop();
-                let load = IExpr::ArrayGet(at, b(get(ta)), b(get(idx)));
+                let load = IExpr::ArrayGet(data, b(get(ta)), b(get(idx)));
+                let tv = cx.temp(VT::Ref(at));
                 let bind = match elem {
                     Some(l) => set(l, load),
                     None => IExpr::Seq(vec![]),
                 };
                 IExpr::Seq(vec![
-                    set(ta, a),
+                    set(tv, a),
+                    set(ta, Self::vec_items(at, get(tv))),
+                    set(n, Self::vec_len(at, get(tv))),
                     set(idx, IExpr::I32(0)),
                     IExpr::Block(
                         brk,
@@ -616,10 +979,7 @@ impl<'a> Lower<'a> {
                         vec![IExpr::Loop(
                             lp,
                             vec![
-                                IExpr::BrIf(
-                                    brk,
-                                    b(bin(Op::I32GeU, get(idx), IExpr::ArrayLen(b(get(ta))))),
-                                ),
+                                IExpr::BrIf(brk, b(bin(Op::I32GeU, get(idx), get(n)))),
                                 bind,
                                 IExpr::Block(cont, None, vec![body]),
                                 set(idx, bin(Op::I32Add, get(idx), IExpr::I32(1))),
@@ -760,9 +1120,14 @@ impl<'a> Lower<'a> {
         let s = self.str_ty;
         let wrap = |e: IExpr| un(UnOp::I32WrapI64, e);
         let ext = |e: IExpr| un(UnOp::I64ExtendI32U, e);
-        let arr = |this: &mut Self| {
-            let st = this.storage(&targs[0]);
-            this.m.array_type(st)
+        let vec = |this: &mut Self| this.vec_type(&targs[0]);
+        let unit = targs.first().is_some_and(|t| self.vt(t).is_none());
+        let stored = |v: IExpr| {
+            if unit {
+                IExpr::Seq(vec![v, IExpr::I32(0)])
+            } else {
+                v
+            }
         };
         let mut take = || a.remove(0);
         match name {
@@ -776,31 +1141,39 @@ impl<'a> Lower<'a> {
                 let (x, i, v) = (take(), take(), take());
                 IExpr::ArraySet(s, b(x), b(wrap(i)), b(wrap(v)))
             }
-            "__str_copy" | "__arr_copy" => {
-                let t = if name == "__str_copy" { s } else { arr(self) };
+            "__str_copy" => {
                 let (d, di, src, si, n) = (take(), take(), take(), take(), take());
+                IExpr::ArrayCopy(s, [b(d), b(wrap(di)), b(src), b(wrap(si)), b(wrap(n))])
+            }
+            // The prelude only writes into arrays it has just allocated.
+            "__arr_copy" => {
+                let v = vec(self);
+                let t = self.vec_data_type(v);
+                let (d, di, src, si, n) = (take(), take(), take(), take(), take());
+                let (d, src) = (Self::vec_items(v, d), Self::vec_items(v, src));
                 IExpr::ArrayCopy(t, [b(d), b(wrap(di)), b(src), b(wrap(si)), b(wrap(n))])
             }
-            "__arr_len" => ext(IExpr::ArrayLen(b(take()))),
+            "__arr_len" => {
+                let v = vec(self);
+                ext(Self::vec_len(v, take()))
+            }
             "__arr_alloc" => {
-                let t = arr(self);
+                let v = vec(self);
+                let f = self.helper_arr_alloc(v);
                 let (n, fill) = (take(), take());
-                let fill = if self.vt(&targs[0]).is_none() {
-                    IExpr::Seq(vec![fill, IExpr::I32(0)])
-                } else {
-                    fill
-                };
-                IExpr::ArrayNew(t, b(fill), b(wrap(n)))
+                IExpr::Call(f, vec![n, stored(fill)])
+            }
+            "__arr_push" => {
+                let v = vec(self);
+                let f = self.helper_arr_push(v);
+                let (x, e) = (take(), take());
+                IExpr::Call(f, vec![x, stored(e)])
             }
             "__arr_set" => {
-                let t = arr(self);
-                let (x, i, v) = (take(), take(), take());
-                let v = if self.vt(&targs[0]).is_none() {
-                    IExpr::Seq(vec![v, IExpr::I32(0)])
-                } else {
-                    v
-                };
-                IExpr::ArraySet(t, b(x), b(wrap(i)), b(v))
+                let v = vec(self);
+                let t = self.vec_data_type(v);
+                let (x, i, e) = (take(), take(), take());
+                IExpr::ArraySet(t, b(Self::vec_items(v, x)), b(wrap(i)), b(stored(e)))
             }
             "__float_from_int" => un(UnOp::F64ConvertI64S, take()),
             "__int_from_float" => un(UnOp::I64TruncSatF64S, take()),

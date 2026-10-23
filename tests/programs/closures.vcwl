@@ -1,0 +1,63 @@
+// expect: [2, 4, 6]
+// expect: 3 even, sum 15
+// expect: 11 12
+// expect: Some(4)
+// expect: 1 2 3 5 8
+// expect: bob ann
+// expect: ok
+// expect: 5
+
+fn show(xs: [Int]) -> String {
+    "[" + xs.map(|x| x.to_string()).join(", ") + "]"
+}
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+struct Person {
+    name: String,
+    age: Int,
+}
+
+struct Button {
+    label: String,
+    on_press: fn() -> Int,
+}
+
+fn main() {
+    let xs = [1, 2, 3, 4, 5]
+    print(show([1, 2, 3].map(double)))
+    let evens = xs.filter(|x| x % 2 == 0).len() + 1
+    print("{evens} even, sum {xs.fold(0, |acc, x| acc + x)}")
+    let add10 = make_adder(10)
+    print("{add10(1)} {make_adder(2)(10)}")
+    match xs.find(|x| x > 3) {
+        Some(v) => print("Some({v})"),
+        None => print("None"),
+    }
+    print([5, 3, 8, 1, 2].sort_by(|a, b| a < b).map(|n| n.to_string()).join(" "))
+    let people = [Person { name: "ann", age: 30 }, Person { name: "bob", age: 20 }]
+    print(people.sort_by(|a, b| a.age < b.age).map(|p| p.name).join(" "))
+    var total = 0
+    let ages: fn(Person) -> Int = |p| {
+        if p.age > 100 {
+            return 0
+        }
+        p.age
+    }
+    for p in people {
+        total = total + ages(p)
+    }
+    let b = Button { label: "ok", on_press: || twice(|x| x * 2, total / 20) + 1 }
+    print(b.label)
+    print("{b.on_press() - 3 * 2 + 4 - 2 + 0}")
+}

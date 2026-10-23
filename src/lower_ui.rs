@@ -126,6 +126,8 @@ struct Globals {
     free_n: u32,
     route: u32,
     app: u32,
+    /// Captured handler values for `await` continuations, by fetch slot.
+    fetch_env: u32,
 }
 
 pub struct UiState {
@@ -270,6 +272,7 @@ impl Lower<'_> {
             free_n: self.global(VT::I32, IExpr::I32(0)),
             route,
             app: 0,
+            fetch_env: self.global(VT::RefNull(any_arr), IExpr::Null(any_arr)),
         };
         {
             let u = self.u();
@@ -563,6 +566,13 @@ impl Lower<'_> {
             None => S::Static(String::new()),
         };
         let has_body = IExpr::I32(f.body.is_some() as i32);
+        let keep_env = if f.captures.is_empty() {
+            IExpr::Seq(vec![])
+        } else {
+            let (_, env) = self.capture_env(cx, &f.captures);
+            let keep = self.helper_fetch_env_set();
+            IExpr::Call(keep, vec![get(slot), env])
+        };
         let cmd = self.op(
             cx,
             opc::FETCH,
@@ -574,8 +584,69 @@ impl Lower<'_> {
                 slot,
                 IExpr::Call(alloc, vec![get(sr.local), IExpr::I32(kind)]),
             ),
+            keep_env,
             cmd,
         ])
+    }
+
+    /// `(slot, env)`: keeps an `await` continuation's captured values until its response.
+    fn helper_fetch_env_set(&mut self) -> FuncRef {
+        let g = self.u().g;
+        let any_arr = self.u().any_arr;
+        self.helper("fetch_env_set", |_| {
+            let (slot, env, grown) = (0, 1, 2);
+            let cur = || IExpr::GlobalGet(g.fetch_env);
+            let full = IExpr::If(
+                Some(VT::I32),
+                b(un(UnOp::RefIsNull, cur())),
+                vec![IExpr::I32(1)],
+                vec![bin(Op::I32GeU, get(slot), IExpr::ArrayLen(b(cur())))],
+            );
+            let size = bin(
+                Op::I32Add,
+                bin(Op::I32Mul, get(slot), IExpr::I32(2)),
+                IExpr::I32(16),
+            );
+            Func {
+                name: "fetch_env_set".into(),
+                params: vec![VT::I32, VT::Any],
+                result: None,
+                locals: vec![VT::Ref(any_arr)],
+                body: vec![
+                    IExpr::If(
+                        None,
+                        b(full),
+                        vec![
+                            set(grown, IExpr::ArrayNewDefault(any_arr, b(size))),
+                            IExpr::If(
+                                None,
+                                b(un(UnOp::I32Eqz, un(UnOp::RefIsNull, cur()))),
+                                vec![IExpr::ArrayCopy(
+                                    any_arr,
+                                    [
+                                        b(get(grown)),
+                                        b(IExpr::I32(0)),
+                                        b(un(UnOp::RefAsNonNull, cur())),
+                                        b(IExpr::I32(0)),
+                                        b(IExpr::ArrayLen(b(cur()))),
+                                    ],
+                                )],
+                                vec![],
+                            ),
+                            IExpr::GlobalSet(g.fetch_env, b(get(grown))),
+                        ],
+                        vec![],
+                    ),
+                    IExpr::ArraySet(
+                        any_arr,
+                        b(un(UnOp::RefAsNonNull, cur())),
+                        b(get(slot)),
+                        b(get(env)),
+                    ),
+                ],
+                export: None,
+            }
+        })
     }
 
     /// `(scope, kind: i64, status: i64, len: i64)`: runs a fetch's arms, then updates the
@@ -584,7 +655,13 @@ impl Lower<'_> {
         let idx = self.placeholder_fn();
         let comp = self.u().scopes[si].comp;
         let c = self.u().comps[comp].clone();
-        let params = vec![VT::Ref(self.scope_ty(si)), VT::I64, VT::I64, VT::I64];
+        let params = vec![
+            VT::Ref(self.scope_ty(si)),
+            VT::I64,
+            VT::I64,
+            VT::I64,
+            VT::Any,
+        ];
         let mut cx = FnCx::new(params.clone(), c.locals.clone(), vec![]);
         cx.scope = Some(ScopeRef {
             scope: si,
@@ -596,7 +673,12 @@ impl Lower<'_> {
         let root = self.comp_root_of(si);
         let (rty, dead) = (self.scope_ty(root), self.u().scopes[root].comp_fields.dead);
         let path = self.scope_path(&cx, root);
-        let mut body = vec![self.stmt_expr(&mut cx, &f.on_done)];
+        let mut body = Vec::new();
+        if !f.captures.is_empty() {
+            let env_ty = self.env_type(&cx, &f.captures);
+            body.extend(self.load_env(&mut cx, env_ty, &f.captures, 4));
+        }
+        body.push(self.stmt_expr(&mut cx, &f.on_done));
         body.extend(self.handler_epilogue(&mut cx, si));
         // The dead check stays outside `wrap_returns`, which turns returns into jumps to the epilogue.
         let mut body = wrap_returns(body);
@@ -677,6 +759,14 @@ impl Lower<'_> {
                 arms.iter().for_each(|(_, x)| self.deps_into(cx, x, m));
             }
             TK::Return(Some(x)) => self.deps_into(cx, x, m),
+            TK::Lambda(l) => l
+                .captures
+                .iter()
+                .for_each(|(c, _)| self.deps_into(cx, c, m)),
+            TK::CallValue(f, xs) => {
+                self.deps_into(cx, f, m);
+                xs.iter().for_each(|x| self.deps_into(cx, x, m));
+            }
             _ => {}
         }
     }
@@ -1881,10 +1971,13 @@ impl Lower<'_> {
     /// Appends one `<option>` per string of `opts` to the select element `sel`.
     fn select_options(&mut self, cx: &mut FnCx, sel: IExpr, opts: &TExpr) -> IExpr {
         let arr_ty = self.ty(cx, &opts.ty);
-        let VT::Ref(at) = self.vt(&arr_ty).unwrap() else {
+        let VT::Ref(av) = self.vt(&arr_ty).unwrap() else {
             unreachable!()
         };
+        let at = self.vec_data_type(av);
+        let v = cx.temp(VT::Ref(av));
         let a = cx.temp(VT::Ref(at));
+        let n = cx.temp(VT::I32);
         let i = cx.temp(VT::I32);
         let s = cx.temp(VT::I32);
         let o = cx.temp(VT::I32);
@@ -1911,7 +2004,9 @@ impl Lower<'_> {
         let l2 = cx.label();
         IExpr::Seq(vec![
             set(s, sel),
-            set(a, arr),
+            set(v, arr),
+            set(a, Self::vec_items(av, get(v))),
+            set(n, Self::vec_len(av, get(v))),
             set(i, IExpr::I32(0)),
             IExpr::Block(
                 l,
@@ -1919,7 +2014,7 @@ impl Lower<'_> {
                 vec![IExpr::Loop(
                     l2,
                     vec![
-                        IExpr::BrIf(l, b(bin(Op::I32GeU, get(i), IExpr::ArrayLen(b(get(a)))))),
+                        IExpr::BrIf(l, b(bin(Op::I32GeU, get(i), get(n)))),
                         set(txt, IExpr::ArrayGet(at, b(get(a)), b(get(i)))),
                         set(o, IExpr::Call(nn, vec![])),
                         set(t, IExpr::Call(nn, vec![])),
@@ -2313,9 +2408,10 @@ impl Lower<'_> {
         self.u().scopes[fs].key_field = Some(f_key);
         let ffns = self.u().scopes[fs].fns;
         let iter_ty = self.ty(&g.mount, &iter.ty);
-        let VT::Ref(src_arr) = self.vt(&iter_ty).unwrap() else {
+        let VT::Ref(src_vec) = self.vt(&iter_ty).unwrap() else {
             unreachable!()
         };
+        let src_arr = self.vec_data_type(src_vec);
         let iter_deps = self.deps(&g.mount, iter);
         let mut probe = FnCx::new(vec![], comp.locals.clone(), vec![]);
         probe.scope = Some(ScopeRef {
@@ -2356,6 +2452,7 @@ impl Lower<'_> {
         {
             let cx = &mut g.mount;
             let a = cx.temp(VT::Ref(src_arr));
+            let av = cx.temp(VT::Ref(src_vec));
             let n = cx.temp(VT::I32);
             let i = cx.temp(VT::I32);
             let il = cx.temp(item_vt);
@@ -2381,8 +2478,9 @@ impl Lower<'_> {
             let l1 = cx.label();
             let l2 = cx.label();
             g.mb.push(IExpr::Seq(vec![
-                set(a, arr),
-                set(n, IExpr::ArrayLen(b(get(a)))),
+                set(av, arr),
+                set(a, Self::vec_items(src_vec, get(av))),
+                set(n, Self::vec_len(src_vec, get(av))),
                 IExpr::StructSet(
                     ty,
                     ffrags,
@@ -2428,6 +2526,7 @@ impl Lower<'_> {
             let cx = &mut g.update;
             let i32_arr = self.u().i32_arr;
             let a = cx.temp(VT::Ref(src_arr));
+            let av = cx.temp(VT::Ref(src_vec));
             let n = cx.temp(VT::I32);
             let on = cx.temp(VT::I32);
             let old = cx.temp(VT::Ref(arr_frags));
@@ -2492,8 +2591,9 @@ impl Lower<'_> {
             let src_at = |at: IExpr| IExpr::ArrayGet(i32_arr, b(get(src)), b(at));
             let pnode = IExpr::StructGet(ty, fp, b(get(0)));
             let reconcile = vec![
-                set(a, arr),
-                set(n, IExpr::ArrayLen(b(get(a)))),
+                set(av, arr),
+                set(a, Self::vec_items(src_vec, get(av))),
+                set(n, Self::vec_len(src_vec, get(av))),
                 set(old, frags_of(get(0))),
                 set(on, IExpr::StructGet(ty, fcount, b(get(0)))),
                 set(new, IExpr::ArrayNewDefault(arr_frags, b(get(n)))),
@@ -3510,7 +3610,7 @@ impl Lower<'_> {
         let fetches = self.u().fetch_kinds.clone();
         if !fetches.is_empty() {
             let release = self.helper_release_slot();
-            let (slot, kind, status, len, scope, k) = (0, 1, 2, 3, 4, 5);
+            let (slot, kind, status, len, scope, k, env) = (0, 1, 2, 3, 4, 5, 6);
             let ext = |i| un(UnOp::I64ExtendI32S, get(i));
             let arms = fetches
                 .iter()
@@ -3526,6 +3626,7 @@ impl Lower<'_> {
                                 ext(kind),
                                 ext(status),
                                 ext(len),
+                                get(env),
                             ],
                         ),
                     )
@@ -3535,12 +3636,46 @@ impl Lower<'_> {
                 name: "fetch_done".into(),
                 params: vec![VT::I32; 4],
                 result: None,
-                locals: vec![VT::Any, VT::I32],
+                locals: vec![VT::Any, VT::I32, VT::Any],
                 body: vec![
                     IExpr::If(
                         None,
                         b(bin(Op::I32GeU, get(slot), IExpr::GlobalGet(g.slot_n))),
                         vec![IExpr::Return(None)],
+                        vec![],
+                    ),
+                    // Take the slot's `await` values, if any, so they can be collected.
+                    IExpr::If(
+                        None,
+                        b(un(
+                            UnOp::I32Eqz,
+                            un(UnOp::RefIsNull, IExpr::GlobalGet(g.fetch_env)),
+                        )),
+                        vec![IExpr::If(
+                            None,
+                            b(bin(
+                                Op::I32LtU,
+                                get(slot),
+                                IExpr::ArrayLen(b(IExpr::GlobalGet(g.fetch_env))),
+                            )),
+                            vec![
+                                set(
+                                    env,
+                                    IExpr::ArrayGet(
+                                        any_arr,
+                                        b(un(UnOp::RefAsNonNull, IExpr::GlobalGet(g.fetch_env))),
+                                        b(get(slot)),
+                                    ),
+                                ),
+                                IExpr::ArraySet(
+                                    any_arr,
+                                    b(un(UnOp::RefAsNonNull, IExpr::GlobalGet(g.fetch_env))),
+                                    b(get(slot)),
+                                    b(IExpr::NullAny),
+                                ),
+                            ],
+                            vec![],
+                        )],
                         vec![],
                     ),
                     set(

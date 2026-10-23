@@ -1,0 +1,4 @@
+// error: type error: `await` can only start a statement in an event handler
+fn main() {
+    let x = await get("/x") as Int
+}

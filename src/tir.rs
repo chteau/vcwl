@@ -17,6 +17,8 @@ pub enum Type {
     /// A struct or enum with its type arguments.
     Adt(usize, Vec<Type>),
     Param(String),
+    /// A function value (closure or named function): `fn(A, B) -> R`.
+    Fn(Vec<Type>, Box<Type>),
     /// Inference variable; never survives checking.
     Var(u32),
 }
@@ -31,6 +33,10 @@ impl Type {
                 .unwrap_or_else(|| self.clone()),
             Type::Array(t) => Type::Array(Box::new(t.subst(map))),
             Type::Adt(id, args) => Type::Adt(*id, args.iter().map(|a| a.subst(map)).collect()),
+            Type::Fn(ps, r) => Type::Fn(
+                ps.iter().map(|p| p.subst(map)).collect(),
+                Box::new(r.subst(map)),
+            ),
             _ => self.clone(),
         }
     }
@@ -73,6 +79,21 @@ pub enum TK {
     Block(Vec<TStmt>, Option<Box<TExpr>>),
     Match(Box<TExpr>, Vec<(TPat, TExpr)>),
     Return(Option<Box<TExpr>>),
+    Lambda(Box<TLambda>),
+    /// A named function used as a value, with its type arguments.
+    FnRef(usize, Vec<Type>),
+    /// Calls a function value.
+    CallValue(Box<TExpr>, Vec<TExpr>),
+}
+
+/// A closure. Its body refers to captured values only through `captures`' inner locals.
+#[derive(Clone, Debug)]
+pub struct TLambda {
+    pub params: Vec<LocalId>,
+    /// The value captured when the closure is created (evaluated outside it), and the local
+    /// holding it inside the body.
+    pub captures: Vec<(TExpr, LocalId)>,
+    pub body: TExpr,
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +122,8 @@ pub struct TFetch {
     pub params: [LocalId; 3],
     /// Runs when the response arrives: decodes it and evaluates the arms.
     pub on_done: TExpr,
+    /// For `await`: handler values the rest of the handler uses, as in `TLambda`.
+    pub captures: Vec<(TExpr, LocalId)>,
     pub span: Span,
 }
 

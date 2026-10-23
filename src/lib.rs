@@ -27,3 +27,4 @@ pub mod sha256;
 pub mod style;
 pub mod testrunner;
 pub mod tir;
+pub mod update;

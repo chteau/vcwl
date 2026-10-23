@@ -87,7 +87,7 @@ test("a response for a destroyed component is discarded", async () => {
   while (!releaseSlow) await new Promise((r) => setTimeout(r, 20));
   const slots = await app.page.evaluate(() => window.vcwl.exports.live_slots());
   await click("Toggle loader");
-  assert.equal(await count(app.page, "button"), 8);
+  assert.equal(await count(app.page, "button"), 9);
   releaseSlow();
   // The request's slot is released when its response arrives (polled: the suite runs in
   // parallel, so the response can take a while).
@@ -99,4 +99,11 @@ test("a response for a destroyed component is discarded", async () => {
 
 test("no console errors", () => {
   assert.deepEqual(app.errors.filter((e) => !/404|Failed to load resource/.test(e)), []);
+});
+
+test("await runs the rest of the handler with its values when each response arrives", async () => {
+  await click("Await");
+  const s = await waitStatus(/^await /);
+  assert.match(s, /^await 2 2 \S.* \d+$/);
+  assert.doesNotMatch(s, / none /);
 });

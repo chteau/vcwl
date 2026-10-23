@@ -66,6 +66,23 @@ component App {
                 }
             }
         }
+        button("Await") {
+            on click {
+                let prefix = "await"
+                var steps = 0
+                status = "waiting"
+                let first = await get("api/items") as [Item]
+                steps += 1
+                let count = first.unwrap_or([]).len()
+                let second = await get("api/missing") as Item
+                steps += 1
+                let err = match second {
+                    Ok(_) => "none",
+                    Err(e) => e.message(),
+                }
+                status = "{prefix} {steps} {count} {err} {items.len()}"
+            }
+        }
         button("Create") {
             on click {
                 fetch post("api/items", NewItem { name: "Dune", kind: Book }) as Item {

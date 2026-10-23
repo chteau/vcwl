@@ -65,6 +65,36 @@ pub struct Checker<'a> {
     pub server: bool,
     /// First `fetch` in the program (it requires the network capability).
     pub fetch_span: Option<Span>,
+    /// Closures being checked, innermost last.
+    lambdas: Vec<LambdaFrame>,
+    /// Interfaces (struct ADTs of closures).
+    pub ifaces: Vec<usize>,
+    /// `impl Interface for Type`: (type, interface, method function per interface field).
+    pub impls: Vec<(usize, usize, Vec<usize>)>,
+    /// What `Self` means in the current method.
+    self_ty: Option<Type>,
+    /// The block about to be checked may contain `await` statements (a handler's body, or what
+    /// follows an `await`).
+    pub await_top: bool,
+}
+
+struct LambdaFrame {
+    /// `local_scopes` index of the closure's own scope: names from below it are captured.
+    base: usize,
+    captures: Vec<(TExpr, LocalId)>,
+    /// The rest of a handler after an `await`: it runs in the component, so it reads state
+    /// directly and may assign its copies of the handler's variables.
+    resumes: bool,
+}
+
+/// Identifies a captured value, so a closure captures it once.
+fn capture_key(k: &TK) -> Option<(u8, usize)> {
+    match k {
+        TK::Local(id) => Some((0, *id)),
+        TK::CompVar(i) => Some((1, *i)),
+        TK::Route => Some((2, 0)),
+        _ => None,
+    }
 }
 
 const INTRINSICS: &[(&str, &[&str], &str)] = &[
@@ -80,6 +110,7 @@ const INTRINSICS: &[(&str, &[&str], &str)] = &[
     ("__arr_len", &["[T]"], "Int"),
     ("__arr_alloc", &["Int", "T"], "[T]"),
     ("__arr_set", &["[T]", "Int", "T"], "()"),
+    ("__arr_push", &["[T]", "T"], "[T]"),
     ("__arr_copy", &["[T]", "Int", "[T]", "Int", "Int"], "()"),
     ("__float_to_string", &["Float"], "String"),
     ("__float_from_int", &["Int"], "Float"),
@@ -131,6 +162,11 @@ impl<'a> Checker<'a> {
             fetch_span: None,
             fetch_hidden: Vec::new(),
             server: false,
+            lambdas: Vec::new(),
+            ifaces: Vec::new(),
+            impls: Vec::new(),
+            self_ty: None,
+            await_top: false,
         }
     }
 
@@ -150,6 +186,9 @@ impl<'a> Checker<'a> {
                             generics: names(&s.generics),
                             kind: AdtKind::Struct(vec![]),
                         });
+                        if s.interface {
+                            self.ifaces.push(self.adts.len() - 1);
+                        }
                         (Sym::Adt(self.adts.len() - 1), &s.name, s.exported)
                     }
                     ast::Item::Enum(e) => {
@@ -264,6 +303,7 @@ impl<'a> Checker<'a> {
                     }
                     (ast::Item::Fn(f), Sym::Fn(id)) => {
                         self.generics = names(&f.generics);
+                        self.self_ty = self.method_self(&f.name, &self.generics)?;
                         let params = f
                             .params
                             .iter()
@@ -290,7 +330,111 @@ impl<'a> Checker<'a> {
                 self.diags.push(d);
             }
         }
+        self.self_ty = None;
         self.generics.clear();
+        for (fi, f) in self.files.iter().enumerate() {
+            for item in &f.items {
+                if let ast::Item::Impl(im) = item
+                    && let Err(d) = self.declare_impl(fi, im)
+                {
+                    self.diags.push(d);
+                }
+            }
+        }
+    }
+
+    /// `Self` for a method `Type.name` (whose first type parameters are the type's), or `None`.
+    fn method_self(&self, name: &ast::Ident, generics: &[String]) -> Result<Option<Type>> {
+        let Some((ty, _)) = name.name.split_once('.') else {
+            return Ok(None);
+        };
+        let Some(Sym::Adt(id)) = self.scopes[self.file].get(ty).copied() else {
+            return Err(Diag::ty(name.span, format!("unknown type `{ty}`")));
+        };
+        let n = self.adts[id].generics.len();
+        if generics.len() < n {
+            return Err(
+                Diag::ty(name.span, format!("`{ty}` is generic")).help(format!(
+                    "name its type parameters: `impl {ty}<{}>`",
+                    self.adts[id].generics.join(", ")
+                )),
+            );
+        }
+        Ok(Some(Type::Adt(
+            id,
+            generics[..n]
+                .iter()
+                .map(|g| Type::Param(g.clone()))
+                .collect(),
+        )))
+    }
+
+    /// Checks `impl Interface for Type`: every interface method exists with the declared signature.
+    fn declare_impl(&mut self, fi: usize, im: &ast::ImplDecl) -> Result<()> {
+        let scope = &self.scopes[fi];
+        let Some(Sym::Adt(ty)) = scope.get(&im.ty.name).copied() else {
+            return Err(Diag::ty(
+                im.ty.span,
+                format!("unknown type `{}`", im.ty.name),
+            ));
+        };
+        let Some(iname) = &im.iface else {
+            return Ok(());
+        };
+        let iface = match scope.get(&iname.name).copied() {
+            Some(Sym::Adt(i)) if self.ifaces.contains(&i) => i,
+            _ => {
+                return Err(Diag::ty(
+                    iname.span,
+                    format!("`{}` is not an interface", iname.name),
+                ));
+            }
+        };
+        if !self.adts[ty].generics.is_empty() {
+            return Err(Diag::ty(
+                im.ty.span,
+                "generic types cannot implement interfaces",
+            ));
+        }
+        let self_t = Type::Adt(ty, vec![]);
+        let mut fns = Vec::new();
+        for (m, mt) in self.adts[iface].fields().to_vec() {
+            let Type::Fn(ps, r) = mt else { unreachable!() };
+            let want: Vec<Type> = std::iter::once(self_t.clone()).chain(ps).collect();
+            let found = match self.scopes[fi].get(&format!("{}.{m}", im.ty.name)).copied() {
+                Some(Sym::Fn(f)) => Some(f),
+                _ => None,
+            };
+            match found {
+                Some(f)
+                    if self.sigs[f].params == want
+                        && self.sigs[f].ret == *r
+                        && self.sigs[f].generics.is_empty() =>
+                {
+                    fns.push(f)
+                }
+                _ => {
+                    let params: String = want[1..]
+                        .iter()
+                        .map(|t| format!(", _: {}", self.show(t)))
+                        .collect();
+                    let ret = if *r == Type::Unit {
+                        String::new()
+                    } else {
+                        format!(" -> {}", self.show(&r))
+                    };
+                    return Err(Diag::ty(
+                        im.span,
+                        format!(
+                            "`{}` does not implement `{}`: it needs `fn {m}(self{params}){ret}`",
+                            im.ty.name, iname.name
+                        ),
+                    ));
+                }
+            }
+        }
+        self.impls.push((ty, iface, fns));
+        Ok(())
     }
 
     pub fn check_fns(&mut self) {
@@ -305,6 +449,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.server = false;
+        self.self_ty = None;
     }
 
     fn check_fn(&mut self, id: usize, f: &ast::FnDecl) -> Result<TFn> {
@@ -314,6 +459,7 @@ impl<'a> Checker<'a> {
             return Err(Diag::ty(f.name.span, "server functions cannot be generic"));
         }
         self.begin_body(names(&f.generics), self.sigs[id].ret.clone(), Ctx::Fn);
+        self.self_ty = self.method_self(&f.name, &self.generics)?;
         let mut params = Vec::new();
         for (p, ty) in f.params.iter().zip(self.sigs[id].params.clone()) {
             if params
@@ -361,8 +507,20 @@ impl<'a> Checker<'a> {
                 exported: f.exported,
             });
         }
-        let body = self.check_block(&f.body, Some(&ret))?;
+        let mut body = self.check_block(&f.body, Some(&ret))?;
         if ret != Type::Unit {
+            if let TK::Block(_, Some(tail)) = &mut body.kind {
+                let t = std::mem::replace(
+                    &mut **tail,
+                    TExpr {
+                        kind: TK::Unit,
+                        ty: Type::Unit,
+                        span: f.span,
+                    },
+                );
+                **tail = self.box_iface(t, &ret);
+                body.ty = tail.ty.clone();
+            }
             self.coerce(
                 &body.ty,
                 &ret,
@@ -472,6 +630,15 @@ impl<'a> Checker<'a> {
                 }
             }
             TK::Return(Some(v)) => self.zonk_expr(v),
+            TK::Lambda(l) => {
+                l.captures.iter_mut().for_each(|(c, _)| self.zonk_expr(c));
+                self.zonk_expr(&mut l.body);
+            }
+            TK::FnRef(_, ts) => fix(ts),
+            TK::CallValue(f, args) => {
+                self.zonk_expr(f);
+                args.iter_mut().for_each(|a| self.zonk_expr(a));
+            }
             _ => {}
         }
     }
@@ -498,6 +665,7 @@ impl<'a> Checker<'a> {
                 self.zonk_expr(body);
             }
             TStmt::Fetch(f) => {
+                f.captures.iter_mut().for_each(|(c, _)| self.zonk_expr(c));
                 self.zonk_expr(&mut f.url);
                 if let Some(b) = &mut f.body {
                     self.zonk_expr(b);
@@ -518,6 +686,20 @@ impl<'a> Checker<'a> {
             TypeExprKind::Optional(inner) => {
                 let inner = self.resolve_type(inner)?;
                 Type::Adt(self.prelude_adt("Option"), vec![inner])
+            }
+            TypeExprKind::Fn(ps, r) => Type::Fn(
+                ps.iter()
+                    .map(|p| self.resolve_type(p))
+                    .collect::<Result<_>>()?,
+                Box::new(match r {
+                    Some(r) => self.resolve_type(r)?,
+                    None => Type::Unit,
+                }),
+            ),
+            TypeExprKind::Named(name, args) if name == "Self" && args.is_empty() => {
+                return self.self_ty.clone().ok_or_else(|| {
+                    Diag::ty(t.span, "`Self` is only available inside `impl` blocks")
+                });
             }
             TypeExprKind::Named(name, args) => {
                 let prim = match name.as_str() {
@@ -628,6 +810,13 @@ impl<'a> Checker<'a> {
                     .join(", ")
             ),
             Type::Param(n) => n,
+            Type::Fn(ps, r) => {
+                let ps: Vec<String> = ps.iter().map(|p| self.show(p)).collect();
+                match *r {
+                    Type::Unit => format!("fn({})", ps.join(", ")),
+                    r => format!("fn({}) -> {}", ps.join(", "), self.show(&r)),
+                }
+            }
             Type::Var(_) => "_".into(),
         }
     }
@@ -645,6 +834,10 @@ impl<'a> Checker<'a> {
             },
             Type::Array(t) => Type::Array(Box::new(self.zonk(t))),
             Type::Adt(id, args) => Type::Adt(*id, args.iter().map(|a| self.zonk(a)).collect()),
+            Type::Fn(ps, r) => Type::Fn(
+                ps.iter().map(|p| self.zonk(p)).collect(),
+                Box::new(self.zonk(r)),
+            ),
             _ => t.clone(),
         }
     }
@@ -654,6 +847,7 @@ impl<'a> Checker<'a> {
             Type::Var(w) => w == v,
             Type::Array(t) => self.occurs(v, &t),
             Type::Adt(_, args) => args.iter().any(|a| self.occurs(v, a)),
+            Type::Fn(ps, r) => ps.iter().any(|p| self.occurs(v, p)) || self.occurs(v, &r),
             _ => false,
         }
     }
@@ -672,6 +866,11 @@ impl<'a> Checker<'a> {
             (Type::Array(x), Type::Array(y)) => self.unify(x, y),
             (Type::Adt(i, xs), Type::Adt(j, ys)) => {
                 i == j && xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| self.unify(x, y))
+            }
+            (Type::Fn(xs, r), Type::Fn(ys, q)) => {
+                xs.len() == ys.len()
+                    && xs.iter().zip(ys).all(|(x, y)| self.unify(x, y))
+                    && self.unify(r, q)
             }
             _ => a == b,
         }
@@ -725,12 +924,63 @@ impl<'a> Checker<'a> {
     }
 
     fn lookup_local(&self, name: &str) -> Option<(LocalId, bool)> {
+        self.lookup_local_at(name).map(|(id, m, _)| (id, m))
+    }
+
+    /// The local named `name`, whether it is mutable, and the index of its scope.
+    fn lookup_local_at(&self, name: &str) -> Option<(LocalId, bool, usize)> {
         self.local_scopes
             .iter()
+            .enumerate()
             .rev()
-            .flat_map(|s| s.iter().rev())
-            .find(|(n, _, _)| n == name)
-            .map(|&(_, id, m)| (id, m))
+            .find_map(|(d, s)| {
+                s.iter()
+                    .rev()
+                    .find(|(n, _, _)| n == name)
+                    .map(|&(_, id, m)| (id, m, d))
+            })
+    }
+
+    /// Starts checking the rest of a handler after an `await`.
+    pub fn begin_resume(&mut self) {
+        self.lambdas.push(LambdaFrame {
+            base: self.local_scopes.len(),
+            captures: Vec::new(),
+            resumes: true,
+        });
+    }
+
+    pub fn end_resume(&mut self) -> Vec<(TExpr, LocalId)> {
+        self.lambdas.pop().unwrap().captures
+    }
+
+    /// Routes a value defined at scope `depth` through the captures of every closure that
+    /// encloses the use but not the definition.
+    fn capture(&mut self, mut e: TExpr, depth: usize) -> TExpr {
+        for k in 0..self.lambdas.len() {
+            let key = capture_key(&e.kind);
+            if self.lambdas[k].base <= depth
+                || self.lambdas[k].resumes && !matches!(e.kind, TK::Local(_))
+            {
+                continue;
+            }
+            let found = self.lambdas[k]
+                .captures
+                .iter()
+                .find(|(o, _)| capture_key(&o.kind) == key)
+                .map(|c| c.1);
+            let inner = found.unwrap_or_else(|| {
+                self.locals.push(Local {
+                    name: "$captured".into(),
+                    ty: e.ty.clone(),
+                });
+                let l = self.locals.len() - 1;
+                self.lambdas[k].captures.push((e.clone(), l));
+                l
+            });
+            e.kind = TK::Local(inner);
+        }
+        e
     }
 
     fn visible_value_names(&self) -> Vec<String> {
@@ -758,7 +1008,16 @@ impl<'a> Checker<'a> {
     fn check_block_inner(&mut self, b: &ast::Block, expected: Option<&Type>) -> Result<TExpr> {
         let mut stmts = Vec::new();
         let mut diverges = false;
-        for s in &b.stmts {
+        let await_top = std::mem::replace(&mut self.await_top, false);
+        for (i, s) in b.stmts.iter().enumerate() {
+            if await_top && let Some(f) = self.await_split(b, i) {
+                stmts.push(self.check_fetch(&f, true)?);
+                return Ok(TExpr {
+                    kind: TK::Block(stmts, None),
+                    ty: Type::Unit,
+                    span: b.span,
+                });
+            }
             let ts = self.check_stmt(s)?;
             diverges |= stmt_diverges(&ts);
             stmts.push(ts);
@@ -779,6 +1038,61 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// When statement `i` of `b` is `[let x =] await f(...)`: a `fetch` whose single arm binds
+    /// the result and runs the rest of the block.
+    fn await_split(&self, b: &ast::Block, i: usize) -> Option<ast::Fetch> {
+        let (f, bind) = match &b.stmts[i] {
+            Stmt::Let { value, .. } | Stmt::Expr(value) => match &value.kind {
+                ExprKind::Await(f) => (f, matches!(b.stmts[i], Stmt::Let { .. })),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let span = f.span;
+        let mut rest = Vec::new();
+        if let Stmt::Let {
+            name,
+            mutable,
+            ty,
+            span: s,
+            ..
+        } = &b.stmts[i]
+        {
+            rest.push(Stmt::Let {
+                name: name.clone(),
+                mutable: *mutable,
+                ty: ty.clone(),
+                value: ast::Expr {
+                    id: 0,
+                    kind: ExprKind::Ident("$awaited".into()),
+                    span,
+                },
+                span: *s,
+            });
+        }
+        rest.extend(b.stmts[i + 1..].iter().cloned());
+        let body = ast::Block {
+            stmts: rest,
+            tail: b.tail.clone(),
+            span: b.span,
+        };
+        let pat = if bind {
+            PatKind::Bind("$awaited".into())
+        } else {
+            PatKind::Wild
+        };
+        let mut f = (**f).clone();
+        f.arms = vec![ast::Arm {
+            pat: ast::Pattern { kind: pat, span },
+            body: ast::Expr {
+                id: 0,
+                kind: ExprKind::Block(body),
+                span: b.span,
+            },
+        }];
+        Some(f)
+    }
+
     pub fn check_stmt(&mut self, s: &Stmt) -> Result<TStmt> {
         Ok(match s {
             Stmt::Let {
@@ -792,9 +1106,9 @@ impl<'a> Checker<'a> {
                     Some(t) => Some(self.resolve_type(t)?),
                     None => None,
                 };
-                let v = self.check_expr(value, ann.as_ref())?;
+                let mut v = self.check_expr(value, ann.as_ref())?;
                 if let Some(a) = &ann {
-                    self.coerce(&v.ty, a, value.span)?;
+                    v = self.coerce_into(v, a)?;
                 }
                 let ty = ann.unwrap_or_else(|| v.ty.clone());
                 if self.zonk(&ty) == Type::Unit {
@@ -811,7 +1125,7 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let (place, ty) = self.check_place(target)?;
-                let v = match op {
+                let mut v = match op {
                     None => self.check_expr(value, Some(&ty))?,
                     Some(op) => {
                         let cur = TExpr {
@@ -823,6 +1137,9 @@ impl<'a> Checker<'a> {
                         self.binary(*op, cur, rhs, *span)?
                     }
                 };
+                if op.is_none() {
+                    v = self.coerce_into(v, &ty)?;
+                }
                 self.coerce(&v.ty, &ty, value.span)?;
                 TStmt::Assign(place, v)
             }
@@ -881,7 +1198,7 @@ impl<'a> Checker<'a> {
                     TStmt::Continue
                 }
             }
-            Stmt::Fetch(f) => self.check_fetch(f)?,
+            Stmt::Fetch(f) => self.check_fetch(f, false)?,
             Stmt::Emit { name, value, span } => self.check_emit(name, value.as_ref(), *span)?,
         })
     }
@@ -889,11 +1206,27 @@ impl<'a> Checker<'a> {
     fn check_place(&mut self, target: &ast::Expr) -> Result<(Place, Type)> {
         match &target.kind {
             ExprKind::Ident(name) => {
+                let closed = |depth: usize| self.lambdas.iter().any(|l| !l.resumes && depth < l.base);
+                let captured = match self.lookup_local_at(name) {
+                    Some((_, _, depth)) => closed(depth),
+                    None => self.ui.is_some() && closed(0),
+                };
+                if captured {
+                    return Err(Diag::ty(target.span, format!("a closure cannot assign to `{name}`"))
+                        .help("closures capture copies of the values they use; return the new value instead"));
+                }
                 if let Some((id, mutable)) = self.lookup_local(name) {
                     if !mutable {
                         return Err(Diag::ty(target.span, format!("cannot assign to `{name}`: it is immutable"))
                             .help(format!("declare it with `var {name} = ...` to make it mutable")));
                     }
+                    let depth = self.lookup_local_at(name).unwrap().2;
+                    let e = TExpr {
+                        kind: TK::Local(id),
+                        ty: self.locals[id].ty.clone(),
+                        span: target.span,
+                    };
+                    let TK::Local(id) = self.capture(e, depth).kind else { unreachable!() };
                     return Ok((Place::Local(id), self.locals[id].ty.clone()));
                 }
                 if self.ui.is_some() {
@@ -1092,7 +1425,7 @@ impl<'a> Checker<'a> {
                 let mut out = Vec::new();
                 for it in items {
                     let t = self.check_expr(it, Some(&elem))?;
-                    self.coerce(&t.ty, &elem, it.span).map_err(|d| {
+                    let t = self.coerce_into(t, &elem).map_err(|d| {
                         Diag::ty(
                             d.span,
                             format!("array elements must all have the same type: {}", d.msg),
@@ -1107,6 +1440,17 @@ impl<'a> Checker<'a> {
             ExprKind::Range(..) => {
                 return Err(Diag::ty(e.span, "ranges can only be used in `for` loops"));
             }
+            ExprKind::Lambda { params, ret, body } => {
+                self.check_lambda(params, ret.as_ref(), body, e.span, expected)?
+            }
+            ExprKind::Await(_) => {
+                return Err(Diag::ty(e.span, "`await` can only start a statement in an event handler")
+                    .help("write `let result = await get(url) as T` directly in the handler, outside `if`, `match` and loops"));
+            }
+            ExprKind::Apply(f, args) => {
+                let f = self.check_expr(f, None)?;
+                self.call_value(f, args, e.span)?
+            }
             ExprKind::Return(v) => {
                 if self.ctx == Ctx::Render {
                     return Err(Diag::ty(
@@ -1118,8 +1462,7 @@ impl<'a> Checker<'a> {
                 let tv = match v {
                     Some(v) => {
                         let tv = self.check_expr(v, Some(&ret))?;
-                        self.coerce(&tv.ty, &ret, v.span)?;
-                        Some(Box::new(tv))
+                        Some(Box::new(self.coerce_into(tv, &ret)?))
                     }
                     None => {
                         if ret != Type::Unit {
@@ -1292,20 +1635,47 @@ impl<'a> Checker<'a> {
     }
 
     fn check_ident(&mut self, name: &str, span: Span, expected: Option<&Type>) -> Result<TExpr> {
-        if let Some((id, _)) = self.lookup_local(name) {
-            return Ok(TExpr {
+        if let Some((id, _, depth)) = self.lookup_local_at(name) {
+            let e = TExpr {
                 kind: TK::Local(id),
                 ty: self.locals[id].ty.clone(),
                 span,
-            });
+            };
+            return Ok(self.capture(e, depth));
         }
         if self.ui.is_some()
             && let Some(t) = self.ui_ident(name, span)?
         {
-            return Ok(t);
+            return Ok(self.capture(t, 0));
         }
         if let Some((adt, v)) = self.unqualified_variant(name, span)? {
             return self.check_variant(adt, v, &[], span, expected);
+        }
+        if let Some(Sym::Fn(id)) = self.scopes[self.file].get(name).copied()
+            && !self.sigs[id].server
+            && !name.starts_with("server_")
+        {
+            let targs: Vec<Type> = (0..self.sigs[id].generics.len())
+                .map(|_| self.fresh())
+                .collect();
+            let map: Vec<(String, Type)> = self.sigs[id]
+                .generics
+                .iter()
+                .cloned()
+                .zip(targs.clone())
+                .collect();
+            let ty = Type::Fn(
+                self.sigs[id].params.iter().map(|p| p.subst(&map)).collect(),
+                Box::new(self.sigs[id].ret.subst(&map)),
+            );
+            for t in &targs {
+                self.pending.push((span, t.clone()));
+            }
+            return Ok(TExpr {
+                kind: TK::FnRef(id, targs),
+                ty,
+                span,
+            });
         }
         let mut d = Diag::ty(span, format!("unknown name `{name}`"));
         if self.fetch_hidden.iter().flatten().any(|(n, ..)| n == name) {
@@ -1491,8 +1861,7 @@ impl<'a> Checker<'a> {
             }
             let ft = ft.subst(&map);
             let ta = self.check_expr(&a.value, Some(&ft))?;
-            self.coerce(&ta.ty, &ft, a.value.span)?;
-            targs_out.push(ta);
+            targs_out.push(self.coerce_into(ta, &ft)?);
         }
         self.pending.push((span, ty.clone()));
         Ok(TExpr {
@@ -1553,8 +1922,7 @@ impl<'a> Checker<'a> {
             }
             let ft = decl[i].1.subst(&map);
             let te = self.check_expr(e, Some(&ft))?;
-            self.coerce(&te.ty, &ft, e.span)?;
-            given[i] = Some(te);
+            given[i] = Some(self.coerce_into(te, &ft)?);
         }
         self.pending.push((span, ty.clone()));
         let Some(base) = base else {
@@ -1636,6 +2004,9 @@ impl<'a> Checker<'a> {
             if let Some(&(iname, params, ret)) = INTRINSICS.iter().find(|i| i.0 == name) {
                 return self.check_intrinsic(iname, params, ret, args, span);
             }
+        }
+        if let Some(f) = self.value_callee(name, callee.span)? {
+            return self.call_value(f, args, span);
         }
         match name {
             "navigate" | "copy" if self.ctx != Ctx::Handler => {
@@ -1934,8 +2305,7 @@ impl<'a> Checker<'a> {
         }
         for (a, p) in args.iter().zip(pit) {
             let ta = self.check_expr(a, Some(p))?;
-            self.coerce(&ta.ty, p, a.span)?;
-            targs_out.push(ta);
+            targs_out.push(self.coerce_into(ta, p)?);
         }
         for t in &targs {
             self.pending.push((span, t.clone()));
@@ -1945,6 +2315,208 @@ impl<'a> Checker<'a> {
             ty: ret,
             span,
         })
+    }
+
+    /// Checks `e` against `expected`, wrapping a value whose type implements the expected
+    /// interface.
+    pub fn coerce_into(&mut self, e: TExpr, expected: &Type) -> Result<TExpr> {
+        let e = self.box_iface(e, expected);
+        self.coerce(&e.ty, expected, e.span)?;
+        Ok(e)
+    }
+
+    /// `e` as a value of interface `expected` when its type implements it: a struct of
+    /// closures calling the type's methods on `e`. Otherwise `e` unchanged.
+    fn box_iface(&mut self, e: TExpr, expected: &Type) -> TExpr {
+        let (Type::Adt(ty, _), Type::Adt(iface, _)) = (self.zonk(&e.ty), self.zonk(expected))
+        else {
+            return e;
+        };
+        let Some((_, _, fns)) = self
+            .impls
+            .iter()
+            .find(|i| i.0 == ty && i.1 == iface)
+            .cloned()
+        else {
+            return e;
+        };
+        let span = e.span;
+        let ex = |kind, ty| TExpr { kind, ty, span };
+        let recv_ty = e.ty.clone();
+        let new_local = |this: &mut Self, ty: Type| {
+            this.locals.push(Local {
+                name: "$self".into(),
+                ty,
+            });
+            this.locals.len() - 1
+        };
+        let tmp = new_local(self, recv_ty.clone());
+        let mut closures = Vec::new();
+        for ((_, mt), f) in self.adts[iface].fields().to_vec().into_iter().zip(fns) {
+            let Type::Fn(ps, r) = mt.clone() else {
+                unreachable!()
+            };
+            let inner = new_local(self, recv_ty.clone());
+            let params: Vec<LocalId> = ps.iter().map(|p| new_local(self, p.clone())).collect();
+            let args = std::iter::once(ex(TK::Local(inner), recv_ty.clone()))
+                .chain(
+                    params
+                        .iter()
+                        .zip(&ps)
+                        .map(|(&l, p)| ex(TK::Local(l), p.clone())),
+                )
+                .collect();
+            let body = ex(TK::Call(f, vec![], args), *r);
+            let captures = vec![(ex(TK::Local(tmp), recv_ty.clone()), inner)];
+            closures.push(ex(
+                TK::Lambda(Box::new(TLambda {
+                    params,
+                    captures,
+                    body,
+                })),
+                mt,
+            ));
+        }
+        let obj = ex(
+            TK::StructNew(iface, vec![], closures),
+            Type::Adt(iface, vec![]),
+        );
+        ex(
+            TK::Block(vec![TStmt::Let(tmp, e)], Some(Box::new(obj))),
+            Type::Adt(iface, vec![]),
+        )
+    }
+
+    fn check_lambda(
+        &mut self,
+        params: &[(ast::Ident, Option<ast::TypeExpr>)],
+        ret: Option<&ast::TypeExpr>,
+        body: &ast::Expr,
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Result<TExpr> {
+        let (exp_ps, exp_r) = match expected.map(|t| self.zonk(t)) {
+            Some(Type::Fn(ps, r)) if ps.len() == params.len() => (Some(ps), Some(*r)),
+            _ => (None, None),
+        };
+        let mut ptys = Vec::new();
+        for (i, (_, t)) in params.iter().enumerate() {
+            ptys.push(match (t, &exp_ps) {
+                (Some(t), _) => self.resolve_type(t)?,
+                (None, Some(ps)) => ps[i].clone(),
+                (None, None) => self.fresh(),
+            });
+        }
+        let ret = match (ret, exp_r) {
+            (Some(t), _) => self.resolve_type(t)?,
+            (None, Some(r)) => r,
+            (None, None) => self.fresh(),
+        };
+        let saved = (
+            std::mem::replace(&mut self.ret, ret.clone()),
+            std::mem::replace(&mut self.loops, 0),
+            std::mem::replace(&mut self.ctx, Ctx::Fn),
+        );
+        self.lambdas.push(LambdaFrame {
+            base: self.local_scopes.len(),
+            captures: Vec::new(),
+            resumes: false,
+        });
+        self.local_scopes.push(Vec::new());
+        let r = (|| {
+            let mut ids = Vec::new();
+            for ((name, _), t) in params.iter().zip(&ptys) {
+                if ids
+                    .iter()
+                    .any(|&l: &LocalId| self.locals[l].name == name.name)
+                {
+                    return Err(Diag::ty(
+                        name.span,
+                        format!("duplicate parameter `{}`", name.name),
+                    ));
+                }
+                ids.push(self.bind(&name.name, t.clone(), false));
+            }
+            let b = self.check_expr(body, Some(&ret))?;
+            let b = if self.zonk(&ret) == Type::Unit && self.zonk(&b.ty) != Type::Never {
+                TExpr {
+                    span: b.span,
+                    kind: TK::Block(vec![TStmt::Expr(b)], None),
+                    ty: Type::Unit,
+                }
+            } else {
+                self.coerce_into(b, &ret)?
+            };
+            Ok((ids, b))
+        })();
+        self.local_scopes.pop();
+        let frame = self.lambdas.pop().unwrap();
+        (self.ret, self.loops, self.ctx) = saved;
+        let (params, body) = r?;
+        let ty = Type::Fn(ptys, Box::new(ret));
+        self.pending.push((span, ty.clone()));
+        Ok(TExpr {
+            kind: TK::Lambda(Box::new(TLambda {
+                params,
+                captures: frame.captures,
+                body,
+            })),
+            ty,
+            span,
+        })
+    }
+
+    /// Calls the function value `f`.
+    fn call_value(&mut self, f: TExpr, args: &[ast::Arg], span: Span) -> Result<TExpr> {
+        let Type::Fn(ps, r) = self.zonk(&f.ty) else {
+            return Err(Diag::ty(
+                f.span,
+                format!("`{}` is not a function", self.show(&f.ty)),
+            ));
+        };
+        if let Some(n) = args.iter().find_map(|a| a.name.as_ref()) {
+            return Err(Diag::ty(n.span, "function arguments are positional"));
+        }
+        if args.len() != ps.len() {
+            return Err(Diag::ty(
+                span,
+                format!(
+                    "this function takes {} argument(s), but {} were given",
+                    ps.len(),
+                    args.len()
+                ),
+            ));
+        }
+        let mut out = Vec::new();
+        for (a, p) in args.iter().zip(&ps) {
+            let ta = self.check_expr(&a.value, Some(p))?;
+            out.push(self.coerce_into(ta, p)?);
+        }
+        Ok(TExpr {
+            kind: TK::CallValue(Box::new(f), out),
+            ty: *r,
+            span,
+        })
+    }
+
+    /// A local, or a component value not shadowed by a function, that holds a function.
+    fn value_callee(&mut self, name: &str, span: Span) -> Result<Option<TExpr>> {
+        let is_fn = |this: &Self, t: &Type| matches!(this.zonk(t), Type::Fn(..));
+        if let Some((id, _)) = self.lookup_local(name) {
+            return Ok(if is_fn(self, &self.locals[id].ty) {
+                Some(self.check_ident(name, span, None)?)
+            } else {
+                None
+            });
+        }
+        if self.ui.is_some()
+            && !matches!(self.scopes[self.file].get(name), Some(Sym::Fn(_)))
+            && let Some(t) = self.ui_ident(name, span)?
+            && is_fn(self, &t.ty)
+        {
+            return Ok(Some(self.capture(t, 0)));
+        }
+        Ok(None)
     }
 
     fn check_method(
@@ -1961,8 +2533,51 @@ impl<'a> Checker<'a> {
         {
             return self.check_variant(adt, v, args, span, expected);
         }
+        let args_e: Vec<ast::Expr> = args.iter().map(|a| a.value.clone()).collect();
+        // `Type.function(args)`: a method without `self`.
+        if let ExprKind::Ident(q) = &recv.kind
+            && self.lookup_local(q).is_none()
+            && let Some(Sym::Fn(id)) = self.scopes[self.file]
+                .get(&format!("{q}.{}", name.name))
+                .copied()
+        {
+            return self.call_fn(id, type_args, args_e, args, span, None);
+        }
         let r = self.check_expr(recv, None)?;
         let rt = self.zonk(&r.ty);
+        if let Type::Adt(id, targs) = &rt
+            && matches!(self.adts[*id].kind, AdtKind::Struct(_))
+        {
+            let method = format!("{}.{}", self.adts[*id].name, name.name);
+            if let Some(Sym::Fn(f)) = self.scopes[self.file].get(&method).copied() {
+                return self.call_fn(f, type_args, args_e, args, span, Some(r));
+            }
+            let map: Vec<(String, Type)> = self.adts[*id]
+                .generics
+                .iter()
+                .cloned()
+                .zip(targs.clone())
+                .collect();
+            if let Some(i) = self.adts[*id]
+                .fields()
+                .iter()
+                .position(|(n, _)| *n == name.name)
+                && let ft @ Type::Fn(..) = self.adts[*id].fields()[i].1.subst(&map)
+            {
+                let field = TExpr {
+                    kind: TK::Field(Box::new(r), i),
+                    ty: ft,
+                    span: name.span,
+                };
+                return self.call_value(field, args, span);
+            }
+        } else if let Type::Adt(id, _) = &rt
+            && let Some(Sym::Fn(f)) = self.scopes[self.file]
+                .get(&format!("{}.{}", self.adts[*id].name, name.name))
+                .copied()
+        {
+            return self.call_fn(f, type_args, args_e, args, span, Some(r));
+        }
         let prefix = match &rt {
             Type::Int => Some("int"),
             Type::Float => Some("float"),
@@ -1974,7 +2589,6 @@ impl<'a> Checker<'a> {
             Type::Adt(id, _) if *id == self.prelude_adt("HttpError") => Some("http"),
             _ => None,
         };
-        let args_e: Vec<ast::Expr> = args.iter().map(|a| a.value.clone()).collect();
         if let Some(p) = prefix
             && let Some(id) = self.prelude_fn(&format!("{p}_{}", name.name))
         {
@@ -2219,6 +2833,7 @@ fn stmt_diverges(s: &TStmt) -> bool {
 fn has_var(t: &Type) -> bool {
     match t {
         Type::Var(_) => true,
+        Type::Fn(ps, r) => ps.iter().any(has_var) || has_var(r),
         Type::Array(t) => has_var(t),
         Type::Adt(_, a) => a.iter().any(has_var),
         _ => false,
@@ -2229,6 +2844,10 @@ fn has_var(t: &Type) -> bool {
 fn default_vars(t: &Type) -> Type {
     match t {
         Type::Var(_) => Type::Unit,
+        Type::Fn(ps, r) => Type::Fn(
+            ps.iter().map(default_vars).collect(),
+            Box::new(default_vars(r)),
+        ),
         Type::Array(t) => Type::Array(Box::new(default_vars(t))),
         Type::Adt(id, a) => Type::Adt(*id, a.iter().map(default_vars).collect()),
         _ => t.clone(),

@@ -1,0 +1,42 @@
+// Browser-test fixture: closures that read component state, and a function-typed property.
+app "Closures"
+
+interface Badge {
+    fn label(self) -> String
+}
+
+struct Star {
+    n: Int,
+}
+
+impl Badge for Star {
+    fn label(self) -> String {
+        "star {self.n}"
+    }
+}
+
+component Tag(n: Int, format: fn(Int) -> String) {
+    item(format(n))
+}
+
+component App {
+    state min = 2
+    state prefix = "#"
+    let shown = [1, 2, 3, 4].filter(|n| n >= min)
+    let badge: Badge = Star { n: min }
+
+    main {
+        list {
+            for n in shown key n {
+                Tag(n: n, format: |x| "{prefix}{x}")
+            }
+        }
+        paragraph(badge.label())
+        button("More") {
+            on click {
+                min += 1
+                prefix = "n"
+            }
+        }
+    }
+}

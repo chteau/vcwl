@@ -1,0 +1,7 @@
+// error: type error: `Self` is only available inside `impl` blocks
+fn make() -> Self {
+    make()
+}
+
+fn main() {
+}
