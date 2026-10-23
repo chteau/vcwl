@@ -50,6 +50,7 @@ component App {
     state items: [Item] = []
     state status: String = "idle"
     state show_loader: Bool = true
+    state branch_flag: Bool = false
 
     column {
         button("Load") {
@@ -81,6 +82,20 @@ component App {
                     Err(e) => e.message(),
                 }
                 status = "{prefix} {steps} {count} {err} {items.len()}"
+            }
+        }
+        button("Await branch") {
+            on click {
+                let fetching = !branch_flag
+                branch_flag = fetching
+                var note = "skipped"
+                if fetching {
+                    let r = await get("api/items") as [Item]
+                    note = "fetched {r.unwrap_or([]).len()}"
+                } else {
+                    note = "local"
+                }
+                status = "branch {note}"
             }
         }
         button("Create") {

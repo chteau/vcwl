@@ -87,7 +87,7 @@ test("a response for a destroyed component is discarded", async () => {
   while (!releaseSlow) await new Promise((r) => setTimeout(r, 20));
   const slots = await app.page.evaluate(() => window.vcwl.exports.live_slots());
   await click("Toggle loader");
-  assert.equal(await count(app.page, "button"), 9);
+  assert.equal(await count(app.page, "button"), 10);
   releaseSlow();
   // The request's slot is released when its response arrives (polled: the suite runs in
   // parallel, so the response can take a while).
@@ -106,4 +106,11 @@ test("await runs the rest of the handler with its values when each response arri
   const s = await waitStatus(/^await /);
   assert.match(s, /^await 2 2 \S.* \d+$/);
   assert.doesNotMatch(s, / none /);
+});
+
+test("await inside an if branch resumes the code after the if on both paths", async () => {
+  await click("Await branch");
+  assert.equal(await waitStatus(/^branch /), "branch fetched 2");
+  await click("Await branch");
+  assert.equal(await waitStatus(/^branch local/), "branch local");
 });

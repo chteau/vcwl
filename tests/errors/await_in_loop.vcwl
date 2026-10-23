@@ -1,0 +1,13 @@
+// error: `await` can only start a statement in an event handler
+component App {
+    state status: String = ""
+
+    button("Go") {
+        on click {
+            for i in 0..3 {
+                let r = await get("api/items") as Int
+            }
+            status = "done"
+        }
+    }
+}

@@ -76,6 +76,8 @@ pub struct Checker<'a> {
     /// The block about to be checked may contain `await` statements (a handler's body, or what
     /// follows an `await`).
     pub await_top: bool,
+    /// Branch blocks of a rewritten `if`/`match` that may themselves contain `await` statements.
+    await_blocks: Vec<*const ast::Block>,
 }
 
 struct LambdaFrame {
@@ -169,6 +171,7 @@ impl<'a> Checker<'a> {
             impls: Vec::new(),
             self_ty: None,
             await_top: false,
+            await_blocks: Vec::new(),
         }
     }
 
@@ -1010,7 +1013,8 @@ impl<'a> Checker<'a> {
     fn check_block_inner(&mut self, b: &ast::Block, expected: Option<&Type>) -> Result<TExpr> {
         let mut stmts = Vec::new();
         let mut diverges = false;
-        let await_top = std::mem::replace(&mut self.await_top, false);
+        let await_top = std::mem::replace(&mut self.await_top, false)
+            || self.await_blocks.contains(&(b as *const ast::Block));
         for (i, s) in b.stmts.iter().enumerate() {
             if await_top && let Some(f) = self.await_split(b, i) {
                 stmts.push(self.check_fetch(&f, true)?);
@@ -1020,9 +1024,33 @@ impl<'a> Checker<'a> {
                     span: b.span,
                 });
             }
+            if await_top
+                && let Stmt::Expr(e) = s
+                && branch_awaits(e)
+            {
+                let rewritten = Stmt::Expr(append_continuation(e, &b.stmts[i + 1..], &b.tail));
+                stmts.push(self.check_await_branches(&rewritten)?);
+                return Ok(TExpr {
+                    kind: TK::Block(stmts, None),
+                    ty: Type::Unit,
+                    span: b.span,
+                });
+            }
             let ts = self.check_stmt(s)?;
             diverges |= stmt_diverges(&ts);
             stmts.push(ts);
+        }
+        if await_top
+            && let Some(t) = &b.tail
+            && branch_awaits(t)
+        {
+            let rewritten = Stmt::Expr(append_continuation(t, &[], &None));
+            stmts.push(self.check_await_branches(&rewritten)?);
+            return Ok(TExpr {
+                kind: TK::Block(stmts, None),
+                ty: Type::Unit,
+                span: b.span,
+            });
         }
         let tail = match &b.tail {
             Some(t) => Some(Box::new(self.check_expr(t, expected)?)),
@@ -1038,6 +1066,18 @@ impl<'a> Checker<'a> {
             ty,
             span: b.span,
         })
+    }
+
+    /// Checks an `if`/`match` statement produced by `append_continuation`, letting each branch
+    /// block split at its own `await` statements.
+    fn check_await_branches(&mut self, s: &Stmt) -> Result<TStmt> {
+        let mark = self.await_blocks.len();
+        if let Stmt::Expr(e) = s {
+            collect_branch_blocks(e, &mut self.await_blocks);
+        }
+        let r = self.check_stmt(s);
+        self.await_blocks.truncate(mark);
+        r
     }
 
     /// When statement `i` of `b` is `[let x =] await f(...)`: a `fetch` whose single arm binds
@@ -1447,7 +1487,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Await(_) => {
                 return Err(Diag::ty(e.span, "`await` can only start a statement in an event handler")
-                    .help("write `let result = await get(url) as T` directly in the handler, outside `if`, `match` and loops"));
+                    .help("write `let result = await get(url) as T` directly in the handler, or at the top of an `if`/`match` branch there; `await` cannot be used inside loops, closures or outside handlers"));
             }
             ExprKind::Apply(f, args) => {
                 let f = self.check_expr(f, None)?;
@@ -2922,6 +2962,115 @@ fn place_read(p: &Place) -> TK {
     match p {
         Place::Local(id) => TK::Local(*id),
         Place::CompVar(i) => TK::CompVar(*i),
+    }
+}
+
+fn is_await(e: &ast::Expr) -> bool {
+    matches!(e.kind, ExprKind::Await(_))
+}
+
+fn block_awaits(b: &ast::Block) -> bool {
+    b.stmts.iter().any(|s| match s {
+        Stmt::Let { value, .. } => is_await(value),
+        Stmt::Expr(v) => is_await(v) || branch_awaits(v),
+        _ => false,
+    }) || b.tail.as_deref().is_some_and(|t| is_await(t) || branch_awaits(t))
+}
+
+fn arm_awaits(e: &ast::Expr) -> bool {
+    match &e.kind {
+        ExprKind::Block(b) => block_awaits(b),
+        _ => is_await(e) || branch_awaits(e),
+    }
+}
+
+/// Whether `e` is an `if`/`match` with an `await` statement at the top level of some branch.
+fn branch_awaits(e: &ast::Expr) -> bool {
+    match &e.kind {
+        ExprKind::If { then, els, .. } => block_awaits(then) || els.as_deref().is_some_and(arm_awaits),
+        ExprKind::Match { arms, .. } => arms.iter().any(|a| arm_awaits(&a.body)),
+        _ => false,
+    }
+}
+
+/// Rewrites an `if`/`match` statement so every branch ends with the statements that followed it.
+fn append_continuation(e: &ast::Expr, rest: &[Stmt], tail: &Option<Box<ast::Expr>>) -> ast::Expr {
+    let extend = |b: &ast::Block| -> ast::Block {
+        let mut stmts = b.stmts.clone();
+        if let Some(t) = &b.tail {
+            stmts.push(Stmt::Expr((**t).clone()));
+        }
+        stmts.extend(rest.iter().cloned());
+        ast::Block {
+            stmts,
+            tail: tail.clone(),
+            span: b.span,
+        }
+    };
+    let branch = |x: &ast::Expr| -> ast::Expr {
+        let kind = match &x.kind {
+            ExprKind::Block(b) => ExprKind::Block(extend(b)),
+            ExprKind::If { .. } => return append_continuation(x, rest, tail),
+            _ => ExprKind::Block(extend(&ast::Block {
+                stmts: Vec::new(),
+                tail: Some(Box::new(x.clone())),
+                span: x.span,
+            })),
+        };
+        ast::Expr {
+            id: x.id,
+            kind,
+            span: x.span,
+        }
+    };
+    let kind = match &e.kind {
+        ExprKind::If { cond, then, els } => {
+            let empty = ast::Expr {
+                id: 0,
+                kind: ExprKind::Block(ast::Block {
+                    stmts: Vec::new(),
+                    tail: None,
+                    span: e.span,
+                }),
+                span: e.span,
+            };
+            ExprKind::If {
+                cond: cond.clone(),
+                then: extend(then),
+                els: Some(Box::new(branch(els.as_deref().unwrap_or(&empty)))),
+            }
+        }
+        ExprKind::Match { scrut, arms } => ExprKind::Match {
+            scrut: scrut.clone(),
+            arms: arms
+                .iter()
+                .map(|a| ast::Arm {
+                    pat: a.pat.clone(),
+                    body: branch(&a.body),
+                })
+                .collect(),
+        },
+        _ => e.kind.clone(),
+    };
+    ast::Expr {
+        id: e.id,
+        kind,
+        span: e.span,
+    }
+}
+
+/// The branch blocks of a rewritten `if`/`match`, which are checked in await position.
+fn collect_branch_blocks(e: &ast::Expr, out: &mut Vec<*const ast::Block>) {
+    match &e.kind {
+        ExprKind::If { then, els, .. } => {
+            out.push(then as *const ast::Block);
+            if let Some(x) = els {
+                collect_branch_blocks(x, out);
+            }
+        }
+        ExprKind::Match { arms, .. } => arms.iter().for_each(|a| collect_branch_blocks(&a.body, out)),
+        ExprKind::Block(b) => out.push(b as *const ast::Block),
+        _ => {}
     }
 }
 
