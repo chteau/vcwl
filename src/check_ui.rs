@@ -84,6 +84,17 @@ pub struct TComp {
     pub body: Vec<TView>,
     pub handlers: Vec<THandler>,
     pub mount_handlers: Vec<usize>,
+    pub js_handlers: Vec<TJsHandler>,
+}
+
+/// `on js "name"(param: T)`: a handler run when JavaScript dispatches event `name`. The host
+/// delivers the value as JSON handle 0; `ok` tells whether it decodes as `T`, and the
+/// handler decodes it again into its parameter.
+#[derive(Clone, Debug)]
+pub struct TJsHandler {
+    pub name: String,
+    pub handler: usize,
+    pub ok: TExpr,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -776,10 +787,12 @@ impl Checker<'_> {
             sheet,
             handlers: Vec::new(),
             mount: Vec::new(),
+            js: Vec::new(),
             root_classes: Vec::new(),
         };
         let body = self.check_views(&c.body, &mut cx, true)?;
-        let (handlers, mount, root_classes) = (cx.handlers, cx.mount, cx.root_classes);
+        let (handlers, mount, js_handlers, root_classes) =
+            (cx.handlers, cx.mount, cx.js, cx.root_classes);
         let mut body = body;
         if !root_classes.is_empty() {
             let elems: Vec<&mut TView> = body.iter_mut().collect();
@@ -821,6 +834,7 @@ impl Checker<'_> {
                 body,
                 handlers,
                 mount_handlers: mount,
+                js_handlers,
             },
             None,
         ))
@@ -893,6 +907,22 @@ impl Checker<'_> {
                             "`event` must be declared at the top level of a component",
                         ));
                     }
+                }
+                View::JsOn {
+                    name,
+                    param,
+                    ty,
+                    body,
+                    span,
+                } => {
+                    if !top {
+                        return Err(Diag::ty(
+                            *span,
+                            "`on js` must appear at the top level of a component",
+                        ));
+                    }
+                    let js = self.check_js_handler(name, param, ty, body, *span, cx)?;
+                    cx.js.push(js);
                 }
                 View::SlotDecl { span, .. } => {
                     if !top {
@@ -1164,6 +1194,67 @@ impl Checker<'_> {
                 Err(d)
             }
         }
+    }
+
+    /// `on js "name"(param: T) { body }`: the handler binds `param` to the decoded value.
+    fn check_js_handler(
+        &mut self,
+        name: &str,
+        param: &ast::Ident,
+        ty: &ast::TypeExpr,
+        body: &ast::Block,
+        span: Span,
+        cx: &mut ViewCx,
+    ) -> Result<TJsHandler> {
+        if name.is_empty() {
+            return Err(Diag::ty(span, "a JavaScript event needs a name"));
+        }
+        let t = self.resolve_type(ty)?;
+        let dec = self.json_decoder(&t, ty.span)?;
+        let h = self.check_handler(Some(param), Payload::Event, Some(t.clone()), body)?;
+        let p = h.param.expect("js handler parameter");
+        let result = self.prelude_adt("Result");
+        let targs = vec![t, Type::Str];
+        let rty = Type::Adt(result, targs.clone());
+        let e = |kind: TK, ty: Type| TExpr { kind, ty, span };
+        let decoded = || {
+            e(
+                TK::Call(dec, vec![], vec![e(TK::Int(0), Type::Int)]),
+                rty.clone(),
+            )
+        };
+        let ok_pat = |sub: TPat| TPat::Variant(result, targs.clone(), 0, vec![sub]);
+        let run = e(
+            TK::Match(
+                Box::new(decoded()),
+                vec![
+                    (ok_pat(TPat::Bind(p)), h.body),
+                    (TPat::Wild, e(TK::Unit, Type::Unit)),
+                ],
+            ),
+            Type::Unit,
+        );
+        let ok = e(
+            TK::Match(
+                Box::new(decoded()),
+                vec![
+                    (ok_pat(TPat::Wild), e(TK::Bool(true), Type::Bool)),
+                    (TPat::Wild, e(TK::Bool(false), Type::Bool)),
+                ],
+            ),
+            Type::Bool,
+        );
+        cx.handlers.push(THandler {
+            param: None,
+            payload: Payload::None,
+            event_ty: None,
+            body: run,
+        });
+        Ok(TJsHandler {
+            name: name.to_string(),
+            handler: cx.handlers.len() - 1,
+            ok,
+        })
     }
 
     fn check_handler(
@@ -2030,6 +2121,7 @@ struct ViewCx<'s> {
     sheet: &'s mut Sheet,
     handlers: Vec<THandler>,
     mount: Vec<usize>,
+    js: Vec<TJsHandler>,
     root_classes: Vec<String>,
 }
 

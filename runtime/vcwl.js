@@ -1209,6 +1209,27 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
     host.call((x) => x.set_route(host.writeIO(path)));
     input(() => r.scroll_to_top());
   };
+  /** Delivers `value` (as JSON) to every mounted `on js "<name>"` handler of the app. */
+  host.dispatch = (name, value) => {
+    let parsed;
+    try {
+      parsed = JSON.parse(JSON.stringify(value) ?? "null");
+    } catch (e) {
+      console.warn(`[vcwl] event "${name}" ignored: its value cannot be encoded as JSON (${e.message})`);
+      return;
+    }
+    host.call((x) => {
+      const json = host.json;
+      json.length = 0;
+      json.push(parsed);
+      try {
+        const failed = x.js_event(host.writeIO(String(name)));
+        if (failed) console.warn(`[vcwl] event "${name}" ignored by ${failed} handler(s): its value does not match their type`);
+      } finally {
+        json.length = 0;
+      }
+    });
+  };
   host.showError = (msg) => {
     host.error = msg;
     replay();

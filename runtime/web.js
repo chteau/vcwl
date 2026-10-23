@@ -22,6 +22,10 @@ const utf8 = new TextEncoder();
 const sha256 = async (text) => new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(text)));
 const loc = (locale) => locale || undefined;
 
+// Open WebSockets by id, with the messages sent before they opened.
+const sockets = new Map();
+let nextSocket = 1;
+
 export default {
   // URL, history, navigation
   location: () => location.href,
@@ -89,6 +93,33 @@ export default {
   },
   close_window: () => window.close(),
   has_opener: () => !!window.opener,
+
+  // WebSockets
+  websocket: (url, event) => {
+    const id = nextSocket++;
+    const ws = new WebSocket(new URL(url, location.href).href.replace(/^http/, "ws"));
+    const entry = { ws, pending: [] };
+    sockets.set(id, entry);
+    ws.addEventListener("open", () => {
+      for (const text of entry.pending) ws.send(text);
+      entry.pending = [];
+    });
+    ws.addEventListener("message", (e) => {
+      if (typeof e.data === "string") window.vcwl?.dispatch(event, e.data);
+    });
+    ws.addEventListener("close", () => sockets.delete(id));
+    return id;
+  },
+  ws_send: (id, text) => {
+    const s = sockets.get(id);
+    if (!s) return;
+    if (s.ws.readyState === WebSocket.CONNECTING) s.pending.push(text);
+    else if (s.ws.readyState === WebSocket.OPEN) s.ws.send(text);
+  },
+  ws_close: (id) => {
+    sockets.get(id)?.ws.close();
+    sockets.delete(id);
+  },
 
   // storage
   local_get(key) {

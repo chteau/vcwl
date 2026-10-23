@@ -1,0 +1,27 @@
+// JavaScript -> app events: `on js "name"(msg: T)` handlers.
+app "Events" {
+}
+
+struct Msg {
+    from: String,
+    text: String,
+}
+
+component App {
+    state last: String = "none"
+    state count: Int = 0
+
+    on js "chat"(msg: Msg) {
+        last = "{msg.from}: {msg.text}"
+        count = count + 1
+    }
+
+    on js "tick"(n: Int) {
+        count = count + n
+    }
+
+    column(gap: 4px, padding: 8px) {
+        paragraph("last={last}")
+        paragraph("count={count}")
+    }
+}

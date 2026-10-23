@@ -381,6 +381,14 @@ pub enum View {
         body: Block,
         span: Span,
     },
+    /// `on js "name"(param: Type) { ... }` runs when JavaScript dispatches event `name`.
+    JsOn {
+        name: String,
+        param: Ident,
+        ty: TypeExpr,
+        body: Block,
+        span: Span,
+    },
     /// `event name(Type)` declares an event the component can emit to its parent.
     Event {
         name: Ident,

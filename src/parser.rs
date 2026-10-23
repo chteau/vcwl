@@ -1671,6 +1671,28 @@ impl<'a> Parser<'a> {
                 span: start.to(self.prev_span()),
             });
         }
+        if self.is_kw("on")
+            && matches!(self.peek_at(1), Tok::Ident(s) if s == "js")
+            && matches!(self.peek_at(2), Tok::Str(_))
+        {
+            self.bump();
+            self.bump();
+            let name = self.plain_str("a JavaScript event name")?;
+            self.expect("(")
+                .map_err(|d| d.help("name the event's value: `on js \"chat\"(msg: Message) { ... }`"))?;
+            let param = self.ident()?;
+            self.expect(":")?;
+            let ty = self.type_expr()?;
+            self.expect(")")?;
+            let body = self.block()?;
+            return Ok(View::JsOn {
+                name,
+                param,
+                ty,
+                body,
+                span: start.to(self.prev_span()),
+            });
+        }
         if self.is_kw("on") && matches!(self.peek_at(1), Tok::Ident(_)) {
             self.bump();
             let event = self.ident()?;

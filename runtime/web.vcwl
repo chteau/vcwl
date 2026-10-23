@@ -70,6 +70,16 @@ export extern fn close_window()
 /// Whether this page was opened by another window.
 export extern fn has_opener() -> Bool
 
+// ----- WebSockets -----
+
+/// Opens a WebSocket to `url` and returns its id. Each text message arrives as JavaScript
+/// event `event`, handled with `on js "<event>"(text: String) { ... }`.
+export extern fn websocket(url: String, event: String) -> Int
+/// Sends `text` on socket `id` (queued until it is open; ignored once closed).
+export extern fn ws_send(id: Int, text: String)
+/// Closes socket `id`.
+export extern fn ws_close(id: Int)
+
 // ----- storage (needs the app's `storage` capability) -----
 
 export extern fn local_get(key: String) -> String?

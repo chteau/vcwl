@@ -18,8 +18,8 @@
 use std::collections::HashMap;
 
 use crate::check_ui::{
-    AttrKind, CompSig, Payload, Special, SwitchKind, TComp, TElem, TFill, TVarKind, TView,
-    route_params,
+    AttrKind, CompSig, Payload, Special, SwitchKind, TComp, TElem, TFill, TJsHandler, TVarKind,
+    TView, route_params,
 };
 use crate::diag::{SourceMap, Span};
 use crate::ir::*;
@@ -60,6 +60,8 @@ pub mod opc {
 
 /// Handler-slot kinds at or above this value are pending `fetch` requests.
 const FETCH_KIND_BASE: i32 = 1 << 16;
+/// Handler-slot kinds at or above this value are mounted `on js` handlers.
+const JS_KIND_BASE: i32 = 1 << 24;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScopeRef {
@@ -148,6 +150,9 @@ pub struct UiState {
     in_handler: bool,
     /// Continuations of `fetch` statements: (scope, function).
     fetch_kinds: Vec<(usize, u32)>,
+    /// `on js` handlers: event name, scope and function `(scope) -> i32` (0 when the value
+    /// does not decode); the index is the kind id above `JS_KIND_BASE`.
+    js_kinds: Vec<(String, usize, u32)>,
     defaults: HashMap<(usize, usize), u32>,
     g: Globals,
     any_arr: u32,
@@ -228,6 +233,7 @@ impl UiState {
             handler_fns: HashMap::new(),
             in_handler: false,
             fetch_kinds: Vec::new(),
+            js_kinds: Vec::new(),
             defaults: HashMap::new(),
             g: Globals::default(),
             any_arr: 0,
@@ -1260,6 +1266,28 @@ impl Lower<'_> {
             for &h in &comp.mount_handlers {
                 let f = self.handler_fn(ci, h, si);
                 g.mb.push(IExpr::Call(FuncRef::Local(f), vec![get(0)]));
+            }
+            // `on js` handlers hold a handler slot while mounted; `js_event` scans them.
+            for jh in &comp.js_handlers {
+                let f = self.js_fn(ci, jh, si);
+                let kind = {
+                    let u = self.u();
+                    u.js_kinds.push((jh.name.clone(), si, f));
+                    JS_KIND_BASE + u.js_kinds.len() as i32 - 1
+                };
+                let alloc = self.helper_alloc_slot();
+                let release = self.helper_release_slot();
+                let sf = self.add_field(si, VT::I32);
+                g.mb.push(IExpr::StructSet(
+                    ty,
+                    sf,
+                    b(get(0)),
+                    b(IExpr::Call(alloc, vec![get(0), IExpr::I32(kind)])),
+                ));
+                g.db.push(IExpr::Call(
+                    release,
+                    vec![IExpr::StructGet(ty, sf, b(get(0)))],
+                ));
             }
         }
         self.finish_scope(g);
@@ -3550,6 +3578,39 @@ impl Lower<'_> {
         idx
     }
 
+    /// `(scope) -> i32`: runs `on js` handler `jh` if the delivered value decodes, else
+    /// returns 0.
+    fn js_fn(&mut self, comp: usize, jh: &TJsHandler, si: usize) -> u32 {
+        let run = self.handler_fn(comp, jh.handler, si);
+        let c = self.u().comps[comp].clone();
+        let params = vec![VT::Ref(self.scope_ty(si))];
+        let mut cx = FnCx::new(params.clone(), c.locals.clone(), vec![]);
+        cx.scope = Some(ScopeRef {
+            scope: si,
+            local: 0,
+        });
+        let ok = self.expr(&mut cx, &jh.ok);
+        let body = vec![
+            IExpr::If(
+                None,
+                b(un(UnOp::I32Eqz, ok)),
+                vec![IExpr::Return(Some(b(IExpr::I32(0))))],
+                vec![],
+            ),
+            IExpr::Call(FuncRef::Local(run), vec![get(0)]),
+            IExpr::I32(1),
+        ];
+        self.m.funcs.push(Func {
+            name: format!("{}_js{}", c.name, jh.handler),
+            params,
+            result: Some(VT::I32),
+            locals: cx.body_locals(),
+            body,
+            export: None,
+        });
+        self.m.funcs.len() as u32 - 1
+    }
+
     /// Updates the component of scope `si` if a handler changed any of its state.
     fn handler_epilogue(&mut self, cx: &mut FnCx, si: usize) -> Vec<IExpr> {
         let root = self.comp_root_of(si);
@@ -3800,6 +3861,99 @@ impl Lower<'_> {
                     IExpr::Call(flush, vec![]),
                 ],
                 export: Some("fetch_done".into()),
+            });
+        }
+        // js_event(name_len): runs every mounted `on js` handler for the event named in the
+        // I/O region with JSON handle 0 as its value; returns how many could not decode it.
+        let js = self.u().js_kinds.clone();
+        {
+            let str_eq = self.fns.iter().position(|f| f.name == "str_eq").unwrap();
+            let str_eq = FuncRef::Local(self.fn_inst(str_eq, &[]));
+            let (name_len, name, slot, n, scope, k, failed) = (0, 1, 2, 3, 4, 5, 6);
+            let mut arms = Vec::new();
+            for (i, (event, si, f)) in js.iter().enumerate() {
+                let sty = self.scope_ty(*si);
+                let lit = self.string_const(event);
+                arms.push((
+                    i,
+                    IExpr::If(
+                        None,
+                        b(IExpr::Call(str_eq, vec![get(name), lit])),
+                        vec![set(
+                            failed,
+                            bin(
+                                Op::I32Add,
+                                get(failed),
+                                un(
+                                    UnOp::I32Eqz,
+                                    IExpr::Call(
+                                        FuncRef::Local(*f),
+                                        vec![IExpr::RefCast(sty, b(get(scope)))],
+                                    ),
+                                ),
+                            ),
+                        )],
+                        vec![],
+                    ),
+                ));
+            }
+            let str_ty = self.str_ty;
+            self.m.funcs.push(Func {
+                name: "js_event".into(),
+                params: vec![VT::I32],
+                result: Some(VT::I32),
+                locals: vec![VT::Ref(str_ty), VT::I32, VT::I32, VT::Any, VT::I32, VT::I32],
+                body: vec![
+                    IExpr::If(
+                        None,
+                        b(un(UnOp::RefIsNull, IExpr::GlobalGet(g.slot_scope))),
+                        vec![IExpr::Return(Some(b(IExpr::I32(0))))],
+                        vec![],
+                    ),
+                    set(name, IExpr::Call(from, vec![get(name_len)])),
+                    // Slots taken by handlers that these handlers mount are not visited.
+                    set(n, IExpr::GlobalGet(g.slot_n)),
+                    for_range(
+                        slot,
+                        get(n),
+                        vec![
+                            set(
+                                scope,
+                                IExpr::ArrayGet(
+                                    any_arr,
+                                    b(IExpr::GlobalGet(g.slot_scope)),
+                                    b(get(slot)),
+                                ),
+                            ),
+                            set(
+                                k,
+                                bin(
+                                    Op::I32Sub,
+                                    IExpr::ArrayGet(
+                                        i32_arr,
+                                        b(IExpr::GlobalGet(g.slot_kind)),
+                                        b(get(slot)),
+                                    ),
+                                    IExpr::I32(JS_KIND_BASE),
+                                ),
+                            ),
+                            IExpr::If(
+                                None,
+                                b(bin(
+                                    Op::I32And,
+                                    un(UnOp::I32Eqz, un(UnOp::RefIsNull, get(scope))),
+                                    bin(Op::I32GeS, get(k), IExpr::I32(0)),
+                                )),
+                                vec![switch_on(get(k), arms)],
+                                vec![],
+                            ),
+                        ],
+                        902,
+                    ),
+                    IExpr::Call(flush, vec![]),
+                    get(failed),
+                ],
+                export: Some("js_event".into()),
             });
         }
         // live_slots(): handler slots currently registered (for leak tests).
