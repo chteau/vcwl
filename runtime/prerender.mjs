@@ -8,7 +8,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [dist, routesJson] = process.argv.slice(1);
-const { createHost, reader, OUT } = await import(pathToFileURL(path.join(dist, "vcwl.js")));
+const { createHost, reader, OUT, DESCRIPTION_MARK } = await import(pathToFileURL(path.join(dist, "vcwl.js")));
 const FETCH_OK = 0, FETCH_NETWORK = 1, FETCH_STATUS = 3, FETCH_INVALID = 4;
 const BASE = "http://prerender.invalid/";
 const app = await WebAssembly.compile(fs.readFileSync(path.join(dist, "app.wasm")));
@@ -18,7 +18,7 @@ const decoder = new TextDecoder();
 
 async function page(route, root) {
   const host = createHost({ print: () => {} });
-  let pending = 0, x;
+  let pending = 0, x, appTitle, title, description;
   // Layout is the browser's job here; widths only need to be plausible.
   const r = (await WebAssembly.instantiate(render, { host: { measure: (fp, fl, spacing, tp, tl) => tl * 8 } })).exports;
   const put = (bytes) => {
@@ -54,7 +54,13 @@ async function page(route, root) {
             b.int();
             b.str();
             break;
-          case OUT.TITLE:
+          case OUT.TITLE: {
+            const s = b.str();
+            if (s.startsWith(DESCRIPTION_MARK)) description = s.slice(DESCRIPTION_MARK.length);
+            else if (appTitle === undefined) appTitle = s;
+            else title = s;
+            break;
+          }
           case OUT.NAVIGATE:
           case OUT.WARN:
           case OUT.CURSOR:
@@ -105,7 +111,15 @@ async function page(route, root) {
   call((x) => x.start());
   for (let i = 0; pending && i < 100; i++) await new Promise((r) => setImmediate(r));
   const n = r.prerender(put(new TextEncoder().encode(root)));
-  return decoder.decode(new Uint8Array(r.memory.buffer, r.out_ptr(), n));
+  let out = decoder.decode(new Uint8Array(r.memory.buffer, r.out_ptr(), n));
+  // The page's metadata (`meta(...)`) as rendered for this route.
+  if (title !== undefined && title !== appTitle) out += `<title>${escape(title)}</title>`;
+  if (description !== undefined) out += `<meta name="description" content="${escape(description)}">`;
+  return out;
+}
+
+function escape(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 }
 
 for (const [route, root] of JSON.parse(routesJson)) process.stdout.write(`${await page(route, root)}\0`);

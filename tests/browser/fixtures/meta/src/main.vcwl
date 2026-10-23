@@ -1,0 +1,40 @@
+// Browser-test fixture: per-route `meta` (title, description) and very long texts.
+app "Meta"
+
+component Home {
+    state visits: Int = 0
+    state big: String = ""
+
+    meta(title: "Home {visits}", description: "The home page")
+    column(gap: 8px) {
+        heading("Home page", level: 1)
+        button("Visit") {
+            on click {
+                visits += 1
+            }
+        }
+        button("Big") {
+            on click {
+                big = "0123456789".repeat(20000) + "END"
+            }
+        }
+        paragraph(big)
+    }
+}
+
+component App {
+    column(gap: 16px) {
+        row(gap: 12px) {
+            link("Home", to: "/")
+            link("About", to: "/about")
+        }
+        routes {
+            "/" => Home()
+            "/about" => column {
+                meta(title: "About us", description: "Who we are")
+                heading("About page", level: 1)
+            }
+            _ => heading("Not found", level: 1)
+        }
+    }
+}

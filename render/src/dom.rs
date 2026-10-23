@@ -124,13 +124,22 @@ pub mod opc {
     pub const WARN: i32 = 16;
     pub const CLEAR: i32 = 17;
     pub const FETCH: i32 = 18;
+    /// `index, bytes`: the start of string operand `index` of the next command, for strings
+    /// longer than one command buffer; the command carries the rest.
+    pub const APPEND: i32 = 19;
+    pub const DESCRIPTION: i32 = 20;
 }
+
+/// Prefix of an `Effect::Title` that sets the page description instead of its title.
+pub const DESCRIPTION_MARK: char = '\u{1}';
 
 pub struct Tree {
     pub nodes: Vec<Option<Node>>,
     /// Commands applied so far, and how many of them moved an attached node.
     pub commands: usize,
     pub moves: usize,
+    /// String starts sent with `APPEND`, by operand index, for the next command.
+    pending: Vec<(i32, Vec<u8>)>,
 }
 
 impl Default for Tree {
@@ -139,6 +148,7 @@ impl Default for Tree {
             nodes: vec![Some(Node::new(Kind::Element, "body", String::new()))],
             commands: 0,
             moves: 0,
+            pending: Vec::new(),
         }
     }
 }
@@ -146,9 +156,12 @@ impl Default for Tree {
 struct Reader<'a> {
     b: &'a [u8],
     p: usize,
+    pending: Vec<(i32, Vec<u8>)>,
+    /// Index of the next string operand of the current command.
+    k: i32,
 }
 
-impl Reader<'_> {
+impl<'a> Reader<'a> {
     fn int(&mut self) -> Result<i32, String> {
         let w = self
             .b
@@ -158,14 +171,28 @@ impl Reader<'_> {
         Ok(i32::from_le_bytes(w.try_into().unwrap()))
     }
 
-    fn str(&mut self) -> Result<String, String> {
+    fn bytes(&mut self) -> Result<&'a [u8], String> {
         let n = self.int()? as usize;
         let s = self
             .b
             .get(self.p..self.p + n)
             .ok_or("truncated command buffer")?;
         self.p += (n + 3) & !3;
-        Ok(String::from_utf8_lossy(s).into_owned())
+        Ok(s)
+    }
+
+    fn str(&mut self) -> Result<String, String> {
+        let k = self.k;
+        self.k += 1;
+        let tail = self.bytes()?;
+        match self.pending.iter().position(|(i, _)| *i == k) {
+            Some(i) => {
+                let mut head = self.pending.swap_remove(i).1;
+                head.extend(tail);
+                Ok(String::from_utf8_lossy(&head).into_owned())
+            }
+            None => Ok(String::from_utf8_lossy(tail).into_owned()),
+        }
     }
 }
 
@@ -262,9 +289,24 @@ impl Tree {
 
     /// Applies a command buffer, appending host effects to `fx`.
     pub fn apply(&mut self, buf: &[u8], fx: &mut Vec<Effect>) -> Result<(), String> {
-        let mut r = Reader { b: buf, p: 0 };
+        let mut r = Reader {
+            b: buf,
+            p: 0,
+            pending: std::mem::take(&mut self.pending),
+            k: 0,
+        };
         while r.p < buf.len() {
             let op = r.int()?;
+            if op == opc::APPEND {
+                let k = r.int()?;
+                let chunk = r.bytes()?;
+                match r.pending.iter_mut().find(|(i, _)| *i == k) {
+                    Some((_, head)) => head.extend_from_slice(chunk),
+                    None => r.pending.push((k, chunk.to_vec())),
+                }
+                continue;
+            }
+            r.k = 0;
             self.commands += 1;
             match op {
                 opc::CREATE => {
@@ -388,6 +430,9 @@ impl Tree {
                     self.mark_style(id as Id);
                 }
                 opc::TITLE => fx.push(Effect::Title(r.str()?)),
+                opc::DESCRIPTION => {
+                    fx.push(Effect::Title(format!("{DESCRIPTION_MARK}{}", r.str()?)))
+                }
                 opc::NAVIGATE => fx.push(Effect::Navigate(r.str()?)),
                 opc::WARN => fx.push(Effect::Warn(r.str()?)),
                 opc::CLEAR => {
@@ -415,7 +460,9 @@ impl Tree {
                     ));
                 }
             }
+            r.pending.clear();
         }
+        self.pending = r.pending;
         Ok(())
     }
 
@@ -537,6 +584,21 @@ pub mod tests {
             .insert(2, 3, 0)
             .insert(3, 2, 0);
         assert!(t.apply(&b.0, &mut fx).unwrap_err().contains("descendant"));
+    }
+
+    #[test]
+    fn appends_long_strings() {
+        let mut t = Tree::default();
+        let mut fx = Vec::new();
+        let mut b = Buf::default();
+        b.int(opc::APPEND).int(1).str("ab");
+        t.apply(&b.0, &mut fx).unwrap();
+        let mut b = Buf::default();
+        b.int(opc::APPEND).int(1).str("cd");
+        b.create(1, "p").attr(1, "title", "ef").attr(1, "lang", "x");
+        t.apply(&b.0, &mut fx).unwrap();
+        assert_eq!(t.n(1).attr("title"), Some("abcdef"));
+        assert_eq!(t.n(1).attr("lang"), Some("x"));
     }
 
     #[test]

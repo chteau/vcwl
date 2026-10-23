@@ -498,7 +498,12 @@ pub const ELEMENTS: &[&str] = &[
     "select",
     "form",
     "divider",
+    "meta",
 ];
+
+/// Tag of the element `meta(...)` checks to: no DOM node, its `title` and `description`
+/// attributes set the page's metadata.
+pub const META_TAG: &str = "vcwl:meta";
 
 impl Checker<'_> {
     pub fn ui_ident(&mut self, name: &str, span: Span) -> Result<Option<TExpr>> {
@@ -795,7 +800,10 @@ impl Checker<'_> {
             (cx.handlers, cx.mount, cx.js, cx.root_classes);
         let mut body = body;
         if !root_classes.is_empty() {
-            let elems: Vec<&mut TView> = body.iter_mut().collect();
+            let mut elems: Vec<&mut TView> = body
+                .iter_mut()
+                .filter(|v| !matches!(v, TView::Element(e) if e.tag == META_TAG))
+                .collect();
             match elems.as_slice() {
                 [TView::Element(_)] => {}
                 _ => {
@@ -808,7 +816,7 @@ impl Checker<'_> {
                     ));
                 }
             }
-            if let Some(TView::Element(e)) = body.first_mut() {
+            if let Some(TView::Element(e)) = elems.pop() {
                 e.classes.extend(root_classes);
             }
         }
@@ -1312,6 +1320,9 @@ impl Checker<'_> {
                     .help("a scene holds `mesh`, `light` and `group` elements"),
             );
         }
+        if name == "meta" {
+            return self.check_meta(el);
+        }
         if name == "slot" {
             let (n, value) = slot_args(el)?;
             let slots = &self.ui.as_ref().unwrap().slots;
@@ -1670,6 +1681,67 @@ impl Checker<'_> {
         cx.in_scene = outer;
         let kids = kids?;
         te.children.extend(kids);
+        Ok(TView::Element(te))
+    }
+
+    /// `meta(title: s, description: s)`: page metadata while shown, an element with
+    /// `META_TAG` that creates no node.
+    fn check_meta(&mut self, el: &ast::Element) -> Result<TView> {
+        if let Some(c) = el.children.first() {
+            let span = match c {
+                View::Element(e) => e.span,
+                _ => el.span,
+            };
+            return Err(Diag::ty(span, "`meta` cannot contain other elements"));
+        }
+        let mut te = TElem {
+            tag: META_TAG.into(),
+            static_attrs: Vec::new(),
+            attrs: Vec::new(),
+            classes: Vec::new(),
+            class_ifs: Vec::new(),
+            events: Vec::new(),
+            children: Vec::new(),
+            special: Special::None,
+            span: el.span,
+        };
+        for a in &el.args {
+            let (n, value) = match a {
+                ElemArg::Expr(ast::Arg {
+                    name: Some(n),
+                    value,
+                }) => (n, value),
+                ElemArg::Expr(ast::Arg { name: None, value }) => {
+                    return Err(Diag::ty(
+                        value.span,
+                        "`meta` arguments are passed by name, e.g. `meta(title: \"About\")`",
+                    ));
+                }
+                ElemArg::Style(n, _, _) => {
+                    return Err(Diag::ty(n.span, format!("`meta` has no `{}` argument", n.name))
+                        .help("available arguments: title, description"));
+                }
+            };
+            let kind = match n.name.as_str() {
+                "title" => AttrKind::Attr("title"),
+                "description" => AttrKind::Attr("description"),
+                other => {
+                    return Err(Diag::ty(n.span, format!("`meta` has no `{other}` argument"))
+                        .help("available arguments: title, description"));
+                }
+            };
+            if te.attrs.iter().any(|(k, _)| *k == kind) {
+                return Err(Diag::ty(n.span, format!("duplicate argument `{}`", n.name)));
+            }
+            let t = self.render_expr(value, Some(&Type::Str))?;
+            te.attrs.push((kind, t));
+        }
+        if te.attrs.is_empty() {
+            return Err(Diag::ty(
+                el.span,
+                "`meta` needs a `title` or `description` argument",
+            ));
+        }
         Ok(TView::Element(te))
     }
 

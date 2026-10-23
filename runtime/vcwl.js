@@ -382,7 +382,7 @@ export async function createCanvasHost(canvas, app, render, opts = {}) {
             break;
           }
           case OUT.TITLE:
-            doc.title = b.str();
+            setTitle(doc, b.str());
             break;
           case OUT.NAVIGATE:
             navigate(b.str());
@@ -1280,6 +1280,24 @@ export function showError(doc, msg) {
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (msg) drawError(ctx, canvas.width, canvas.height, "VCWL " + msg);
+}
+
+/** Prefix of a TITLE output that is the page's description (`meta(description: ...)`). */
+export const DESCRIPTION_MARK = "\u0001";
+
+/** Applies a TITLE output: the document's title, or its `<meta name="description">`. */
+export function setTitle(doc, s) {
+  if (!s.startsWith(DESCRIPTION_MARK)) {
+    doc.title = s;
+    return;
+  }
+  let meta = doc.querySelector('meta[name="description"]');
+  if (!meta) {
+    meta = doc.createElement("meta");
+    meta.name = "description";
+    doc.head.append(meta);
+  }
+  meta.content = s.slice(DESCRIPTION_MARK.length);
 }
 
 /** The URL of route `path` with path routing: one directory per route below the app's root. */

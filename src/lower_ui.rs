@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use crate::check_ui::{
     AttrKind, CompSig, Payload, Special, SwitchKind, TComp, TElem, TFill, TJsHandler, TVarKind,
-    TView, route_params,
+    META_TAG, TView, route_params,
 };
 use crate::diag::{SourceMap, Span};
 use crate::ir::*;
@@ -56,6 +56,8 @@ pub mod opc {
     pub const WARN: i32 = 16;
     pub const CLEAR: i32 = 17;
     pub const FETCH: i32 = 18;
+    pub const APPEND: i32 = 19;
+    pub const DESCRIPTION: i32 = 20;
 }
 
 /// Handler-slot kinds at or above this value are pending `fetch` requests.
@@ -898,21 +900,131 @@ impl Lower<'_> {
         })
     }
 
-    /// `(s) -> i32`: encoded size of a string operand (length word + padded bytes).
+    /// `(s) -> i32`: bytes of `s` sent ahead of its command in `APPEND` chunks (a multiple of
+    /// `MAX_CMD_STR`, leaving 1 to `MAX_CMD_STR` bytes for the command itself).
+    fn helper_str_head(&mut self) -> FuncRef {
+        let s = self.str_ty;
+        self.helper("cmd_str_head", |_| {
+            let (str_, n, h) = (0, 1, 2);
+            Func {
+                name: "cmd_str_head".into(),
+                params: vec![VT::Ref(s)],
+                result: Some(VT::I32),
+                locals: vec![VT::I32, VT::I32],
+                body: vec![
+                    set(n, IExpr::ArrayLen(b(get(str_)))),
+                    IExpr::Block(
+                        1,
+                        None,
+                        vec![IExpr::Loop(
+                            2,
+                            vec![
+                                IExpr::BrIf(
+                                    1,
+                                    b(bin(
+                                        Op::I32LeS,
+                                        bin(Op::I32Sub, get(n), get(h)),
+                                        IExpr::I32(MAX_CMD_STR),
+                                    )),
+                                ),
+                                set(h, bin(Op::I32Add, get(h), IExpr::I32(MAX_CMD_STR))),
+                                IExpr::Br(2),
+                            ],
+                        )],
+                    ),
+                    get(h),
+                ],
+                export: None,
+            }
+        })
+    }
+
+    /// `(s, k)`: sends all but the last part of string operand `k` in `APPEND` commands.
+    fn helper_str_chunks(&mut self) -> FuncRef {
+        let cmd = self.u().g.cmd;
+        let s = self.str_ty;
+        let head = self.helper_str_head();
+        let reserve = self.helper_reserve();
+        let put = self.helper_put_i32();
+        self.helper("cmd_str_chunks", |_| {
+            let (str_, k, h, off, i) = (0, 1, 2, 3, 4);
+            let copy = IExpr::Block(
+                3,
+                None,
+                vec![IExpr::Loop(
+                    4,
+                    vec![
+                        IExpr::BrIf(3, b(bin(Op::I32GeU, get(i), IExpr::I32(MAX_CMD_STR)))),
+                        IExpr::Store8(
+                            b(bin(Op::I32Add, IExpr::GlobalGet(cmd), get(i))),
+                            b(IExpr::ArrayGetU(
+                                s,
+                                b(get(str_)),
+                                b(bin(Op::I32Add, get(off), get(i))),
+                            )),
+                        ),
+                        set(i, bin(Op::I32Add, get(i), IExpr::I32(1))),
+                        IExpr::Br(4),
+                    ],
+                )],
+            );
+            Func {
+                name: "cmd_str_chunks".into(),
+                params: vec![VT::Ref(s), VT::I32],
+                result: None,
+                locals: vec![VT::I32, VT::I32, VT::I32],
+                body: vec![
+                    set(h, IExpr::Call(head, vec![get(str_)])),
+                    IExpr::Block(
+                        1,
+                        None,
+                        vec![IExpr::Loop(
+                            2,
+                            vec![
+                                IExpr::BrIf(1, b(bin(Op::I32GeU, get(off), get(h)))),
+                                IExpr::Call(reserve, vec![IExpr::I32(12 + MAX_CMD_STR)]),
+                                IExpr::Call(put, vec![IExpr::I32(opc::APPEND)]),
+                                IExpr::Call(put, vec![get(k)]),
+                                IExpr::Call(put, vec![IExpr::I32(MAX_CMD_STR)]),
+                                set(i, IExpr::I32(0)),
+                                copy,
+                                IExpr::GlobalSet(
+                                    cmd,
+                                    b(bin(
+                                        Op::I32Add,
+                                        IExpr::GlobalGet(cmd),
+                                        IExpr::I32(MAX_CMD_STR),
+                                    )),
+                                ),
+                                set(off, bin(Op::I32Add, get(off), IExpr::I32(MAX_CMD_STR))),
+                                IExpr::Br(2),
+                            ],
+                        )],
+                    ),
+                ],
+                export: None,
+            }
+        })
+    }
+
+    /// `(s) -> i32`: encoded size of the part of a string operand its command carries (length
+    /// word + padded bytes).
     fn helper_str_size(&mut self) -> FuncRef {
-        let panic = self.panic_call("text too long for a single DOM update (limit 60000 bytes)");
+        let s = self.str_ty;
+        let head = self.helper_str_head();
         self.helper("cmd_str_size", |_| Func {
             name: "cmd_str_size".into(),
-            params: vec![VT::Ref(0)],
+            params: vec![VT::Ref(s)],
             result: Some(VT::I32),
             locals: vec![VT::I32],
             body: vec![
-                set(1, IExpr::ArrayLen(b(get(0)))),
-                IExpr::If(
-                    None,
-                    b(bin(Op::I32GtS, get(1), IExpr::I32(MAX_CMD_STR))),
-                    vec![panic],
-                    vec![],
+                set(
+                    1,
+                    bin(
+                        Op::I32Sub,
+                        IExpr::ArrayLen(b(get(0))),
+                        IExpr::Call(head, vec![get(0)]),
+                    ),
                 ),
                 bin(
                     Op::I32Add,
@@ -931,15 +1043,17 @@ impl Lower<'_> {
     fn helper_put_str(&mut self) -> FuncRef {
         let cmd = self.u().g.cmd;
         let s = self.str_ty;
+        let head = self.helper_str_head();
         self.helper("cmd_str", |_| {
-            let (str_, n, i) = (0, 1, 2);
+            let (str_, n, i, h) = (0, 1, 2, 3);
             Func {
                 name: "cmd_str".into(),
                 params: vec![VT::Ref(s)],
                 result: None,
-                locals: vec![VT::I32, VT::I32],
+                locals: vec![VT::I32, VT::I32, VT::I32],
                 body: vec![
-                    set(n, IExpr::ArrayLen(b(get(str_)))),
+                    set(h, IExpr::Call(head, vec![get(str_)])),
+                    set(n, bin(Op::I32Sub, IExpr::ArrayLen(b(get(str_))), get(h))),
                     IExpr::Store32(b(IExpr::GlobalGet(cmd)), b(get(n))),
                     IExpr::Block(
                         1,
@@ -954,7 +1068,11 @@ impl Lower<'_> {
                                         bin(Op::I32Add, IExpr::GlobalGet(cmd), IExpr::I32(4)),
                                         get(i),
                                     )),
-                                    b(IExpr::ArrayGetU(s, b(get(str_)), b(get(i)))),
+                                    b(IExpr::ArrayGetU(
+                                        s,
+                                        b(get(str_)),
+                                        b(bin(Op::I32Add, get(h), get(i))),
+                                    )),
                                 ),
                                 set(i, bin(Op::I32Add, get(i), IExpr::I32(1))),
                                 IExpr::Br(2),
@@ -1001,7 +1119,7 @@ impl Lower<'_> {
         let mut out = Vec::new();
         let mut size = IExpr::I32(4 * (1 + ints.len() as i32));
         let mut writes = Vec::new();
-        for s in strs {
+        for (k, s) in strs.into_iter().enumerate() {
             match s {
                 S::Static(text) => {
                     let (off, len) = self.static_bytes(&text);
@@ -1021,6 +1139,8 @@ impl Lower<'_> {
                 S::Dyn(e) => {
                     let t = cx.temp(VT::Ref(self.str_ty));
                     out.push(set(t, e));
+                    let chunks = self.helper_str_chunks();
+                    out.push(IExpr::Call(chunks, vec![get(t), IExpr::I32(k as i32)]));
                     let sz = self.helper_str_size();
                     size = bin(Op::I32Add, size, IExpr::Call(sz, vec![get(t)]));
                     let ps = self.helper_put_str();
@@ -1825,7 +1945,39 @@ impl Lower<'_> {
         }
     }
 
+    /// `meta(...)`: sets the page title and description when mounted and when their values
+    /// change; the app's title comes back when it is removed.
+    fn view_meta(&mut self, g: &mut Gen, el: &TElem) {
+        let mut restore = false;
+        for (kind, e) in &el.attrs {
+            let code = match kind {
+                AttrKind::Attr("title") => {
+                    restore = true;
+                    opc::TITLE
+                }
+                _ => opc::DESCRIPTION,
+            };
+            let x = self.expr(&mut g.mount, e);
+            let set_now = self.op(&mut g.mount, code, vec![], vec![S::Dyn(x)]);
+            g.mb.push(set_now);
+            let deps = self.deps(&g.update, e);
+            if deps != 0 {
+                let x = self.expr(&mut g.update, e);
+                let upd = self.op(&mut g.update, code, vec![], vec![S::Dyn(x)]);
+                g.ub.push(IExpr::If(None, b(Self::dirty(deps)), vec![upd], vec![]));
+            }
+        }
+        if restore {
+            let title = self.u().title.clone();
+            let back = self.op(&mut g.destroy, opc::TITLE, vec![], vec![S::Static(title)]);
+            g.db.push(back);
+        }
+    }
+
     fn view_element(&mut self, g: &mut Gen, comp: &TComp, el: &TElem, pos: Pos) {
+        if el.tag == META_TAG {
+            return self.view_meta(g, el);
+        }
         let ty = self.scope_ty(g.si);
         let nn = self.helper_new_node();
         let id = g.mount.temp(VT::I32);
