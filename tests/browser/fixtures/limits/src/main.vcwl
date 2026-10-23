@@ -1,0 +1,123 @@
+// Browser-test fixture: more than 62 component values, nested state, fresh derived reads, style order.
+app "Limits"
+
+component App {
+    state v0 = 0
+    state v1 = 1
+    state v2 = 2
+    state v3 = 3
+    state v4 = 4
+    state v5 = 5
+    state v6 = 6
+    state v7 = 7
+    state v8 = 8
+    state v9 = 9
+    state v10 = 10
+    state v11 = 11
+    state v12 = 12
+    state v13 = 13
+    state v14 = 14
+    state v15 = 15
+    state v16 = 16
+    state v17 = 17
+    state v18 = 18
+    state v19 = 19
+    state v20 = 20
+    state v21 = 21
+    state v22 = 22
+    state v23 = 23
+    state v24 = 24
+    state v25 = 25
+    state v26 = 26
+    state v27 = 27
+    state v28 = 28
+    state v29 = 29
+    state v30 = 30
+    state v31 = 31
+    state v32 = 32
+    state v33 = 33
+    state v34 = 34
+    state v35 = 35
+    state v36 = 36
+    state v37 = 37
+    state v38 = 38
+    state v39 = 39
+    state v40 = 40
+    state v41 = 41
+    state v42 = 42
+    state v43 = 43
+    state v44 = 44
+    state v45 = 45
+    state v46 = 46
+    state v47 = 47
+    state v48 = 48
+    state v49 = 49
+    state v50 = 50
+    state v51 = 51
+    state v52 = 52
+    state v53 = 53
+    state v54 = 54
+    state v55 = 55
+    state v56 = 56
+    state v57 = 57
+    state v58 = 58
+    state v59 = 59
+    state v60 = 60
+    state v61 = 61
+    state v62 = 62
+    state v63 = 63
+    state v64 = 64
+    state v65 = 65
+    state v66 = 66
+    state v67 = 67
+    state v68 = 68
+    state v69 = 69
+    state v70 = 70
+    state v71 = 71
+    state v72 = 72
+    state v73 = 73
+    state v74 = 74
+    state v75 = 75
+    state v76 = 76
+    state v77 = 77
+    state v78 = 78
+    state v79 = 79
+    let total = v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 + v50 + v51 + v52 + v53 + v54 + v55 + v56 + v57 + v58 + v59 + v60 + v61 + v62 + v63 + v64 + v65 + v66 + v67 + v68 + v69 + v70 + v71 + v72 + v73 + v74 + v75 + v76 + v77 + v78 + v79
+    state hot = false
+    state seen = 0
+
+    main {
+        paragraph("sum {total}")
+        button("Bump") {
+            on click {
+                v0 += 1
+                v79 += 1
+            }
+        }
+        section {
+            state inner = 5
+            let doubled = inner * 2
+            paragraph("doubled {doubled}")
+            button("Read") {
+                on click {
+                    inner = 20
+                    seen = doubled
+                }
+            }
+        }
+        paragraph("seen {seen}")
+        heading("Colored") {
+            style if hot {
+                color: #ff0000
+            }
+            style {
+                color: #0000ff
+            }
+        }
+        button("Toggle") {
+            on click {
+                hot = !hot
+            }
+        }
+    }
+}

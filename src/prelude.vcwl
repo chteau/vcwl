@@ -644,6 +644,45 @@ fn server_remove(key: String) {
     __store_delete(key)
 }
 
+// ----- server host calls (`query`, `exec`, `http` and the session builtins) -----
+
+/// The response of `http(method, url, body)` in a server function.
+export struct HttpResponse {
+    status: Int,
+    body: String,
+}
+
+fn server_host(name: String, args: String) -> Int {
+    __host(__str_len(name), name + args)
+}
+
+fn server_call<T>(name: String, args: String, dec: fn(Int) -> Result<T, String>) -> Result<T, String> {
+    let h = server_host(name, args)
+    let e = __json_field(h, "err")
+    if __json_kind(e) == 3 {
+        return Err(__json_str(e))
+    }
+    match dec(__json_field(h, "ok")) {
+        Ok(v) => Ok(v),
+        Err(m) => Err("unexpected result of `" + name + "`" + m),
+    }
+}
+
+fn server_session_value(r: Result<String?, String>) -> String? {
+    match r {
+        Ok(v) => v,
+        Err(_) => None,
+    }
+}
+
+fn server_set_session(key: String, value: String) {
+    server_host("session.set", "[" + __json_quote(key) + "," + __json_quote(value) + "]")
+}
+
+fn server_end_session(key: String) {
+    server_host("session.set", "[" + __json_quote(key) + ",null]")
+}
+
 // ----- 3D -----
 
 /// A point or direction in 3D (scene, mesh, light and group arguments).

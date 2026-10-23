@@ -1224,10 +1224,11 @@ impl<'a> Lower<'a> {
                     IExpr::Call(f, vec![IExpr::Call(to, vec![take()])]),
                 )
             }
-            "__js_call" => {
+            "__js_call" | "__host" => {
+                let host = if name == "__host" { "host" } else { "js_call" };
                 let f = self
                     .m
-                    .import("js_call", vec![VT::I32, VT::I32], Some(VT::I32));
+                    .import(host, vec![VT::I32, VT::I32], Some(VT::I32));
                 let to = self.helper_str_to_mem();
                 let (name_len, text) = (take(), take());
                 un(

@@ -136,6 +136,8 @@ const INTRINSICS: &[(&str, &[&str], &str)] = &[
     ("__store_delete", &["String"], "()"),
     ("__js_call", &["Int", "String"], "Int"),
     ("__json_drop", &["Int"], "()"),
+    ("__host", &["Int", "String"], "Int"),
+    ("__json_field", &["Int", "String"], "Int"),
 ];
 
 impl<'a> Checker<'a> {
@@ -2067,7 +2069,20 @@ impl<'a> Checker<'a> {
             _ => {}
         }
         let user_fn = matches!(self.scopes[self.file].get(name), Some(Sym::Fn(id)) if self.sigs[*id].file != 0);
-        if !user_fn && matches!(name, "env" | "load" | "save" | "remove") {
+        if !user_fn && matches!(
+                name,
+                "env"
+                    | "load"
+                    | "save"
+                    | "remove"
+                    | "query"
+                    | "exec"
+                    | "http"
+                    | "session"
+                    | "set_session"
+                    | "end_session"
+            )
+        {
             return self.check_server_builtin(callee, type_args, args, span);
         }
         if !user_fn && name == "to_json" {
@@ -2140,12 +2155,19 @@ impl<'a> Checker<'a> {
                 format!("`{name}` is only available in server functions (`server fn`)"),
             ));
         }
-        let arity = if name == "save" { 2 } else { 1 };
+        let arity = match name {
+            "save" | "query" | "exec" | "set_session" => 2,
+            "http" => 3,
+            _ => 1,
+        };
         if args.len() != arity {
             return Err(Diag::ty(
                 span,
                 format!("`{name}` takes {arity} argument(s)"),
             ));
+        }
+        if !matches!(name, "env" | "load" | "save" | "remove") {
+            return self.check_host_builtin(name, type_args, args, span);
         }
         let key = self.check_expr(&args[0].value, Some(&Type::Str))?;
         self.coerce(&key.ty, &Type::Str, args[0].value.span)?;
@@ -2185,6 +2207,81 @@ impl<'a> Checker<'a> {
                 Ok(call(f, vec![key], self.option(t)))
             }
         }
+    }
+
+    /// `query`, `exec`, `http` and the session builtins: generic host calls whose `ok` value is
+    /// decoded like `load<T>` decodes the store.
+    fn check_host_builtin(
+        &mut self,
+        name: &str,
+        type_args: &[ast::TypeExpr],
+        args: &[ast::Arg],
+        span: Span,
+    ) -> Result<TExpr> {
+        let params = match name {
+            "query" | "exec" => vec![Type::Str, Type::Array(Box::new(Type::Str))],
+            "http" => vec![Type::Str, Type::Str, Type::Str],
+            "set_session" => vec![Type::Str, Type::Str],
+            _ => vec![Type::Str],
+        };
+        let mut vals = Vec::new();
+        for (a, t) in args.iter().zip(&params) {
+            let v = self.check_expr(&a.value, Some(t))?;
+            self.coerce(&v.ty, t, a.value.span)?;
+            vals.push(v);
+        }
+        let pf = |this: &Self, n: &str| this.prelude_fn(n).expect("server prelude");
+        let call = |f: usize, targs: Vec<Type>, args: Vec<TExpr>, ty: Type| TExpr {
+            kind: TK::Call(f, targs, args),
+            ty,
+            span,
+        };
+        let (host, t) = match name {
+            "set_session" | "end_session" => {
+                let f = pf(self, &format!("server_{name}"));
+                return Ok(call(f, vec![], vals, Type::Unit));
+            }
+            "query" => {
+                let [t] = type_args else {
+                    return Err(Diag::ty(
+                        span,
+                        "`query` needs the row type: `query<Row>(\"select ...\", [])`",
+                    ));
+                };
+                ("sql.query", Type::Array(Box::new(self.resolve_type(t)?)))
+            }
+            "exec" => ("sql.exec", Type::Int),
+            "http" => ("http", Type::Adt(self.prelude_adt("HttpResponse"), vec![])),
+            _ => ("session.get", self.option(Type::Str)),
+        };
+        let dec = self.json_decoder(&t, span)?;
+        let rty = Type::Adt(self.prelude_adt("Result"), vec![t.clone(), Type::Str]);
+        let dec_ref = TExpr {
+            kind: TK::FnRef(dec, vec![]),
+            ty: Type::Fn(vec![Type::Int], Box::new(rty.clone())),
+            span,
+        };
+        let text = self.server_args(vals, span)?;
+        let host = TExpr {
+            kind: TK::Str(host.to_string()),
+            ty: Type::Str,
+            span,
+        };
+        let r = call(
+            pf(self, "server_call"),
+            vec![t],
+            vec![host, text, dec_ref],
+            rty,
+        );
+        if name != "session" {
+            return Ok(r);
+        }
+        Ok(call(
+            pf(self, "server_session_value"),
+            vec![],
+            vec![r],
+            self.option(Type::Str),
+        ))
     }
 
     fn check_intrinsic(

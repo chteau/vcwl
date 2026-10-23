@@ -28,6 +28,10 @@ use crate::tir::{LocalId, TExpr, TFetch, TK, TPat, TStmt, Type};
 
 pub const BIT_BOUND: i64 = 1 << 62;
 pub const BIT_SLOT: i64 = 1 << 61;
+/// Dirty bit of component value `i`: values from index 60 on share bit 60.
+fn var_bit(i: usize) -> i64 {
+    1i64 << i.min(60)
+}
 pub const BIT_ROUTE: i64 = i64::MIN;
 const CMD_CAP: i32 = 65536;
 const MAX_CMD_STR: i32 = 60000;
@@ -140,6 +144,8 @@ pub struct UiState {
     handler_kinds: Vec<(usize, u32, Payload)>,
     /// Handler function per (component, handler index).
     handler_fns: HashMap<(usize, usize), u32>,
+    /// True while a handler body is lowered: derived values are then recomputed on read.
+    in_handler: bool,
     /// Continuations of `fetch` statements: (scope, function).
     fetch_kinds: Vec<(usize, u32)>,
     defaults: HashMap<(usize, usize), u32>,
@@ -220,6 +226,7 @@ impl UiState {
             comp_scope: Vec::new(),
             handler_kinds: Vec::new(),
             handler_fns: HashMap::new(),
+            in_handler: false,
             fetch_kinds: Vec::new(),
             defaults: HashMap::new(),
             g: Globals::default(),
@@ -472,6 +479,13 @@ impl Lower<'_> {
             }
             TK::CompVar(i) => {
                 let root = self.comp_root_of(cx.scope.unwrap().scope);
+                if self.u().in_handler {
+                    let ci = self.u().scopes[root].comp;
+                    if let TVarKind::Derived(d) = &self.u().comps[ci].vars[*i].kind {
+                        let d = d.clone();
+                        return self.expr(cx, &d);
+                    }
+                }
                 let obj = self.scope_path(cx, root);
                 self.read_field(root, Self::var_field(*i), obj, vt)
             }
@@ -532,7 +546,7 @@ impl Lower<'_> {
                         b(bin(
                             Op::I64Or,
                             IExpr::StructGet(comp_ty, 0, b(get(c))),
-                            IExpr::I64(1i64 << var),
+                            IExpr::I64(var_bit(var)),
                         )),
                     ),
                 ],
@@ -713,7 +727,7 @@ impl Lower<'_> {
 
     fn deps_into(&mut self, cx: &FnCx, e: &TExpr, m: &mut i64) {
         match &e.kind {
-            TK::CompVar(i) => *m |= 1 << i,
+            TK::CompVar(i) => *m |= var_bit(*i),
             TK::Route => *m |= BIT_ROUTE,
             TK::Local(id) if self.ui_bound(cx, *id) => *m |= BIT_BOUND,
             TK::Bin(_, a, b2) | TK::Index(a, b2) => {
@@ -1285,7 +1299,7 @@ impl Lower<'_> {
                             b(differ),
                             vec![
                                 IExpr::StructSet(ty, f, b(get(0)), b(get(t))),
-                                set(1, bin(Op::I64Or, get(1), IExpr::I64(1i64 << i))),
+                                set(1, bin(Op::I64Or, get(1), IExpr::I64(var_bit(i)))),
                             ],
                             vec![],
                         ),
@@ -3262,7 +3276,7 @@ impl Lower<'_> {
                             b(differ),
                             vec![
                                 IExpr::StructSet(cty, fld, b(get(cl)), b(get(t))),
-                                set(cm, bin(Op::I64Or, get(cm), IExpr::I64(1i64 << i))),
+                                set(cm, bin(Op::I64Or, get(cm), IExpr::I64(var_bit(i)))),
                             ],
                             vec![],
                         ),
@@ -3519,7 +3533,9 @@ impl Lower<'_> {
         if let Some(p) = hd.param {
             cx.map.insert(p, 1);
         }
+        let was = std::mem::replace(&mut self.u().in_handler, true);
         let mut body = vec![self.stmt_expr(&mut cx, &hd.body)];
+        self.u().in_handler = was;
         body.extend(self.handler_epilogue(&mut cx, si));
         // `return` inside a handler must still run the update: wrap the body in a block.
         let body = wrap_returns(body);

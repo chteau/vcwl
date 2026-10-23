@@ -24,6 +24,8 @@ pub fn is_style_arg(name: &str) -> bool {
 pub struct Sheet {
     pub css: String,
     classes: HashMap<String, String>,
+    /// Byte length of the plain-class prefix of `css`; conditional classes follow it.
+    plain_len: usize,
     /// Class of each top-level named style, by declaration order.
     pub named: Vec<String>,
 }
@@ -550,11 +552,25 @@ impl Sheet {
         let mut body = String::new();
         let mut extra = Vec::new();
         self.block_into(b, &mut body, &mut extra, &[], "")?;
-        Ok(self.class(body, extra))
+        Ok(self.class(body, extra, false))
     }
 
-    fn class(&mut self, body: String, extra: Vec<(Vec<String>, String, String)>) -> String {
-        let key = format!("{body}|{extra:?}");
+    /// Like `block`, but for conditionally applied classes: these are emitted after every
+    /// plain class so they win over plain blocks setting the same property.
+    pub fn cond_block(&mut self, b: &StyleBlock) -> Result<String> {
+        let mut body = String::new();
+        let mut extra = Vec::new();
+        self.block_into(b, &mut body, &mut extra, &[], "")?;
+        Ok(self.class(body, extra, true))
+    }
+
+    fn class(
+        &mut self,
+        body: String,
+        extra: Vec<(Vec<String>, String, String)>,
+        cond: bool,
+    ) -> String {
+        let key = format!("{}{body}|{extra:?}", if cond { "?|" } else { "" });
         if let Some(c) = self.classes.get(&key) {
             return c.clone();
         }
@@ -566,22 +582,29 @@ impl Sheet {
         while self.classes.values().any(|c| *c == name) {
             name.push('x');
         }
+        let mut css = String::new();
         if !body.is_empty() {
-            let _ = write!(self.css, ".{name}{{{body}}}");
+            let _ = write!(css, ".{name}{{{body}}}");
         }
         for (media, pseudo, decls) in &extra {
             let rule = format!(".{name}{pseudo}{{{decls}}}");
             if media.is_empty() {
-                self.css.push_str(&rule);
+                css.push_str(&rule);
             } else {
                 let mut wrapped = rule;
                 for m in media.iter().rev() {
                     wrapped = format!("{m}{{{wrapped}}}");
                 }
-                self.css.push_str(&wrapped);
+                css.push_str(&wrapped);
             }
         }
-        self.css.push('\n');
+        css.push('\n');
+        if cond {
+            self.css.push_str(&css);
+        } else {
+            self.css.insert_str(self.plain_len, &css);
+            self.plain_len += css.len();
+        }
         self.classes.insert(key, name.clone());
         name
     }
@@ -632,7 +655,7 @@ impl Sheet {
             }
             body.push_str(&decl(id, toks, *span)?);
         }
-        Ok(self.class(body, vec![]))
+        Ok(self.class(body, vec![], false))
     }
 }
 

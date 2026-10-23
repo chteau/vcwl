@@ -708,7 +708,9 @@ impl Checker<'_> {
         }
         let n_props = vars.len();
         // Pass 1: state and derived values, in order; each sees only earlier declarations.
-        for v in &c.body {
+        let mut decls = Vec::new();
+        collect_decls(&c.body, false, &mut decls)?;
+        for v in decls {
             let (name, ty, value, is_state) = match v {
                 View::State { name, ty, init, .. } => (name, ty, init, true),
                 View::Let {
@@ -900,14 +902,7 @@ impl Checker<'_> {
                         ));
                     }
                 }
-                View::State { span, .. } | View::Let { span, .. } => {
-                    if !top {
-                        return Err(Diag::ty(
-                            *span,
-                            "`state` and `let` must appear at the top level of a component",
-                        ));
-                    }
-                }
+                View::State { .. } | View::Let { .. } => {}
                 View::Element(el) => out.push(self.check_element(el, cx)?),
                 View::If {
                     cond, then, els, ..
@@ -1526,7 +1521,7 @@ impl Checker<'_> {
                 }
                 View::StyleIf { cond, block, .. } => {
                     let t = self.render_expr(cond, Some(&Type::Bool))?;
-                    te.class_ifs.push((cx.sheet.block(block)?, t));
+                    te.class_ifs.push((cx.sheet.cond_block(block)?, t));
                 }
                 View::StyleBind {
                     prop, value, unit, ..
@@ -2104,6 +2099,53 @@ fn slot_args(el: &ast::Element) -> Result<(String, Option<&ast::Expr>)> {
             "`slot` takes a name and at most one value, e.g. `slot(row, r)`",
         )),
     }
+}
+
+/// Gathers `state` and `let` declarations of a component body in source order, rejecting
+/// those inside per-item bodies (`for`, `match`/`routes` arms, slot fills binding a value).
+fn collect_decls<'a>(views: &'a [View], per_item: bool, out: &mut Vec<&'a View>) -> Result<()> {
+    for v in views {
+        match v {
+            View::State { span, .. } | View::Let { span, .. } => {
+                if per_item {
+                    let what = if matches!(v, View::State { .. }) {
+                        "state"
+                    } else {
+                        "let"
+                    };
+                    return Err(Diag::ty(
+                        *span,
+                        format!("`{what}` cannot be declared inside a `for`, `match` or `routes` body"),
+                    )
+                    .help("extract a component: per-item state needs its own component"));
+                }
+                out.push(v);
+            }
+            View::Element(el) => {
+                let binds = el.name.name == "slot" && el.args.len() >= 2;
+                collect_decls(&el.children, per_item || binds, out)?;
+            }
+            View::If { then, els, .. } => {
+                collect_decls(then, per_item, out)?;
+                if let Some(e) = els {
+                    collect_decls(e, per_item, out)?;
+                }
+            }
+            View::For { body, .. } => collect_decls(body, true, out)?,
+            View::Match { arms, .. } => {
+                for (_, b) in arms {
+                    collect_decls(b, true, out)?;
+                }
+            }
+            View::Routes { arms, .. } => {
+                for (_, _, b) in arms {
+                    collect_decls(b, true, out)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Content given for one slot of a used component; `bind` holds the value the slot passes.
