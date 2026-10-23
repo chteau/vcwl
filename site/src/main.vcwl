@@ -17,6 +17,12 @@ struct Quote {
     text: String,
 }
 
+struct Site {
+    name: String,
+    url: String,
+    blurb: String,
+}
+
 struct Plan {
     name: String,
     price: String,
@@ -32,6 +38,12 @@ fn quotes() -> [Quote] {
         Quote { who: "Senior Staff Principal Distinguished Thought Leader", role: "LinkedIn", text: "Agree? 🙏 VCWL taught me more about leadership than my three divorces. Repost if you're hiring." },
         Quote { who: "The canvas renderer", role: "Drawing everything by hand", text: "You people have the DOM. You had the DOM. Why am I doing this." },
         Quote { who: "A WebAssembly module", role: "Sandboxed", text: "Being memory safe at the bytecode level does not make your app secure. Please stop putting that on slides." },
+    ]
+}
+
+fn showcase() -> [Site] {
+    [
+        Site { name: "MoonRb1x", url: "https://moonrb1x.github.io/", blurb: "A Roblox UI designer's portfolio. Shops, inventories and HUDs, painted on a canvas." },
     ]
 }
 
@@ -164,6 +176,7 @@ component Home {
         Problems()
         VibeCheck()
         Quotes()
+        Showcase()
         Pricing()
         Honest()
     }
@@ -764,6 +777,42 @@ component Quotes {
                                             size: 12px
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component Showcase {
+    section(id: "showcase", label: "Showcase") {
+        column(gap: 18px) {
+            heading("Made with VCWL", level: 2) {
+                style Title
+                style Reveal
+            }
+            paragraph("Real websites, by real people, who were warned.") {
+                style Fine
+            }
+            grid(gap: 18px) {
+                style ThreeCols
+                for s in showcase() key s.url {
+                    article {
+                        style Panel
+                        style Reveal
+                        column(gap: 10px) {
+                            link("{s.name} ↗", href: s.url) {
+                                style {
+                                    color: #b6ff6c
+                                    size: 18px
+                                }
+                            }
+                            paragraph(s.blurb) {
+                                style {
+                                    color: #d6d6d6
                                 }
                             }
                         }
