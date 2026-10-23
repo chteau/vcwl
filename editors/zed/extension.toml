@@ -1,9 +1,10 @@
 id = "vcwl"
 name = "VCWL"
-description = "VCWL (Vibe Coded Web Language): highlighting, plus errors, lints and formatting from `vcwl lsp`."
-version = "0.1.0"
+description = "VCWL (Vibe Coded Web Language): highlighting, plus errors, lints and formatting from `vcwl lsp`. It looks like Rust. It is not Rust."
+version = "0.3.0"
 schema_version = 1
-authors = ["VCWL contributors"]
+authors = ["Cheeteau"]
+repository = "https://github.com/chteau/vcwl"
 
 [grammars.vcwl]
 # `rev` is a commit holding the grammar.
