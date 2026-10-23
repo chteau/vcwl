@@ -151,6 +151,7 @@ component App {
                     "/docs/install" => Docs(slug: "install")
                     "/docs/quickstart" => Docs(slug: "quickstart")
                     "/docs/tour" => Docs(slug: "tour")
+                    "/docs/functions" => Docs(slug: "functions")
                     "/docs/components" => Docs(slug: "components")
                     "/docs/styles" => Docs(slug: "styles")
                     "/docs/data" => Docs(slug: "data")
@@ -239,7 +240,7 @@ component Nav {
                         open = false
                     }
                 }
-                span("v0.1.0 (vibes edition)") {
+                span("v0.2.0 (vibes edition)") {
                     style Muted
                     style {
                         when viewport < 500px {

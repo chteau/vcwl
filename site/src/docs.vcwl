@@ -42,6 +42,12 @@ fn is_keyword(w: String) -> Bool {
         "style" => true
         "when" => true
         "fetch" => true
+        "await" => true
+        "impl" => true
+        "interface" => true
+        "self" => true
+        "Self" => true
+        "as" => true
         "return" => true
         "export default" => true
         "const" => true
