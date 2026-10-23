@@ -14,6 +14,27 @@ fn parse(text: String) -> [Int] {
     out
 }
 
+// The keys 1..=n, ordered by `i * step % n` (a permutation when step and n are coprime).
+fn spread(n: Int, step: Int) -> [Int] {
+    var out: [Int] = []
+    var i = 0
+    while i < n {
+        out = out.push(i * step % n + 1)
+        i += 1
+    }
+    out
+}
+
+fn countdown(n: Int) -> [Int] {
+    var out: [Int] = []
+    var i = 0
+    while i < n {
+        out = out.push(n - i)
+        i += 1
+    }
+    out
+}
+
 component App {
     state draft: String = ""
     state keys: [Int] = []
@@ -27,6 +48,21 @@ component App {
         button("Apply", submit: true)
         on submit {
             keys = parse(draft)
+        }
+    }
+    button("Big") {
+        on click {
+            keys = spread(1000, 1)
+        }
+    }
+    button("Reverse") {
+        on click {
+            keys = countdown(1000)
+        }
+    }
+    button("Shuffle") {
+        on click {
+            keys = spread(1000, 7919)
         }
     }
     list {

@@ -79,5 +79,65 @@ test("reversal and clearing", async () => {
   assert.deepEqual((await rendered()).map(([k]) => k), [...keys].reverse());
   await apply([]);
   assert.deepEqual(await rendered(), []);
-  assert.equal(await app.page.evaluate(() => window.vcwl.liveListeners()), 2, "only the form's listeners remain");
+  assert.equal(
+    await app.page.evaluate(() => window.vcwl.liveListeners()),
+    5,
+    "only the form's and the buttons' listeners remain",
+  );
+});
+
+/** Clicks the button labelled `label` and resolves once the first item reads `first`; returns ms taken. */
+function press(label, first) {
+  return app.page.evaluate(
+    ([label, first]) =>
+      new Promise((resolve) => {
+        const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === label);
+        const t0 = performance.now();
+        btn.click();
+        const check = () => {
+          if (document.querySelector("li")?.textContent.trim() === first) resolve(performance.now() - t0);
+          else requestAnimationFrame(check);
+        };
+        check();
+      }),
+    [label, first],
+  );
+}
+
+/** Marks every rendered item node with its current key. */
+const tagNodes = () =>
+  app.page.evaluate(() => {
+    for (const li of document.querySelectorAll("li")) li.dataset.tag = li.textContent.trim();
+  });
+
+/** Keys in DOM order, and whether every node is the one tagged with its key. */
+const snapshot = () =>
+  app.page.evaluate(() => {
+    const lis = [...document.querySelectorAll("li")];
+    return {
+      keys: lis.map((li) => Number(li.textContent.trim())),
+      kept: lis.every((li) => li.dataset.tag === li.textContent.trim()),
+    };
+  });
+
+test("a 1000-item keyed list is reversed and shuffled reusing its nodes", async () => {
+  const n = 1000;
+  await press("Big", "1");
+  assert.deepEqual((await snapshot()).keys, Array.from({ length: n }, (_, i) => i + 1));
+
+  await tagNodes();
+  const before = await app.page.evaluate(() => window.vcwl.moves());
+  const ms = await press("Reverse", String(n));
+  const rev = await snapshot();
+  assert.deepEqual(rev.keys, Array.from({ length: n }, (_, i) => n - i));
+  assert.ok(rev.kept, "reversal keeps every node");
+  assert.equal((await app.page.evaluate(() => window.vcwl.moves())) - before, n - 1);
+  assert.ok(ms < 200, `reversal took ${ms} ms`);
+
+  await tagNodes();
+  await press("Shuffle", "1");
+  const shuf = await snapshot();
+  assert.deepEqual(shuf.keys, Array.from({ length: n }, (_, i) => ((i * 7919) % n) + 1));
+  assert.ok(shuf.kept, "shuffle keeps every node");
+  assert.deepEqual(app.errors, []);
 });

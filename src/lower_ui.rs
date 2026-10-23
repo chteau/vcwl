@@ -2865,6 +2865,25 @@ impl Lower<'_> {
                 cx.temp(VT::I32),
             );
             let (pred, tails) = (cx.temp(VT::Ref(i32_arr)), cx.temp(VT::Ref(i32_arr)));
+            let (bc, lc) = lb(cx);
+            let (bt, lt) = lb(cx);
+            let lf = cx.label();
+            let (htab, hmask, hv, e) = (
+                cx.temp(VT::Ref(i32_arr)),
+                cx.temp(VT::I32),
+                cx.temp(VT::I32),
+                cx.temp(VT::I32),
+            );
+            let old_key = IExpr::StructGet(
+                fty,
+                f_key,
+                b(un(
+                    UnOp::RefAsNonNull,
+                    IExpr::ArrayGet(arr_frags, b(get(old)), b(get(j))),
+                )),
+            );
+            let hash_old = self.key_hash(cx, &key_ty, old_key, hv);
+            let hash_new = self.key_hash(cx, &key_ty, get(kl), hv);
             let src_at = |at: IExpr| IExpr::ArrayGet(i32_arr, b(get(src)), b(at));
             let pnode = IExpr::StructGet(ty, fp, b(get(0)));
             let reconcile = vec![
@@ -2876,6 +2895,81 @@ impl Lower<'_> {
                 set(new, IExpr::ArrayNewDefault(arr_frags, b(get(n)))),
                 set(used, IExpr::ArrayNewDefault(i32_arr, b(get(on)))),
                 set(src, IExpr::ArrayNewDefault(i32_arr, b(get(n)))),
+                // Open-addressing table from key hash to old index + 1, at most half full.
+                set(hmask, IExpr::I32(1)),
+                IExpr::Block(
+                    bc,
+                    None,
+                    vec![IExpr::Loop(
+                        lc,
+                        vec![
+                            IExpr::BrIf(
+                                bc,
+                                b(bin(
+                                    Op::I32GeU,
+                                    get(hmask),
+                                    bin(Op::I32Shl, get(on), IExpr::I32(1)),
+                                )),
+                            ),
+                            set(
+                                hmask,
+                                bin(
+                                    Op::I32Or,
+                                    bin(Op::I32Shl, get(hmask), IExpr::I32(1)),
+                                    IExpr::I32(1),
+                                ),
+                            ),
+                            IExpr::Br(lc),
+                        ],
+                    )],
+                ),
+                set(
+                    htab,
+                    IExpr::ArrayNewDefault(
+                        i32_arr,
+                        b(bin(Op::I32Add, get(hmask), IExpr::I32(1))),
+                    ),
+                ),
+                for_range(
+                    j,
+                    get(on),
+                    vec![
+                        hash_old,
+                        set(hv, bin(Op::I32And, get(hv), get(hmask))),
+                        IExpr::Block(
+                            bt,
+                            None,
+                            vec![IExpr::Loop(
+                                lt,
+                                vec![
+                                    IExpr::BrIf(
+                                        bt,
+                                        b(un(
+                                            UnOp::I32Eqz,
+                                            IExpr::ArrayGet(i32_arr, b(get(htab)), b(get(hv))),
+                                        )),
+                                    ),
+                                    set(
+                                        hv,
+                                        bin(
+                                            Op::I32And,
+                                            bin(Op::I32Add, get(hv), IExpr::I32(1)),
+                                            get(hmask),
+                                        ),
+                                    ),
+                                    IExpr::Br(lt),
+                                ],
+                            )],
+                        ),
+                        IExpr::ArraySet(
+                            i32_arr,
+                            b(get(htab)),
+                            b(get(hv)),
+                            b(bin(Op::I32Add, get(j), IExpr::I32(1))),
+                        ),
+                    ],
+                    lf,
+                ),
                 set(i, IExpr::I32(0)),
                 // Match each new item to an unused old fragment with the same key.
                 IExpr::Block(
@@ -2910,36 +3004,64 @@ impl Lower<'_> {
                                 )],
                                 vec![],
                             ),
-                            set(j, IExpr::I32(0)),
-                            IExpr::Block(
-                                b2,
+                            IExpr::If(
                                 None,
-                                vec![IExpr::Loop(
-                                    l2,
-                                    vec![
-                                        IExpr::BrIf(
-                                            b2,
-                                            b(bin(Op::I32GeS, get(found), IExpr::I32(0))),
-                                        ),
-                                        IExpr::BrIf(b2, b(bin(Op::I32GeU, get(j), get(on)))),
-                                        IExpr::If(
-                                            None,
-                                            b(un(
-                                                UnOp::I32Eqz,
-                                                IExpr::ArrayGet(i32_arr, b(get(used)), b(get(j))),
-                                            )),
-                                            vec![IExpr::If(
-                                                None,
-                                                b(un(UnOp::I32Eqz, key_neq)),
-                                                vec![set(found, get(j))],
-                                                vec![],
-                                            )],
-                                            vec![],
-                                        ),
-                                        set(j, bin(Op::I32Add, get(j), IExpr::I32(1))),
-                                        IExpr::Br(l2),
-                                    ],
-                                )],
+                                b(bin(Op::I32LtS, get(found), IExpr::I32(0))),
+                                vec![
+                                    hash_new,
+                                    set(hv, bin(Op::I32And, get(hv), get(hmask))),
+                                    IExpr::Block(
+                                        b2,
+                                        None,
+                                        vec![IExpr::Loop(
+                                            l2,
+                                            vec![
+                                                IExpr::BrIf(
+                                                    b2,
+                                                    b(bin(Op::I32GeS, get(found), IExpr::I32(0))),
+                                                ),
+                                                set(
+                                                    e,
+                                                    IExpr::ArrayGet(
+                                                        i32_arr,
+                                                        b(get(htab)),
+                                                        b(get(hv)),
+                                                    ),
+                                                ),
+                                                IExpr::BrIf(b2, b(un(UnOp::I32Eqz, get(e)))),
+                                                set(j, bin(Op::I32Sub, get(e), IExpr::I32(1))),
+                                                IExpr::If(
+                                                    None,
+                                                    b(un(
+                                                        UnOp::I32Eqz,
+                                                        IExpr::ArrayGet(
+                                                            i32_arr,
+                                                            b(get(used)),
+                                                            b(get(j)),
+                                                        ),
+                                                    )),
+                                                    vec![IExpr::If(
+                                                        None,
+                                                        b(un(UnOp::I32Eqz, key_neq)),
+                                                        vec![set(found, get(j))],
+                                                        vec![],
+                                                    )],
+                                                    vec![],
+                                                ),
+                                                set(
+                                                    hv,
+                                                    bin(
+                                                        Op::I32And,
+                                                        bin(Op::I32Add, get(hv), IExpr::I32(1)),
+                                                        get(hmask),
+                                                    ),
+                                                ),
+                                                IExpr::Br(l2),
+                                            ],
+                                        )],
+                                    ),
+                                ],
+                                vec![],
                             ),
                             IExpr::If(
                                 None,
@@ -3298,6 +3420,80 @@ impl Lower<'_> {
             });
         }
         self.gen_scope(fs, comp, body);
+    }
+
+    /// Stores into i32 local `h` a hash of list key `k`, consistent with `values_differ`.
+    fn key_hash(&mut self, cx: &mut FnCx, key_ty: &Type, k: IExpr, h: u32) -> IExpr {
+        let mix = |h: u32| {
+            set(
+                h,
+                bin(
+                    Op::I32Xor,
+                    get(h),
+                    bin(Op::I32ShrU, get(h), IExpr::I32(16)),
+                ),
+            )
+        };
+        let of_i64 = |x: u32| {
+            IExpr::Seq(vec![
+                set(
+                    h,
+                    bin(
+                        Op::I32Mul,
+                        bin(
+                            Op::I32Xor,
+                            un(UnOp::I32WrapI64, get(x)),
+                            un(
+                                UnOp::I32WrapI64,
+                                bin(Op::I64ShrU, get(x), IExpr::I64(32)),
+                            ),
+                        ),
+                        IExpr::I32(0x9E37_79B1_u32 as i32),
+                    ),
+                ),
+                mix(h),
+            ])
+        };
+        match key_ty {
+            Type::Int => {
+                let x = cx.temp(VT::I64);
+                IExpr::Seq(vec![set(x, k), of_i64(x)])
+            }
+            Type::Float => {
+                let x = cx.temp(VT::I64);
+                IExpr::Seq(vec![set(x, un(UnOp::I64TruncSatF64S, k)), of_i64(x)])
+            }
+            Type::Bool => set(h, k),
+            Type::Str => {
+                let s = self.str_ty;
+                let sl = cx.temp(VT::Ref(s));
+                let p = cx.temp(VT::I32);
+                let l = cx.label();
+                IExpr::Seq(vec![
+                    set(sl, un(UnOp::RefAsNonNull, k)),
+                    set(h, IExpr::I32(0x811C_9DC5_u32 as i32)),
+                    for_range(
+                        p,
+                        IExpr::ArrayLen(b(get(sl))),
+                        vec![set(
+                            h,
+                            bin(
+                                Op::I32Mul,
+                                bin(
+                                    Op::I32Xor,
+                                    get(h),
+                                    IExpr::ArrayGetU(s, b(get(sl)), b(get(p))),
+                                ),
+                                IExpr::I32(16_777_619),
+                            ),
+                        )],
+                        l,
+                    ),
+                    mix(h),
+                ])
+            }
+            _ => IExpr::Seq(vec![IExpr::Drop(b(k)), set(h, IExpr::I32(0))]),
+        }
     }
 
     /// Dev builds: warn when the key of fragment `f` (at position `i`) equals an earlier key.
