@@ -97,7 +97,7 @@ vcwl build    # a static site in dist/
   OAuth popups, storage, Intl, Web Crypto, clipboard, geolocation...).
 - **Packages.** A registry that is a git branch (like Wally), lock files, and a security
   review before anything gets installed.
-- **Tools.** `vcwl fmt`, `vcwl lint`, `vcwl lsp`, VS Code and Zed extensions, an in-page
+- **Tools.** `vcwl fmt`, `vcwl lint`, `vcwl lsp`, a [VS Code extension](https://marketplace.visualstudio.com/items?itemName=chteau.vcwl), a Zed extension (registry listing coming soon), an in-page
   debugger in dev builds, prerendering, sitemaps and Open Graph tags.
 
 What it is not: fast on purpose, battle-tested, or a good idea for your employer's checkout.
