@@ -1,21 +1,75 @@
 {
   "name": "vcwl",
   "displayName": "VCWL",
-  "description": "VCWL (Vibe Coded Web Language): highlighting, plus errors, lints, completion and formatting from `vcwl lsp`.",
-  "version": "0.1.0",
-  "publisher": "vcwl",
+  "description": "VCWL (Vibe Coded Web Language): highlighting, plus errors, lints, completion and formatting from `vcwl lsp`. It looks like Rust. It is not Rust.",
+  "version": "0.3.0",
+  "publisher": "chteau",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#0d0d0d",
+    "theme": "dark"
+  },
+  "homepage": "https://vcwl.chteau.bzh/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chteau/vcwl.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/chteau/vcwl/issues"
+  },
+  "keywords": [
+    "vcwl",
+    "vibe",
+    "webassembly",
+    "wasm",
+    "web",
+    "language",
+    "lsp",
+    "satire"
+  ],
   "license": "MIT",
-  "engines": { "vscode": "^1.80.0" },
-  "categories": ["Programming Languages", "Linters", "Formatters"],
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
   "main": "./extension.js",
-  "activationEvents": ["onLanguage:vcwl"],
+  "activationEvents": [
+    "onLanguage:vcwl"
+  ],
   "contributes": {
-    "languages": [{ "id": "vcwl", "aliases": ["VCWL", "vcwl"], "extensions": [".vcwl"], "configuration": "./language-configuration.json" }],
-    "grammars": [{ "language": "vcwl", "scopeName": "source.vcwl", "path": "./syntaxes/vcwl.tmLanguage.json" }],
+    "languages": [
+      {
+        "id": "vcwl",
+        "aliases": [
+          "VCWL",
+          "vcwl"
+        ],
+        "extensions": [
+          ".vcwl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vcwl",
+        "scopeName": "source.vcwl",
+        "path": "./syntaxes/vcwl.tmLanguage.json"
+      }
+    ],
     "configuration": {
       "title": "VCWL",
       "properties": {
-        "vcwl.path": { "type": "string", "default": "vcwl", "description": "The vcwl binary (its `lsp` command serves this extension)." }
+        "vcwl.path": {
+          "type": "string",
+          "default": "vcwl",
+          "description": "The vcwl binary (its `lsp` command serves this extension)."
+        }
       }
     }
   }

@@ -19,7 +19,8 @@ Lints (per file; a name counts as used when it appears anywhere else in the file
 
 `editors/vscode` is an extension without dependencies: a TextMate grammar and a small client for
 `vcwl lsp`. With `vcwl` on your PATH (`cargo install --path .`), package it with
-`npx @vscode/vsce package` and install the `.vsix`, or open the folder and press F5.
+Install it from the VS Code Marketplace (`chteau.vcwl`), or build it with `npx @vscode/vsce package`
+and install the `.vsix`, or open the folder and press F5.
 `node --test editors/vscode/test.mjs` runs it against the real server with a stand-in for the
 editor API (not inside VS Code itself).
 
