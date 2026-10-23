@@ -13,6 +13,30 @@ makes a release build and serves `dist/` together with the functions in
 each rebuild. `save`/`load` keep their data in `data/store.json` (`store = "..."` in
 vcwl.toml), written atomically after each call that changes it.
 
+Calls run in parallel, each in its own instance. `query` and `exec` use a SQLite file next to the
+store, named `<store>.sqlite`.
+
+### Sessions
+
+`session(key)`, `set_session(key, value)` and `end_session(key)` keep values in an HMAC-SHA256
+signed cookie named `vcwl_session`. The secret comes from the `VCWL_SECRET` environment variable;
+without it one is generated and kept in the store. Set it when running several servers or when
+sessions must survive a deleted store.
+
+### Rate limits
+
+An optional `vcwl.limits.toml` in the project root limits calls per client IP:
+
+```toml
+calls_per_minute = 120
+
+[functions]
+sign = 10
+```
+
+`calls_per_minute` applies to all functions; entries under `[functions]` apply to the named
+function. Over the limit the server answers 429.
+
 The site's static files still work on any static host; only the function calls need `vcwl serve`.
 Behind a reverse proxy, forward everything (or at least `/__vcwl/fn/`) to it; it speaks plain
 HTTP/1.1 and should not be exposed without TLS in front.
@@ -34,6 +58,17 @@ them. Combined with `prerender = true`, every page holds its own prerendered HTM
 GitHub Pages serves `.wasm` files as `application/wasm`, which lets the browser compile the module
 while it downloads. Other hosts should do the same; the host falls back to a non-streaming
 compile otherwise.
+
+Parameterized routes (`"/post/:id"`) are prerendered for the concrete URLs listed in
+`prerender_routes = ["/post/1"]`; other URLs matching the pattern are served by `404.html`, which
+starts the app.
+
+## `vcwl deploy`
+
+`vcwl deploy <netlify|pages|folder DIR> [--yes]` builds the site, goes through a short ceremony,
+and writes `dist/.vcwl-manifest.json` with the sha256 of every file. Unless `--yes` is given, it
+asks you to type the project name first. `VCWL_DEPLOY_DRY_RUN=1` does everything except the
+upload. `vcwl doctor` checks the environment and the project before you try.
 
 ## With GitHub Actions
 

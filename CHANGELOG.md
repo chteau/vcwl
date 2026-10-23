@@ -2,6 +2,57 @@
 
 All notable changes, grouped by milestone.
 
+## 0.3.0 — 2026-10-23
+
+"It ain't Rust" edition. VCWL looks like Rust. It is not Rust. There is no borrow checker, no
+lifetimes, no `unsafe`, and no crab. Writing Rust in a `.vcwl` file gets you a diagnostic, not a
+compiler.
+
+- Tuples: `(Int, String)`, `(a, b)`, `t.0`, `let (a, b) = t`, `for (k, v) in xs` and tuple
+  patterns in `match`, with 2 to 4 elements. They are sugar for the prelude enums `Tuple2` to
+  `Tuple4` and encode to JSON as such.
+- `Map<V>` with String keys (JSON objects have string keys, and so do we): `empty_map<V>()`,
+  `get`, `has`, `set`, `remove`, `len`, `keys`, `values`, `entries`. Maps are immutable: `set`
+  returns a new map. A set of Strings: `empty_set()`, `has`, `add`, `remove`, `len`, `items`,
+  `union`, `intersect`.
+- Strings: `chars()`, `char_len()` and `char_slice(a, b)` count Unicode code points; `len` and
+  `slice` still count bytes.
+- `await` also works inside `if`/`else` and `match` arms of handlers (the rest of the handler is
+  copied into each branch). Still not in loops or closures.
+- Not-Rust diagnostics: a file that fails to parse and contains `println!`, `::`, `&`,
+  `let mut`, `#[derive]`, `.unwrap()`, `Vec<`, `pub fn`, `use` or lifetimes gets an error with
+  the VCWL spelling. `.rs` entry files are refused.
+- Runtime errors carry `at file:line:col`, and wasm modules have a name section, so stack traces
+  show VCWL function names.
+- Route parameters: `"/post/:id" => Post(id: id)` binds `id: String` in the arm.
+  `prerender_routes = ["/post/1"]` in vcwl.toml prerenders concrete URLs; other parameter URLs
+  are served by `404.html` with path routing.
+- Components: more than 62 values (those past 60 share one dependency bit, so they re-render a
+  little more); `state` and `let` anywhere in a component body except inside `for` and
+  `match`/routes arms; derived `let` values read in a handler after an assignment see the new
+  value; `style if` always overrides a plain `style` on the same element.
+- `on js "name"(msg: T) { ... }` handlers; JavaScript calls `window.vcwl.dispatch("name",
+  value)` (also on the app object). `@web` gains `websocket(url, event) -> Int`,
+  `ws_send(id, text)` and `ws_close(id)`; each message arrives as the js event `event`.
+- `meta(title: ..., description: ...)` view item sets the document title and meta description
+  while shown; prerendered pages get them.
+- Texts and attributes over 60,000 bytes are sent in chunks, so the limit is gone. Keyed lists
+  use a key map and a longest increasing subsequence: O(n log n), minimal moves.
+- Server functions: calls run in parallel, each in its own instance. `query<T>(sql, params)` and
+  `exec(sql, params)` use a SQLite file next to the store (`<store>.sqlite`), params bound as
+  text. `http(method, url, body)` returns `Result<HttpResponse, String>` by shelling out to curl
+  with a 10 s timeout (we invented the network request again, but worse). Sessions:
+  `session(key)`, `set_session(key, value)`, `end_session(key)`, in an HMAC-SHA256 signed
+  `vcwl_session` cookie whose secret comes from `VCWL_SECRET` or is generated and kept in the
+  store. An optional `vcwl.limits.toml` sets `calls_per_minute` and per-function limits per
+  client IP; over the limit is a 429.
+- `vcwl deploy <netlify|pages|folder DIR> [--yes]` builds, performs a ceremony (type the project
+  name unless `--yes`) and writes `dist/.vcwl-manifest.json` with the sha256 of every file;
+  `VCWL_DEPLOY_DRY_RUN=1` skips the upload.
+- `vcwl doctor` checks the environment and project, including Rust contamination.
+- `vcwl new --enterprise <dir>` creates a working counter app spread over domain, application
+  and presentation layers, with factories and interfaces.
+
 ## 0.2.0 — 2026-10-23
 
 - Closures and first-class functions: `|x| x * 2`, `|a, b: Int| -> Int { ... }`, function types

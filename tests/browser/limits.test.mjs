@@ -31,9 +31,16 @@ test("nested state works and handlers read derived values after assigning", asyn
 
 test("style if wins over a plain style setting the same property", async () => {
   const { page } = app;
-  const color = () => page.$eval("h1", (e) => getComputedStyle(e).color);
-  assert.equal(await color(), "rgb(0, 0, 255)");
+  // The canvas draws the heading: read the color the renderer computed for it.
+  const color = async () => {
+    const id = (await tree(page)).one("h2:text('Colored')").id;
+    const info = await page.evaluate((id) => window.vcwl.inspect(id), id);
+    const find = (o) => (o && typeof o === "object" ? ("color" in o ? o.color : Object.values(o).map(find).find(Boolean)) : undefined);
+    return find(info);
+  };
+  assert.equal(await color(), "#0000ffff");
   await click(page, "button:text('Toggle')");
-  await page.waitForFunction(() => getComputedStyle(document.querySelector("h1")).color === "rgb(255, 0, 0)");
-  assert.equal(await color(), "rgb(255, 0, 0)");
+  await waitFor(page, () => true);
+  for (let i = 0; i < 50 && (await color()) !== "#ff0000ff"; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(await color(), "#ff0000ff");
 });

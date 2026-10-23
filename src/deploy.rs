@@ -63,7 +63,9 @@ fn exec(dry: bool, dir: Option<&Path>, program: &str, args: &[&str]) -> Result<(
     if let Some(d) = dir {
         c.current_dir(d);
     }
-    let st = c.status().map_err(|e| format!("cannot run `{shown}`: {e}"))?;
+    let st = c
+        .status()
+        .map_err(|e| format!("cannot run `{shown}`: {e}"))?;
     if st.success() {
         Ok(())
     } else {

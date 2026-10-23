@@ -2109,7 +2109,8 @@ impl<'a> Checker<'a> {
             _ => {}
         }
         let user_fn = matches!(self.scopes[self.file].get(name), Some(Sym::Fn(id)) if self.sigs[*id].file != 0);
-        if !user_fn && matches!(
+        if !user_fn
+            && matches!(
                 name,
                 "env"
                     | "load"
@@ -2974,7 +2975,10 @@ fn block_awaits(b: &ast::Block) -> bool {
         Stmt::Let { value, .. } => is_await(value),
         Stmt::Expr(v) => is_await(v) || branch_awaits(v),
         _ => false,
-    }) || b.tail.as_deref().is_some_and(|t| is_await(t) || branch_awaits(t))
+    }) || b
+        .tail
+        .as_deref()
+        .is_some_and(|t| is_await(t) || branch_awaits(t))
 }
 
 fn arm_awaits(e: &ast::Expr) -> bool {
@@ -2987,7 +2991,9 @@ fn arm_awaits(e: &ast::Expr) -> bool {
 /// Whether `e` is an `if`/`match` with an `await` statement at the top level of some branch.
 fn branch_awaits(e: &ast::Expr) -> bool {
     match &e.kind {
-        ExprKind::If { then, els, .. } => block_awaits(then) || els.as_deref().is_some_and(arm_awaits),
+        ExprKind::If { then, els, .. } => {
+            block_awaits(then) || els.as_deref().is_some_and(arm_awaits)
+        }
         ExprKind::Match { arms, .. } => arms.iter().any(|a| arm_awaits(&a.body)),
         _ => false,
     }
@@ -3068,7 +3074,9 @@ fn collect_branch_blocks(e: &ast::Expr, out: &mut Vec<*const ast::Block>) {
                 collect_branch_blocks(x, out);
             }
         }
-        ExprKind::Match { arms, .. } => arms.iter().for_each(|a| collect_branch_blocks(&a.body, out)),
+        ExprKind::Match { arms, .. } => arms
+            .iter()
+            .for_each(|a| collect_branch_blocks(&a.body, out)),
         ExprKind::Block(b) => out.push(b as *const ast::Block),
         _ => {}
     }

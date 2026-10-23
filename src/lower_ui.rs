@@ -18,8 +18,8 @@
 use std::collections::HashMap;
 
 use crate::check_ui::{
-    AttrKind, CompSig, Payload, Special, SwitchKind, TComp, TElem, TFill, TJsHandler, TVarKind,
-    META_TAG, TView, route_params,
+    AttrKind, CompSig, META_TAG, Payload, Special, SwitchKind, TComp, TElem, TFill, TJsHandler,
+    TVarKind, TView, route_params,
 };
 use crate::diag::{SourceMap, Span};
 use crate::ir::*;
@@ -2408,30 +2408,28 @@ impl Lower<'_> {
                     (k, IExpr::Seq(body))
                 })
                 .collect(),
-            (SwitchKind::Routes(_, params), _) if params.iter().any(|ps| !ps.is_empty()) => {
-                bscopes
-                    .iter()
-                    .enumerate()
-                    .map(|(k, (bs, bf, _))| {
-                        let bty = self.u().scopes[*bs].ty;
-                        let uf = self.u().scopes[*bs].fns.update;
-                        let fr = un(UnOp::RefAsNonNull, IExpr::StructGet(ty, *bf, b(get(0))));
-                        let mut body = Vec::new();
-                        let binds = self.route_binds(kind, k);
-                        let mask = if binds.is_empty() {
-                            get(1)
-                        } else {
-                            bin(Op::I64Or, get(1), IExpr::I64(BIT_BOUND))
-                        };
-                        for (id, v) in binds {
-                            let f = self.u().scopes[*bs].bound[&id];
-                            body.push(IExpr::StructSet(bty, f, b(fr.clone()), b(v)));
-                        }
-                        body.push(IExpr::Call(FuncRef::Local(uf), vec![fr, mask]));
-                        (k, IExpr::Seq(body))
-                    })
-                    .collect()
-            }
+            (SwitchKind::Routes(_, params), _) if params.iter().any(|ps| !ps.is_empty()) => bscopes
+                .iter()
+                .enumerate()
+                .map(|(k, (bs, bf, _))| {
+                    let bty = self.u().scopes[*bs].ty;
+                    let uf = self.u().scopes[*bs].fns.update;
+                    let fr = un(UnOp::RefAsNonNull, IExpr::StructGet(ty, *bf, b(get(0))));
+                    let mut body = Vec::new();
+                    let binds = self.route_binds(kind, k);
+                    let mask = if binds.is_empty() {
+                        get(1)
+                    } else {
+                        bin(Op::I64Or, get(1), IExpr::I64(BIT_BOUND))
+                    };
+                    for (id, v) in binds {
+                        let f = self.u().scopes[*bs].bound[&id];
+                        body.push(IExpr::StructSet(bty, f, b(fr.clone()), b(v)));
+                    }
+                    body.push(IExpr::Call(FuncRef::Local(uf), vec![fr, mask]));
+                    (k, IExpr::Seq(body))
+                })
+                .collect(),
             _ => vec![],
         };
         let same_branch = if rebind.is_empty() {
@@ -2532,7 +2530,11 @@ impl Lower<'_> {
                 for (k, p) in paths.iter().enumerate().rev() {
                     if let Some(p) = p {
                         let lit = self.string_const(p);
-                        let f = if route_params(p).is_empty() { eq } else { matches };
+                        let f = if route_params(p).is_empty() {
+                            eq
+                        } else {
+                            matches
+                        };
                         let args = if route_params(p).is_empty() {
                             vec![un(UnOp::RefAsNonNull, IExpr::GlobalGet(route)), lit]
                         } else {
@@ -2925,10 +2927,7 @@ impl Lower<'_> {
                 ),
                 set(
                     htab,
-                    IExpr::ArrayNewDefault(
-                        i32_arr,
-                        b(bin(Op::I32Add, get(hmask), IExpr::I32(1))),
-                    ),
+                    IExpr::ArrayNewDefault(i32_arr, b(bin(Op::I32Add, get(hmask), IExpr::I32(1)))),
                 ),
                 for_range(
                     j,
@@ -3427,11 +3426,7 @@ impl Lower<'_> {
         let mix = |h: u32| {
             set(
                 h,
-                bin(
-                    Op::I32Xor,
-                    get(h),
-                    bin(Op::I32ShrU, get(h), IExpr::I32(16)),
-                ),
+                bin(Op::I32Xor, get(h), bin(Op::I32ShrU, get(h), IExpr::I32(16))),
             )
         };
         let of_i64 = |x: u32| {
@@ -3443,10 +3438,7 @@ impl Lower<'_> {
                         bin(
                             Op::I32Xor,
                             un(UnOp::I32WrapI64, get(x)),
-                            un(
-                                UnOp::I32WrapI64,
-                                bin(Op::I64ShrU, get(x), IExpr::I64(32)),
-                            ),
+                            un(UnOp::I32WrapI64, bin(Op::I64ShrU, get(x), IExpr::I64(32))),
                         ),
                         IExpr::I32(0x9E37_79B1_u32 as i32),
                     ),

@@ -41,14 +41,16 @@ pub fn load(
     imports.push(Vec::new());
 
     if entry.extension().is_some_and(|e| e == "rs") {
-        return Err(vec![Diag::compile(
-            Span::default(),
-            format!(
-                "`{}` is a Rust file. rustc is down the hall, second door on the left",
-                entry.display()
-            ),
-        )
-        .help("VCWL sources end in `.vcwl`")]);
+        return Err(vec![
+            Diag::compile(
+                Span::default(),
+                format!(
+                    "`{}` is a Rust file. rustc is down the hall, second door on the left",
+                    entry.display()
+                ),
+            )
+            .help("VCWL sources end in `.vcwl`"),
+        ]);
     }
 
     let mut queue = vec![(entry.to_path_buf(), None::<(usize, Span)>)];

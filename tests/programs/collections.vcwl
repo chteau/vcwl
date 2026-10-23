@@ -21,16 +21,16 @@ fn main() {
     m = m.set("c", 3)
     m = m.set("a", 1)
     m = m.set("b", 2)
-    print(m.len())
+    print("{m.len()}")
     match m.get("b") {
         Some(v) => print("Some({v})"),
         None => print("None"),
     }
-    print(m.has("a"))
-    print(m.has("zz"))
+    print((m.has("a")).to_string())
+    print((m.has("zz")).to_string())
     print(m.keys().join(","))
-    print(m.set("b", 9).values().sum() + 7)
-    print(m.remove("a").len())
+    print((m.set("b", 9).values().sum() + 7).to_string())
+    print((m.remove("a").len()).to_string())
     for e in m.set("b", 9).entries() {
         if e._0() == "b" {
             print("b={e._1()}")
@@ -38,18 +38,18 @@ fn main() {
     }
 
     let word = "héllo🦀"
-    print(word.char_len())
+    print("{word.char_len()}")
     let cs = word.chars()
     print("{cs[0]}|{cs[1]}|{cs[2]}")
     print(word.char_slice(1, 4))
 
     var s = empty_set().add("y").add("x").add("y")
-    print(s.len() + 1)
+    print("{s.len() + 1}")
     let t = empty_set().add("z").add("y")
     print(s.union(t).items().join(","))
     print(s.intersect(t).items().join(","))
-    print(s.remove("x").len())
+    print((s.remove("x").len()).to_string())
     print(s.remove("y").items().join(","))
     let tr = (1, "a", 2.0)
-    print(tr._0() + 6)
+    print("{tr._0() + 6}")
 }

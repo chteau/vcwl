@@ -24,6 +24,9 @@ reasons nobody can fully explain, the app doesn't use the browser DOM: a rendere
 in Rust and compiled to WebAssembly, lays out and paints everything onto a single `<canvas>`,
 while an invisible DOM mirror keeps it accessible, selectable and crawlable.
 
+VCWL looks like Rust. It is not Rust. There is no borrow checker, no lifetimes, no `unsafe`, and
+no crab. Writing Rust in a `.vcwl` file gets you a diagnostic, not a compiler.
+
 It started as a joke and kept going. The joke is now load-bearing.
 
 ```vcwl
@@ -113,6 +116,9 @@ an application secure.
 | `vcwl check` · `vcwl test` · `vcwl fmt` · `vcwl lint` | type-check, test, format, lint |
 | `vcwl install` · `add` · `remove` · `publish` · `search` · `audit` | packages |
 | `vcwl lsp` | language server on stdin/stdout |
+| `vcwl new --enterprise <dir>` | a counter app spread over domain, application and presentation layers, with factories and interfaces |
+| `vcwl deploy <netlify\|pages\|folder DIR> [--yes]` | build, a short ceremony, and `dist/.vcwl-manifest.json` (sha256 of every file) |
+| `vcwl doctor` | check the environment and project, Rust contamination included |
 | `vcwl upgrade` | install the latest release (after a short math quiz) |
 | `vcwl run <file>` · `vcwl compile <file>` | run a program's `main` in Node.js, or compile one file |
 

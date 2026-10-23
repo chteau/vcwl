@@ -12,7 +12,7 @@
 (operator) @operator
 
 ; Contextual keywords (plain names to the loose grammar).
-((identifier) @keyword (#any-of? @keyword "impl" "interface" "await" "as"))
+((identifier) @keyword (#any-of? @keyword "impl" "interface" "await" "as" "js" "meta"))
 ((identifier) @variable.builtin (#eq? @variable.builtin "self"))
 ((type_identifier) @type.builtin (#eq? @type.builtin "Self"))
 

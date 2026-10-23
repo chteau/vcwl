@@ -1678,8 +1678,9 @@ impl<'a> Parser<'a> {
             self.bump();
             self.bump();
             let name = self.plain_str("a JavaScript event name")?;
-            self.expect("(")
-                .map_err(|d| d.help("name the event's value: `on js \"chat\"(msg: Message) { ... }`"))?;
+            self.expect("(").map_err(|d| {
+                d.help("name the event's value: `on js \"chat\"(msg: Message) { ... }`")
+            })?;
             let param = self.ident()?;
             self.expect(":")?;
             let ty = self.type_expr()?;

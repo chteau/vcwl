@@ -2,6 +2,16 @@
 
 This describes the language as implemented. Programs are UTF-8 files ending in `.vcwl`.
 
+## It is not Rust
+
+VCWL looks like Rust. It is not Rust. There is no borrow checker, no lifetimes, no `unsafe`, and
+no crab. Writing Rust in a .vcwl file gets you a diagnostic, not a compiler.
+
+When a file fails to parse and contains Rust-isms (`println!`, `::`, `&`, `let mut`,
+`#[derive]`, `.unwrap()`, `Vec<`, `pub fn`, `use`, lifetimes), the error says so and names the VCWL
+spelling (`print`, `.`, no `&`, `var`, `unwrap_or`, `[T]`, `export fn`, `import`). An entry file
+ending in `.rs` is refused. `vcwl doctor` checks the environment for Rust contamination.
+
 ## Lexical structure
 
 - Comments: `// line` and `/* block */`.
@@ -24,6 +34,45 @@ This describes the language as implemented. Programs are UTF-8 files ending in `
 | `T?` | `Option<T>`: `Some(v)` or `None` | enum |
 | `Result<T, E>` | `Ok(v)` or `Err(e)` | enum |
 | user structs and enums | | GC structs |
+
+### Tuples
+
+`(Int, String)` types hold 2 to 4 elements. They are sugar for the prelude enums `Tuple2`,
+`Tuple3` and `Tuple4`, and encode to JSON as such.
+
+```vcwl
+fn pair(a: Int, b: String) -> (Int, String) { (a, b) }
+
+let p = pair(3, "ab")
+print(p.0)                         // fields: t.0, t.1, nested n.0.1
+let (a, b) = (3, 4)                // destructuring let
+for (k, v) in [("x", 1), ("y", 2)] { print("{k}={v}") }
+match p {
+    (n, s) => print("{n}{s}"),     // tuple patterns
+}
+```
+
+### Map and Set
+
+`Map<V>` has `String` keys only, because JSON objects have string keys and so do we. Maps and
+sets are immutable: `set`, `remove` and `add` return a new value.
+
+```vcwl
+var m: Map<Int> = empty_map()
+m = m.set("a", 1).set("b", 2)
+m.get("b")                         // Int?
+m.has("a"); m.len(); m.keys(); m.values(); m.entries()   // entries: [(String, V)]
+m = m.remove("a")
+
+let s = empty_set().add("x").add("y")      // a set of Strings
+s.has("x"); s.len(); s.items()
+s.union(t); s.intersect(t); s.remove("x")
+```
+
+### Characters
+
+`len` and `slice` count bytes. `chars()`, `char_len()` and `char_slice(a, b)` count Unicode code
+points: `"héllo🦀".char_len()` is 6.
 
 Integer division truncates toward zero; division by zero traps. `Float` to `Int` conversion
 (`f.to_int()`) saturates. There are no implicit numeric conversions.
@@ -242,6 +291,25 @@ TodoItem(todo: t) {
 }
 ```
 
+A component can have more than 62 values; those past 60 share one dependency bit, which costs a
+little extra re-rendering. `state` and `let` may appear anywhere in a component body except inside
+`for` and `match`/`routes` arms. A derived `let` read in a handler after an assignment sees the
+new value. `style if` always overrides a plain `style` on the same element. Texts and attributes
+over 60,000 bytes are sent in chunks.
+
+`on js "name"(msg: T) { ... }` handles events from JavaScript, which calls
+`window.vcwl.dispatch("name", value)` (also available on the app object); the value is decoded
+as `T`:
+
+```vcwl
+on js "chat"(msg: Msg) {
+    last = "{msg.from}: {msg.text}"
+}
+```
+
+With `import "@web"`, `websocket(url, event) -> Int` opens a socket and returns its id; each
+message arrives as the js event `event`. `ws_send(id, text)` and `ws_close(id)` do the rest.
+
 Properties are read-only. State changes only in event handlers; assigning in a view is a compile
 error. After a handler finishes, the views that depend on changed values update in one batch.
 
@@ -357,6 +425,11 @@ none, or leaving out the value of one that does, is a compile error.
   (`#/about`) by default, or real paths with `routing = "path"` in vcwl.toml
   ([deploy](deploy.md#real-urls-routing--path)). `route` is the current path; `link(to: "/about")`
   links to a route in either mode.
+- Route parameters: `"/post/:id" => Post(id: id)` binds `id: String` in the arm. With path routing,
+  `prerender_routes = ["/post/1"]` in vcwl.toml prerenders concrete URLs; other parameter URLs
+  are served by `404.html`.
+- `meta(title: "About {name}", description: "...")` sets the document title and meta description
+  while it is shown; prerendered pages get them too.
 
 Events: `on click`, `on input(v)`, `on change(v)`, `on submit`, `on focus`, `on blur`,
 `on dblclick`, and `on mount` in a component body.
@@ -505,8 +578,9 @@ on click {
 }
 ```
 
-- `await` starts a statement (`let x = await ...` or `await ...`) directly in a handler's body,
-  not inside `if`, `match`, loops or closures; any number of them can follow each other.
+- `await` starts a statement (`let x = await ...` or `await ...`) in a handler's body or inside
+  an `if`/`else` branch or a `match` arm of it (the rest of the handler is copied into each
+  branch), not inside loops or closures; any number of them can follow each other.
 - The rest of the handler keeps its local variables (as copies taken at the `await`, which it
   may change) and reads component state as it is when the response arrives.
 - As with `fetch`, nothing runs if the component was removed in the meantime.
@@ -553,6 +627,16 @@ component App {
   shape) and `remove(key)`.
 - Server functions can call ordinary functions and each other. Their code, and what they call,
   is compiled into `dist-server/server.wasm` only; `app.wasm` contains just the call's URL.
+- Calls run in parallel, each in its own instance.
+- `query<T>(sql, params: [String]) -> Result<[T], String>` and
+  `exec(sql, params) -> Result<Int, String>` use a SQLite database next to the store
+  (`<store>.sqlite`). Parameters are bound as text; `exec` returns the rows changed.
+- `http(method, url, body) -> Result<HttpResponse, String>` with
+  `HttpResponse { status, body }`. It shells out to curl with a 10 s timeout. We invented the
+  network request again, but worse.
+- Sessions: `session(key) -> String?`, `set_session(key, value)`, `end_session(key)`, kept in an
+  HMAC-SHA256 signed `vcwl_session` cookie. See [deploy](deploy.md#sessions).
+- Per-client call limits are set in `vcwl.limits.toml` ([deploy](deploy.md#rate-limits)).
 - A panic, trap or call running longer than 5 s is HTTP 500 for the client; the details go to
   the server's log.
 

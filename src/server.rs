@@ -440,7 +440,11 @@ pub fn decode_session(secret: &[u8], cookie_header: Option<&str>) -> BTreeMap<St
         let mac = unhex(mac)?;
         let expected = hmac_sha256(secret, &data);
         if mac.len() != expected.len()
-            || mac.iter().zip(expected).fold(0u8, |acc, (a, b)| acc | (a ^ b)) != 0
+            || mac
+                .iter()
+                .zip(expected)
+                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                != 0
         {
             return None;
         }
@@ -692,10 +696,7 @@ impl Limits {
                     limits.functions.insert(k.to_string(), v);
                 }
                 _ => {
-                    return Err(format!(
-                        "vcwl.limits.toml:{}: unknown setting `{k}`",
-                        n + 1
-                    ));
+                    return Err(format!("vcwl.limits.toml:{}: unknown setting `{k}`", n + 1));
                 }
             }
         }
@@ -1061,10 +1062,7 @@ impl Functions {
         }
         for (key, limit) in checks {
             if limit.is_some() {
-                rates
-                    .entry((client.to_string(), key))
-                    .or_insert((now, 0))
-                    .1 += 1;
+                rates.entry((client.to_string(), key)).or_insert((now, 0)).1 += 1;
             }
         }
         true
@@ -1087,10 +1085,7 @@ impl Functions {
             return (Reply::NotFound, None);
         }
         let Some(args) = Json::parse(args) else {
-            return (
-                Reply::BadRequest("the body is not valid JSON".into()),
-                None,
-            );
+            return (Reply::BadRequest("the body is not valid JSON".into()), None);
         };
         let mut host = HostCtx::new(self.db.clone(), self.db_path.clone());
         host.session = decode_session(&self.secret, cookie);
@@ -1365,14 +1360,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 return;
             };
             let peer = conn.peer_addr().ok().map(|a| a.ip());
-            let res = function_call_from(&req, fns.as_ref().as_ref(), peer).unwrap_or_else(|| {
-                match req.method.as_str() {
+            let res =
+                function_call_from(&req, fns.as_ref().as_ref(), peer).unwrap_or_else(|| match req
+                    .method
+                    .as_str()
+                {
                     "GET" | "HEAD" => crate::devserver::static_file(&out, &req.path),
                     _ => {
                         Response::new("405 Method Not Allowed", "text/plain", "method not allowed")
                     }
-                }
-            });
+                });
             let _ = res.write(&conn, req.method == "HEAD");
         });
     }
@@ -1467,7 +1464,10 @@ mod tests {
         let exec = |ctx: &mut HostCtx, args: &str| {
             text_of(&host_call(ctx, "sql.exec", &Json::parse(args).unwrap()))
         };
-        assert_eq!(exec(&mut ctx, r#"["create table t (a, b)", []]"#), r#"{"ok":0}"#);
+        assert_eq!(
+            exec(&mut ctx, r#"["create table t (a, b)", []]"#),
+            r#"{"ok":0}"#
+        );
         assert_eq!(
             exec(&mut ctx, r#"["insert into t values (?, ?)", ["1", "x"]]"#),
             r#"{"ok":1}"#
@@ -1503,9 +1503,15 @@ mod tests {
             r#"{"err":"unknown host call `nope`"}"#
         );
         let set = Json::parse(r#"["k", "v"]"#).unwrap();
-        assert_eq!(text_of(&host_call(&mut ctx, "session.set", &set)), r#"{"ok":null}"#);
+        assert_eq!(
+            text_of(&host_call(&mut ctx, "session.set", &set)),
+            r#"{"ok":null}"#
+        );
         assert!(ctx.session_changed);
         let get = Json::parse(r#"["k"]"#).unwrap();
-        assert_eq!(text_of(&host_call(&mut ctx, "session.get", &get)), r#"{"ok":"v"}"#);
+        assert_eq!(
+            text_of(&host_call(&mut ctx, "session.get", &get)),
+            r#"{"ok":"v"}"#
+        );
     }
 }

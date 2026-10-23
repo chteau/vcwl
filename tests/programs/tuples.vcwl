@@ -18,17 +18,17 @@ fn sum(t: (Int, Int)) -> Int {
 
 fn main() {
     let p = pair(3, "ab")
-    print(p.0)
-    print(p.1)
+    print("{p.0}")
+    print("{p.1}")
     let (a, b) = (3, 4)
-    print(a + b)
+    print("{a + b}")
     let items: [(String, Int)] = [("x", 1), ("y", 2),]
     for (k, v) in items {
         print("{k}={v}")
     }
     let n = ((1, 2), 3)
-    print(n.0.1 + n.1 - 1)
+    print("{n.0.1 + n.1 - 1}")
     let ((q, r), s) = n
-    print(q + r + s + 2)
-    print(sum((4, 5)))
+    print("{q + r + s + 2}")
+    print("{sum((4, 5))}")
 }

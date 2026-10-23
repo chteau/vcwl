@@ -140,7 +140,9 @@ pub enum SwitchKind {
 
 /// The `:name` parameters of a route path, in order.
 pub fn route_params(path: &str) -> Vec<&str> {
-    path.split('/').filter_map(|s| s.strip_prefix(':')).collect()
+    path.split('/')
+        .filter_map(|s| s.strip_prefix(':'))
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -1718,16 +1720,20 @@ impl Checker<'_> {
                     ));
                 }
                 ElemArg::Style(n, _, _) => {
-                    return Err(Diag::ty(n.span, format!("`meta` has no `{}` argument", n.name))
-                        .help("available arguments: title, description"));
+                    return Err(
+                        Diag::ty(n.span, format!("`meta` has no `{}` argument", n.name))
+                            .help("available arguments: title, description"),
+                    );
                 }
             };
             let kind = match n.name.as_str() {
                 "title" => AttrKind::Attr("title"),
                 "description" => AttrKind::Attr("description"),
                 other => {
-                    return Err(Diag::ty(n.span, format!("`meta` has no `{other}` argument"))
-                        .help("available arguments: title, description"));
+                    return Err(
+                        Diag::ty(n.span, format!("`meta` has no `{other}` argument"))
+                            .help("available arguments: title, description"),
+                    );
                 }
             };
             if te.attrs.iter().any(|(k, _)| *k == kind) {
@@ -2279,7 +2285,9 @@ fn collect_decls<'a>(views: &'a [View], per_item: bool, out: &mut Vec<&'a View>)
                     };
                     return Err(Diag::ty(
                         *span,
-                        format!("`{what}` cannot be declared inside a `for`, `match` or `routes` body"),
+                        format!(
+                            "`{what}` cannot be declared inside a `for`, `match` or `routes` body"
+                        ),
                     )
                     .help("extract a component: per-item state needs its own component"));
                 }

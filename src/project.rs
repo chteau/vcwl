@@ -372,9 +372,13 @@ fn route_fits(pat: &str, url: &str) -> bool {
     let p: Vec<&str> = pat.trim_matches('/').split('/').collect();
     let u: Vec<&str> = url.trim_matches('/').split('/').collect();
     p.len() == u.len()
-        && p.iter()
-            .zip(&u)
-            .all(|(a, b)| if a.starts_with(':') { !b.is_empty() } else { a == b })
+        && p.iter().zip(&u).all(|(a, b)| {
+            if a.starts_with(':') {
+                !b.is_empty()
+            } else {
+                a == b
+            }
+        })
 }
 
 /// The site's base path from its `url` (`https://user.github.io/repo/` gives `/repo/`).
@@ -463,6 +467,36 @@ fn pages(
 }
 
 /// Prerendered pages: an inline style sheet and the markup shown until the canvas takes over.
+/// Removes the first `open...close` from `s`, returning what was between them.
+fn take_between(s: &str, open: &str, close: &str) -> (String, Option<String>) {
+    let Some(i) = s.find(open) else {
+        return (s.to_string(), None);
+    };
+    let Some(j) = s[i + open.len()..].find(close) else {
+        return (s.to_string(), None);
+    };
+    let inner = s[i + open.len()..i + open.len() + j].to_string();
+    let rest = format!("{}{}", &s[..i], &s[i + open.len() + j + close.len()..]);
+    (rest, Some(inner))
+}
+
+/// Removes every `open...close` from `s` (several routes on one page with hash routing),
+/// returning the first content.
+fn take_all(s: &str, open: &str, close: &str) -> (String, Option<String>) {
+    let (mut rest, first) = take_between(s, open, close);
+    while let (r, Some(_)) = take_between(&rest, open, close) {
+        rest = r;
+    }
+    (rest, first)
+}
+
+fn html_unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
+}
+
 pub struct Prerendered {
     pub style: String,
     pub body: String,
@@ -559,7 +593,7 @@ fn assemble(app: &crate::app::AppOutput, root: &str, routes: &[(&str, &str, &str
 /// `app.wasm`; the renderer creates the only element, a canvas.
 /// Page metadata from `vcwl.toml` (`description`, `theme_color`, `icon`, `touch_icon`, `image`,
 /// `url`).
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Meta {
     pub description: Option<String>,
     pub theme_color: Option<String>,
@@ -618,7 +652,24 @@ fn index_html(
     pre: Option<&Prerendered>,
     page: &Page,
 ) -> String {
-    let title = &app.title;
+    // `meta(...)` as prerendered for this page replaces the app's title and description.
+    let (body, pre_title, pre_desc) = match pre {
+        Some(p) => {
+            let (b, t) = take_all(&p.body, "<title>", "</title>");
+            let (b, d) = take_all(&b, "<meta name=\"description\" content=\"", "\">");
+            (
+                Some(b),
+                t.map(|t| html_unescape(&t)),
+                d.map(|d| html_unescape(&d)),
+            )
+        }
+        None => (None, None, None),
+    };
+    let title = pre_title.as_ref().unwrap_or(&app.title);
+    let meta = &Meta {
+        description: pre_desc.or_else(|| meta.description.clone()),
+        ..meta.clone()
+    };
     let root = html_escape(&page.root);
     // Fonts download with the modules instead of after them.
     let mut fonts: String = app
@@ -687,7 +738,7 @@ fn index_html(
 <link rel=\"preload\" href=\"{root}app.wasm\" as=\"fetch\" crossorigin>\n\
 {fonts}<script type=\"module\" src=\"{root}boot.js\"></script>{dev_script}\n{content}\n",
         content = match pre {
-            Some(p) => format!("<style>{}</style>\n{}", p.style, p.body),
+            Some(p) => format!("<style>{}</style>\n{}", p.style, body.unwrap_or_default()),
             None =>
                 "<noscript>This application needs JavaScript and WebAssembly enabled.</noscript>"
                     .into(),

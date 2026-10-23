@@ -4,12 +4,14 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## Language
 
-- No tuples or maps. Interfaces have no type parameters, and generic types cannot implement them.
+- Interfaces have no type parameters, and generic types cannot implement them.
+- Map keys are Strings; tuples have 2 to 4 elements.
 - Closures capture copies of the values they use: they cannot assign to captured variables or
   component state, and they cannot `emit`, `fetch` or `navigate`.
-- `await` only works in event handlers, at the top level of the handler's body, and only on
-  `fetch`-able calls (HTTP, server functions, `extern fn`s); there are no `async` functions.
-- Strings are byte arrays: `len` and `slice` count bytes, not characters.
+- `await` only works in event handlers (also inside `if`/`else` and `match` arms, not in loops or
+  closures), and only on `fetch`-able calls (HTTP, server functions, `extern fn`s); there are no
+  `async` functions.
+- `len` and `slice` count bytes; use `chars()`, `char_len()` and `char_slice` for code points.
 - Arrays are immutable values. `push` (and `concat`) append in place when the array is the
   newest one built from its storage (`xs = xs.push(x)` in a loop is amortized O(1)); pushing onto
   an older version, `set`, `remove_at` and `slice` copy (O(n)).
@@ -18,23 +20,11 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## Components
 
-- At most 62 values (properties, state, derived values) per component: dependencies are an i64 mask.
-- Derived values are recomputed after a handler returns; inside a handler they keep their old value.
-- `let` and `state` are only allowed at the top of a component body.
-- A single command string is limited to 60,000 bytes (text content, attribute values, fetch bodies).
-- Keyed list matching tries the same position first, then scans: matching is O(n·m) in the worst
-  case (n new, m old items) when many items change position.
-- No route parameters (`/post/:id`) yet; every route is a literal path.
+- Values past the 60th in a component share one dependency bit, so they re-render slightly more.
+- `let` and `state` are not allowed inside `for` or `match`/routes arms.
 - With `routing = "path"`, route paths must be letters, digits, `-`, `_`, `.` and `~` between
   slashes (each becomes a directory of `dist/`), and `404.html` needs `url` in vcwl.toml when the
   site is served from a sub-path.
-
-## Styles
-
-- Identical style blocks are shared, and the stylesheet keeps them in the order they first
-  appear in the program. A `style if` therefore does not always override a property that the
-  element's plain `style` block also sets, when the same `style if` block appeared earlier
-  elsewhere. Set such properties only in the conditional blocks, or on a parent.
 
 ## Rendering (canvas, see [ADR 10](adr/0010-canvas-renderer.md))
 
@@ -66,8 +56,8 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## Server functions
 
-- One call runs at a time; there is no async I/O on the server (no outgoing `fetch`, database or
-  file access besides the key-value store).
+- Outgoing requests go through `http`, which shells out to `curl` with a 10 s timeout. `query`
+  and `exec` use one SQLite file next to the store, with params bound as text.
 - The store is one JSON file rewritten after each change: fine for small data, not for large or
   write-heavy workloads.
 - Prerendering does not call server functions (they render their loading state).
@@ -90,8 +80,8 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 
 ## JavaScript interop
 
-- Values cross the boundary as JSON: no functions, DOM nodes, binary data or callbacks; events
-  from JavaScript come back only as Promise results (`fetch`).
+- Values cross the boundary as JSON: no functions, DOM nodes, binary data or callbacks. JavaScript
+  reaches the app through `window.vcwl.dispatch` and `on js` handlers.
 - Sync calls block the UI thread like any JavaScript call.
 
 ## Platform
@@ -99,5 +89,4 @@ Current, deliberate restrictions of the implementation. Each is a candidate for 
 - Requires WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari 18.2+); there is no fallback.
 - `vcwl run` and `vcwl test` need Node.js; tests run outside the browser (no renderer in tests).
 - Building the CLI needs the `wasm32-unknown-unknown` Rust target (for `render.wasm`).
-- No source maps or debugger integration; runtime errors name the WebAssembly function.
-- No package manager or third-party libraries.
+- No source maps or debugger integration; runtime errors carry `file:line:col`.

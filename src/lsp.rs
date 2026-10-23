@@ -49,6 +49,8 @@ const KEYWORDS: &[&str] = &[
     "self",
     "await",
     "as",
+    "js",
+    "meta",
 ];
 const ELEMENTS: &[&str] = &[
     "text",

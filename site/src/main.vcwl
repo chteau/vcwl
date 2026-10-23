@@ -152,6 +152,8 @@ component App {
                     "/docs/quickstart" => Docs(slug: "quickstart")
                     "/docs/tour" => Docs(slug: "tour")
                     "/docs/functions" => Docs(slug: "functions")
+                    "/docs/not-rust" => Docs(slug: "not-rust")
+                    "/docs/web" => Docs(slug: "web")
                     "/docs/components" => Docs(slug: "components")
                     "/docs/styles" => Docs(slug: "styles")
                     "/docs/data" => Docs(slug: "data")
@@ -173,6 +175,9 @@ component Home {
     column(gap: 72px) {
         Hero()
         StatusBar()
+        span("VCWL looks like Rust. It is not Rust. No borrow checker, no lifetimes, no unsafe, no crab.") {
+            style Mono
+        }
         Core()
         Problems()
         VibeCheck()
@@ -240,7 +245,7 @@ component Nav {
                         open = false
                     }
                 }
-                span("v0.2.0 (vibes edition)") {
+                span("v0.3.0 (it ain't Rust edition)") {
                     style Muted
                     style {
                         when viewport < 500px {

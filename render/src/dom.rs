@@ -591,11 +591,12 @@ pub mod tests {
         let mut t = Tree::default();
         let mut fx = Vec::new();
         let mut b = Buf::default();
+        b.create(1, "p");
         b.int(opc::APPEND).int(1).str("ab");
         t.apply(&b.0, &mut fx).unwrap();
         let mut b = Buf::default();
         b.int(opc::APPEND).int(1).str("cd");
-        b.create(1, "p").attr(1, "title", "ef").attr(1, "lang", "x");
+        b.attr(1, "title", "ef").attr(1, "lang", "x");
         t.apply(&b.0, &mut fx).unwrap();
         assert_eq!(t.n(1).attr("title"), Some("abcdef"));
         assert_eq!(t.n(1).attr("lang"), Some("x"));

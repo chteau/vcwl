@@ -45,7 +45,11 @@ pub fn diagnose(src: &str, base: u32) -> Option<Diag> {
                         "delete the lifetime annotation",
                     );
                 }
-                i = if b.get(j) == Some(&b'\'') { j + 1 } else { i + 1 };
+                i = if b.get(j) == Some(&b'\'') {
+                    j + 1
+                } else {
+                    i + 1
+                };
             }
             b'#' if b.get(i + 1) == Some(&b'[') => {
                 return at(
@@ -105,7 +109,9 @@ pub fn diagnose(src: &str, base: u32) -> Option<Diag> {
                     return at(
                         start,
                         i + 1,
-                        &format!("this is Rust. `{word}!` is a macro, and VCWL has none; it has functions and a sense of restraint"),
+                        &format!(
+                            "this is Rust. `{word}!` is a macro, and VCWL has none; it has functions and a sense of restraint"
+                        ),
                         help,
                     );
                 }
@@ -127,7 +133,9 @@ pub fn diagnose(src: &str, base: u32) -> Option<Diag> {
                     return at(
                         start,
                         i + 1,
-                        &format!("this is Rust. `{word}<..>` belongs to a language with an allocator it wants to tell you about"),
+                        &format!(
+                            "this is Rust. `{word}<..>` belongs to a language with an allocator it wants to tell you about"
+                        ),
                         help,
                     );
                 }
@@ -172,7 +180,10 @@ mod tests {
 
     #[test]
     fn detects() {
-        assert_eq!(hit("fn main() { println!(\"x\") }").as_deref(), Some("println!"));
+        assert_eq!(
+            hit("fn main() { println!(\"x\") }").as_deref(),
+            Some("println!")
+        );
         assert_eq!(hit("let a = Foo::new()").as_deref(), Some("::"));
         assert_eq!(hit("let mut x = 1").as_deref(), Some("let mut"));
         assert_eq!(hit("fn f(a: &str) {}").as_deref(), Some("&"));

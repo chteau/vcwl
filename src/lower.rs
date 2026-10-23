@@ -1226,9 +1226,7 @@ impl<'a> Lower<'a> {
             }
             "__js_call" | "__host" => {
                 let host = if name == "__host" { "host" } else { "js_call" };
-                let f = self
-                    .m
-                    .import(host, vec![VT::I32, VT::I32], Some(VT::I32));
+                let f = self.m.import(host, vec![VT::I32, VT::I32], Some(VT::I32));
                 let to = self.helper_str_to_mem();
                 let (name_len, text) = (take(), take());
                 un(
