@@ -5,3 +5,4 @@ node_modules/
 vcwl_packages/
 .netlify/
 *.vsix
+editors/zed/grammars/
